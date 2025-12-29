@@ -1,0 +1,11 @@
+[package]
+name = "money_manager"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+diesel = { version = "2.3.5", features = ["sqlite", "chrono"] }
+ratatui = "0.29"
+crossterm = "0.28"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.11", features = ["v4", "serde"] }
