@@ -4,7 +4,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Tabs},
     Frame,
 };
-use crate::tui::app::{App, Tab};
+use crate::tui::app::{App, ActiveForm, Tab};
 use crate::tui::views;
 
 pub fn draw(frame: &mut Frame, app: &App) {
@@ -21,11 +21,11 @@ pub fn draw(frame: &mut Frame, app: &App) {
     draw_content(frame, app, chunks[1]);
     draw_footer(frame, app, chunks[2]);
 
-    // Render forms on top if in input mode
-    match app.input_mode {
-        crate::tui::app::InputMode::CreatingCategory => views::forms::render_category_form(frame, app),
-        crate::tui::app::InputMode::CreatingExpense => views::forms::render_expense_form(frame, app),
-        crate::tui::app::InputMode::Normal => {},
+    // Render forms on top if active
+    match app.active_form {
+        ActiveForm::Category => views::forms::render_category_form(frame, app),
+        ActiveForm::Expense => views::forms::render_expense_form(frame, app),
+        ActiveForm::None => {},
     }
 }
 
@@ -67,10 +67,8 @@ fn draw_content(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
-    use crate::tui::app::InputMode;
-
-    let footer_text = match app.input_mode {
-        InputMode::Normal => match app.current_tab {
+    let footer_text = match app.active_form {
+        ActiveForm::None => match app.current_tab {
             Tab::ExpenseCategories => {
                 "n: New Category | Tab: Switch | ↑/↓: Scroll | r: Refresh | q: Quit"
             }
@@ -87,10 +85,10 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
                 "Tab: Switch | ↑/↓: Scroll | r: Refresh | q: Quit"
             }
         },
-        InputMode::CreatingCategory => {
+        ActiveForm::Category => {
             "Enter: Submit | Esc: Cancel | Type to edit"
         }
-        InputMode::CreatingExpense => {
+        ActiveForm::Expense => {
             "Tab: Next Field | Enter: Submit | Esc: Cancel | Type to edit"
         }
     };
