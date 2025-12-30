@@ -1,11 +1,12 @@
-pub mod app;
+pub mod app_state;
 pub mod forms;
 pub mod types;
 
 pub use event::{Event, EventHandler};
-pub use app::App;
+pub use app_state::AppState;
 
 pub mod event;
-pub mod handlers;
 pub mod ui;
 pub mod views;
+
+

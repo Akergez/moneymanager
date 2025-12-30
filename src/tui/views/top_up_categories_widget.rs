@@ -1,0 +1,112 @@
+//! Top-up categories view as a StatefulWidget
+
+use crossterm::event::KeyCode;
+use ratatui::{
+    buffer::Buffer,
+    layout::{Constraint, Rect},
+    style::{Color, Modifier, Style},
+    widgets::{Block, Borders, Cell, Row, StatefulWidget, Table, TableState},
+};
+use crate::models::TopUpCategory;
+use super::expenses_widget::{ViewInputResult, ViewState};
+
+/// State for the top-up categories table view
+#[derive(Debug, Clone, Default)]
+pub struct TopUpCategoriesViewState {
+    pub scroll_offset: usize,
+    table_state: TableState,
+}
+
+impl TopUpCategoriesViewState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn scroll_up(&mut self) {
+        self.scroll_offset = self.scroll_offset.saturating_sub(1);
+    }
+
+    pub fn scroll_down(&mut self) {
+        self.scroll_offset += 1;
+    }
+
+    pub fn page_up(&mut self) {
+        self.scroll_offset = self.scroll_offset.saturating_sub(10);
+    }
+
+    pub fn page_down(&mut self) {
+        self.scroll_offset += 10;
+    }
+}
+
+impl ViewState for TopUpCategoriesViewState {
+    fn handle_input(&mut self, key: KeyCode) -> ViewInputResult {
+        match key {
+            KeyCode::Up => {
+                self.scroll_up();
+                ViewInputResult::Consumed
+            }
+            KeyCode::Down => {
+                self.scroll_down();
+                ViewInputResult::Consumed
+            }
+            KeyCode::PageUp => {
+                self.page_up();
+                ViewInputResult::Consumed
+            }
+            KeyCode::PageDown => {
+                self.page_down();
+                ViewInputResult::Consumed
+            }
+            _ => ViewInputResult::NotConsumed,
+        }
+    }
+}
+
+/// Widget for rendering the top-up categories table
+pub struct TopUpCategoriesView<'a> {
+    categories: &'a [TopUpCategory],
+}
+
+impl<'a> TopUpCategoriesView<'a> {
+    pub fn new(categories: &'a [TopUpCategory]) -> Self {
+        Self { categories }
+    }
+
+    fn format_uuid_short(id: &[u8]) -> String {
+        id.iter().take(4).map(|b| format!("{:02x}", b)).collect()
+    }
+}
+
+impl<'a> StatefulWidget for TopUpCategoriesView<'a> {
+    type State = TopUpCategoriesViewState;
+
+    fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+        let header_style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+        let header = Row::new(vec![
+            Cell::from("ID").style(header_style),
+            Cell::from("Name").style(header_style),
+        ]).height(1).bottom_margin(1);
+
+        let rows: Vec<Row> = self.categories
+            .iter()
+            .skip(state.scroll_offset)
+            .map(|cat| {
+                Row::new(vec![
+                    Cell::from(Self::format_uuid_short(&cat.id)),
+                    Cell::from(cat.name.clone()),
+                ]).height(1)
+            })
+            .collect();
+
+        let widths = [Constraint::Length(10), Constraint::Min(20)];
+
+        let table = Table::new(rows, widths)
+            .header(header)
+            .block(Block::default().borders(Borders::ALL).title(format!("Top-Up Categories ({})", self.categories.len())))
+            .style(Style::default().fg(Color::White))
+            .row_highlight_style(Style::default().add_modifier(Modifier::BOLD));
+
+        StatefulWidget::render(table, area, buf, &mut state.table_state);
+    }
+}
