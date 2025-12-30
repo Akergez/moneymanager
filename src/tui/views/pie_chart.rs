@@ -1,24 +1,13 @@
 use ratatui::{
     layout::{Alignment, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
     Frame,
 };
+use ratatui::style::Color;
 use crate::tui::app::App;
-
-const COLORS: [Color; 10] = [
-    Color::Cyan,
-    Color::Green,
-    Color::Yellow,
-    Color::Blue,
-    Color::Magenta,
-    Color::Red,
-    Color::LightCyan,
-    Color::LightGreen,
-    Color::LightYellow,
-    Color::LightBlue,
-];
+use super::common::CHART_COLORS;
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let category_data = app.get_expense_by_category();
@@ -61,7 +50,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         let bar_width = (percentage / 2.0) as usize; // Scale down for display
         let bar = "█".repeat(bar_width.min(50));
         
-        let color = COLORS[i % COLORS.len()];
+        let color = CHART_COLORS[i % CHART_COLORS.len()];
         
         lines.push(Line::from(vec![
             Span::styled(format!("{:20}", name), Style::default().fg(color).add_modifier(Modifier::BOLD)),

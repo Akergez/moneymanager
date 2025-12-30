@@ -1,10 +1,11 @@
 use ratatui::{
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
     Frame,
 };
 use crate::tui::app::{App, InputField};
+use super::common::{centered_rect, styles};
 
 pub fn render_category_form(frame: &mut Frame, app: &App) {
     let area = centered_rect(60, 40, frame.area());
@@ -78,14 +79,11 @@ pub fn render_expense_form(frame: &mut Frame, app: &App) {
         ])
         .split(inner);
 
-    let highlight_style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
-    let normal_style = Style::default().fg(Color::White);
-
     // Category selector (shows selected category name, not editable text)
     let cat_style = if app.form_state.current_field == InputField::ExpenseCategory {
-        highlight_style
+        styles::highlight()
     } else {
-        normal_style
+        styles::normal()
     };
     
     let selected_category_text = if app.categories.is_empty() {
@@ -103,9 +101,9 @@ pub fn render_expense_form(frame: &mut Frame, app: &App) {
 
     // Amount input
     let amt_style = if app.form_state.current_field == InputField::ExpenseAmount {
-        highlight_style
+        styles::highlight()
     } else {
-        normal_style
+        styles::normal()
     };
     let amt_input = Paragraph::new(app.form_state.expense_amount.as_str())
         .style(amt_style)
@@ -114,9 +112,9 @@ pub fn render_expense_form(frame: &mut Frame, app: &App) {
 
     // Date input
     let date_style = if app.form_state.current_field == InputField::ExpenseDate {
-        highlight_style
+        styles::highlight()
     } else {
-        normal_style
+        styles::normal()
     };
     let date_input = Paragraph::new(app.form_state.expense_date.as_str())
         .style(date_style)
@@ -125,9 +123,9 @@ pub fn render_expense_form(frame: &mut Frame, app: &App) {
 
     // Comment input
     let comment_style = if app.form_state.current_field == InputField::ExpenseComment {
-        highlight_style
+        styles::highlight()
     } else {
-        normal_style
+        styles::normal()
     };
     let comment_input = Paragraph::new(app.form_state.expense_comment.as_str())
         .style(comment_style)
@@ -141,14 +139,14 @@ pub fn render_expense_form(frame: &mut Frame, app: &App) {
         "Tab: Next field | Enter: Submit | Esc: Cancel"
     };
     let instructions = Paragraph::new(instructions_text)
-        .style(Style::default().fg(Color::Gray))
+        .style(styles::instruction())
         .alignment(Alignment::Center);
     frame.render_widget(instructions, chunks[4]);
 
     // Error message or categories list
     if let Some(error) = &app.form_state.error_message {
         let error_msg = Paragraph::new(error.as_str())
-            .style(Style::default().fg(Color::Red))
+            .style(styles::error())
             .alignment(Alignment::Center)
             .wrap(Wrap { trim: true });
         frame.render_widget(error_msg, chunks[5]);
@@ -159,9 +157,9 @@ pub fn render_expense_form(frame: &mut Frame, app: &App) {
             .enumerate()
             .map(|(idx, cat)| {
                 let style = if idx == app.form_state.category_list_selected {
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    styles::highlight()
                 } else {
-                    Style::default().fg(Color::White)
+                    styles::normal()
                 };
                 ListItem::new(cat.name.as_str()).style(style)
             })
@@ -178,23 +176,4 @@ pub fn render_expense_form(frame: &mut Frame, app: &App) {
     }
 }
 
-fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-    let popup_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
-        ])
-        .split(r);
-
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
-        ])
-        .split(popup_layout[1])[1]
-}
 

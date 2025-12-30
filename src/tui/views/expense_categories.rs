@@ -1,46 +1,34 @@
 use ratatui::{
-    layout::Rect,
-    style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Cell, Row, Table},
+    layout::{Constraint, Rect},
+    widgets::Cell,
     Frame,
 };
 use crate::tui::app::App;
+use super::common::{format_uuid_short, render_simple_table, TableConfig};
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
-    let header_cells = ["#", "ID", "Name"]
-        .iter()
-        .map(|h| Cell::from(*h).style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)));
-    let header = Row::new(header_cells).height(1).bottom_margin(1);
-
-    let rows = app.categories.iter().enumerate().skip(app.scroll_offset).map(|(idx, cat)| {
-        // Show first 4 bytes as hex
-        let id_display = cat.id.iter().take(4)
-            .map(|b| format!("{:02x}", b))
-            .collect::<String>();
-        let cells = vec![
-            Cell::from((idx + 1).to_string()), // 1-based index for user reference
-            Cell::from(id_display),
-            Cell::from(cat.name.clone()),
-        ];
-        Row::new(cells).height(1)
-    });
-
-    let table = Table::new(
-        rows,
-        [
-            ratatui::layout::Constraint::Length(4),
-            ratatui::layout::Constraint::Length(10),
-            ratatui::layout::Constraint::Min(30),
+    let config = TableConfig {
+        title: format!("Expense Categories (Total: {})", app.categories.len()),
+        widths: vec![
+            Constraint::Length(4),
+            Constraint::Length(10),
+            Constraint::Min(30),
         ],
-    )
-    .header(header)
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(format!("Expense Categories (Total: {})", app.categories.len()))
-    )
-    .style(Style::default().fg(Color::White))
-    .row_highlight_style(Style::default().add_modifier(Modifier::BOLD));
+    };
 
-    frame.render_widget(table, area);
+    render_simple_table(
+        frame,
+        area,
+        config,
+        &["#", "ID", "Name"],
+        app.categories.iter().enumerate(),
+        |(idx, cat)| {
+            vec![
+                Cell::from((idx + 1).to_string()),
+                Cell::from(format_uuid_short(&cat.id)),
+                Cell::from(cat.name.clone()),
+            ]
+        },
+        app.scroll_offset,
+    );
 }

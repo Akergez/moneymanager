@@ -6,19 +6,7 @@ use ratatui::{
     Frame,
 };
 use crate::tui::app::App;
-
-const COLORS: [Color; 10] = [
-    Color::Cyan,
-    Color::Green,
-    Color::Yellow,
-    Color::Blue,
-    Color::Magenta,
-    Color::Red,
-    Color::LightCyan,
-    Color::LightGreen,
-    Color::LightYellow,
-    Color::LightBlue,
-];
+use super::common::CHART_COLORS;
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let monthly_data = app.get_monthly_expenses();
@@ -41,11 +29,11 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
             Bar::default()
                 .value(*amount as u64)
                 .label(Line::from(label))
-                .style(Style::default().fg(COLORS[i % COLORS.len()]))
+                .style(Style::default().fg(CHART_COLORS[i % CHART_COLORS.len()]))
                 .value_style(
                     Style::default()
                         .fg(Color::Black)
-                        .bg(COLORS[i % COLORS.len()])
+                        .bg(CHART_COLORS[i % CHART_COLORS.len()])
                         .add_modifier(Modifier::BOLD)
                 )
         })

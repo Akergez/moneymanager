@@ -1,3 +1,4 @@
+pub mod common;
 pub mod expense_categories;
 pub mod expenses;
 pub mod top_up_categories;
