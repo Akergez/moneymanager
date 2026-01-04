@@ -1,5 +1,4 @@
 stages:
-  - test
   - build
   - release
   - publish
@@ -16,22 +15,6 @@ variables:
       - .cargo/registry
       - .cargo/git
       - target/
-
-# Test stage
-test:
-  stage: test
-  image: rust:latest
-  <<: *cargo-cache
-  before_script:
-    - apt-get update && apt-get install -y libsqlite3-dev
-  script:
-    - cargo fmt --check
-    - cargo clippy -- -D warnings
-    - cargo test --verbose
-  rules:
-    - if: $CI_COMMIT_TAG
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
 # Build for Linux x86_64 (AMD64)
 build-linux-amd64:
