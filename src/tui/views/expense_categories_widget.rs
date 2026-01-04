@@ -1,6 +1,6 @@
 //! Expense categories view as a StatefulWidget
 
-use crossterm::event::KeyCode;
+use crossterm::event::{KeyCode, MouseEvent, MouseEventKind};
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Rect},
@@ -57,6 +57,20 @@ impl ViewState for ExpenseCategoriesViewState {
             }
             KeyCode::PageDown => {
                 self.page_down();
+                ViewInputResult::Consumed
+            }
+            _ => ViewInputResult::NotConsumed,
+        }
+    }
+    
+    fn handle_mouse(&mut self, mouse: MouseEvent, _area: Rect) -> ViewInputResult {
+        match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                self.scroll_up();
+                ViewInputResult::Consumed
+            }
+            MouseEventKind::ScrollDown => {
+                self.scroll_down();
                 ViewInputResult::Consumed
             }
             _ => ViewInputResult::NotConsumed,

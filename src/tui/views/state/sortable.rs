@@ -82,6 +82,11 @@ impl SortableState {
         }
     }
 
+    /// Set sort column - toggles order if same column clicked
+    pub fn set_column(&mut self, column: SortColumn) {
+        self.toggle(column);
+    }
+
     /// Cycle to next column
     pub fn next_column(&mut self) {
         self.toggle(self.column.next());

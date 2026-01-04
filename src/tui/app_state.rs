@@ -1,6 +1,7 @@
 //! Main application state using StatefulWidgets
 
-use crossterm::event::{KeyCode, KeyModifiers};
+use crossterm::event::{KeyCode, KeyModifiers, MouseEvent, MouseEventKind, MouseButton};
+use ratatui::layout::Rect;
 use diesel::prelude::*;
 use crate::models::{Category, Expense, TopUpCategory, TopUp};
 
@@ -185,6 +186,85 @@ impl AppState {
 
             _ => {}
         }
+    }
+
+    /// Handle mouse input for tab switching and view interactions
+    pub fn handle_mouse(&mut self, mouse: MouseEvent, area: Rect) {
+        // Don't handle mouse if a form is active
+        if self.category_form.is_active || self.expense_form.is_active
+            || self.top_up_category_form.is_active || self.top_up_form.is_active {
+            return;
+        }
+
+        // Only handle left button clicks for tabs
+        if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+            let x = mouse.column;
+            let y = mouse.row;
+
+            // Tab bar is in the first 3 rows (height of 3)
+            if y < 3 {
+                // Calculate tab positions based on screen width
+                // Tab bar content starts after the border (x=1)
+                let content_start = 1u16;
+                let click_x = x.saturating_sub(content_start);
+
+                // Determine tab widths based on screen width (matching ui.rs logic)
+                let tab_widths: Vec<u16> = if area.width < 60 {
+                    // Ultra-compact: "1:EC", "2:Ex", "3:TC", "4:TU", "5:Pie", "6:Bar", "7:Ln"
+                    vec![4, 4, 4, 4, 5, 5, 4]
+                } else if area.width < 80 {
+                    // Compact: "1:Cat", "2:Exp", "3:Cat", "4:Top", "5:Pie", "6:Bar", "7:Line"
+                    vec![5, 5, 5, 5, 5, 5, 6]
+                } else {
+                    // Full: "1:Exp.Cat", "2:Expenses", "3:TopUp.Cat", "4:TopUps", "5:Pie Chart", "6:Bar Chart", "7:Line Chart"
+                    vec![9, 10, 11, 8, 11, 11, 12]
+                };
+
+                // Find which tab was clicked
+                let mut current_pos = 0u16;
+                for (idx, &width) in tab_widths.iter().enumerate() {
+                    // Add separator width (tabs have " | " between them, ~3 chars)
+                    let separator = if idx > 0 { 3 } else { 0 };
+                    let tab_start = current_pos + separator;
+                    let tab_end = tab_start + width;
+
+                    if click_x >= tab_start && click_x < tab_end {
+                        self.current_tab = match idx {
+                            0 => Tab::ExpenseCategories,
+                            1 => Tab::Expenses,
+                            2 => Tab::TopUpCategories,
+                            3 => Tab::TopUps,
+                            4 => Tab::ExpensePieChart,
+                            5 => Tab::ExpenseBarChart,
+                            6 => Tab::ExpenseLineChart,
+                            _ => return,
+                        };
+                        return;
+                    }
+                    current_pos = tab_end;
+                }
+            }
+        }
+
+        // Calculate content area (between tab bar and footer)
+        // Tab bar: rows 0-2, Footer: last 3 rows
+        let content_area = Rect {
+            x: area.x,
+            y: area.y + 3,
+            width: area.width,
+            height: area.height.saturating_sub(6),
+        };
+
+        // Delegate to current view for scroll and other interactions
+        let _ = match self.current_tab {
+            Tab::ExpenseCategories => self.expense_categories_view.handle_mouse(mouse, content_area),
+            Tab::Expenses => self.expenses_view.handle_mouse(mouse, content_area),
+            Tab::TopUpCategories => self.top_up_categories_view.handle_mouse(mouse, content_area),
+            Tab::TopUps => self.top_ups_view.handle_mouse(mouse, content_area),
+            Tab::ExpensePieChart => self.pie_chart_view.handle_mouse(mouse, content_area),
+            Tab::ExpenseBarChart => self.bar_chart_view.handle_mouse(mouse, content_area),
+            Tab::ExpenseLineChart => self.line_chart_view.handle_mouse(mouse, content_area),
+        };
     }
 }
 

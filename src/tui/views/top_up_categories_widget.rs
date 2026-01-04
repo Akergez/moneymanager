@@ -1,6 +1,6 @@
 //! Top-up categories view as a StatefulWidget
 
-use crossterm::event::KeyCode;
+use crossterm::event::{KeyCode, MouseEvent, MouseEventKind};
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Rect},
@@ -62,6 +62,20 @@ impl ViewState for TopUpCategoriesViewState {
             _ => ViewInputResult::NotConsumed,
         }
     }
+
+    fn handle_mouse(&mut self, mouse: MouseEvent, _area: Rect) -> ViewInputResult {
+        match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                self.scroll_up();
+                ViewInputResult::Consumed
+            }
+            MouseEventKind::ScrollDown => {
+                self.scroll_down();
+                ViewInputResult::Consumed
+            }
+            _ => ViewInputResult::NotConsumed,
+        }
+    }
 }
 
 /// Widget for rendering the top-up categories table
@@ -85,9 +99,9 @@ impl<'a> StatefulWidget for TopUpCategoriesView<'a> {
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         // Responsive: determine if narrow screen
         let is_narrow = area.width < 60;
-        
+
         let header_style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
-        
+
         // Responsive headers
         let header = if is_narrow {
             Row::new(vec![

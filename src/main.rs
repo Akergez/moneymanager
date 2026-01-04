@@ -11,6 +11,8 @@ use std::io;
 use clap::Parser;
 use crossterm::{
     execute,
+    event::EnableMouseCapture,
+    event::DisableMouseCapture,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
@@ -45,7 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -65,7 +67,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),
-        LeaveAlternateScreen
+        LeaveAlternateScreen,
+        DisableMouseCapture
     )?;
     terminal.show_cursor()?;
 
@@ -83,11 +86,15 @@ fn run_app<B: ratatui::backend::Backend>(
     event_handler: &EventHandler,
 ) -> io::Result<()> {
     while state.running {
+        let frame_area = terminal.get_frame().area();
         terminal.draw(|f| tui::ui::draw(f, state))?;
 
         match event_handler.next()? {
             Event::Key(key) => {
                 state.handle_input(key.code, key.modifiers, conn);
+            }
+            Event::Mouse(mouse) => {
+                state.handle_mouse(mouse, frame_area);
             }
             Event::Tick => {}
         }

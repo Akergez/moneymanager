@@ -1,6 +1,6 @@
 //! Expenses view as a StatefulWidget
 
-use crossterm::event::KeyCode;
+use crossterm::event::{KeyCode, MouseEvent, MouseEventKind, MouseButton};
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Rect},
@@ -30,6 +30,11 @@ pub enum ViewInputResult {
 /// Trait for view states that can handle input
 pub trait ViewState {
     fn handle_input(&mut self, key: KeyCode) -> ViewInputResult;
+
+    /// Handle mouse input - default implementation does nothing
+    fn handle_mouse(&mut self, _mouse: MouseEvent, _area: Rect) -> ViewInputResult {
+        ViewInputResult::NotConsumed
+    }
 }
 
 /// State for the expenses table view
@@ -119,6 +124,60 @@ impl ViewState for ExpensesViewState {
             KeyCode::PageDown => {
                 self.page_down();
                 ViewInputResult::Consumed
+            }
+            _ => ViewInputResult::NotConsumed,
+        }
+    }
+    
+    fn handle_mouse(&mut self, mouse: MouseEvent, area: Rect) -> ViewInputResult {
+        match mouse.kind {
+            // Scroll wheel support
+            MouseEventKind::ScrollUp => {
+                self.scroll_up();
+                ViewInputResult::Consumed
+            }
+            MouseEventKind::ScrollDown => {
+                self.scroll_down();
+                ViewInputResult::Consumed
+            }
+            // Click on header row to change sort column
+            MouseEventKind::Down(MouseButton::Left) => {
+                let x = mouse.column;
+                let y = mouse.row;
+                
+                // Check if click is within the view area and on header row (row 1 inside border)
+                if x >= area.x && x < area.x + area.width && y == area.y + 1 {
+                    let relative_x = x - area.x - 1; // -1 for border
+                    
+                    // Determine which column was clicked based on widths
+                    // Widths: ID(10), Category(20), Amount(12), Date(12), Comment(rest)
+                    let is_narrow = area.width < 60;
+                    
+                    if is_narrow {
+                        // Narrow: Cat(10), Amt(8), Date(6)
+                        if relative_x < 10 {
+                            self.sort.set_column(SortColumn::CategoryId);
+                        } else if relative_x < 18 {
+                            self.sort.set_column(SortColumn::Amount);
+                        } else {
+                            self.sort.set_column(SortColumn::Date);
+                        }
+                    } else {
+                        if relative_x < 10 {
+                            self.sort.set_column(SortColumn::Id);
+                        } else if relative_x < 30 {
+                            self.sort.set_column(SortColumn::CategoryId);
+                        } else if relative_x < 42 {
+                            self.sort.set_column(SortColumn::Amount);
+                        } else if relative_x < 54 {
+                            self.sort.set_column(SortColumn::Date);
+                        } else {
+                            self.sort.set_column(SortColumn::Comment);
+                        }
+                    }
+                    return ViewInputResult::Consumed;
+                }
+                ViewInputResult::NotConsumed
             }
             _ => ViewInputResult::NotConsumed,
         }

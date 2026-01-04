@@ -180,6 +180,23 @@ impl super::expenses_widget::ViewState for PieChartViewState {
             _ => ViewInputResult::NotConsumed,
         }
     }
+
+    fn handle_mouse(&mut self, mouse: crossterm::event::MouseEvent, _area: ratatui::layout::Rect) -> super::expenses_widget::ViewInputResult {
+        use crossterm::event::MouseEventKind;
+        use super::expenses_widget::ViewInputResult;
+
+        match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                self.scroll_up();
+                ViewInputResult::Consumed
+            }
+            MouseEventKind::ScrollDown => {
+                self.scroll_down();
+                ViewInputResult::Consumed
+            }
+            _ => ViewInputResult::NotConsumed,
+        }
+    }
 }
 
 /// Widget for rendering the pie chart
@@ -209,7 +226,7 @@ impl<'a> StatefulWidget for PieChartView<'a> {
         } else {
             20  // Wide screens
         };
-        
+
         // Responsive max bar width
         let max_bar_width = if area.width < 60 {
             15
@@ -251,7 +268,7 @@ impl<'a> StatefulWidget for PieChartView<'a> {
             let bar = "█".repeat(bar_width.min(max_bar_width));
 
             let color = color_from_name(name);
-            
+
             // Truncate name for narrow screens
             let display_name = if name.len() > name_width {
                 format!("{:.width$}", name, width = name_width - 1)
@@ -272,7 +289,7 @@ impl<'a> StatefulWidget for PieChartView<'a> {
             } else {
                 format!("{:.2} ({:.1}%)", amount, percentage)
             };
-            
+
             lines.push(Line::from(vec![
                 Span::raw(padding),
                 Span::styled(amount_text, Style::default().fg(Color::White)),
@@ -285,7 +302,7 @@ impl<'a> StatefulWidget for PieChartView<'a> {
         } else {
             format!("Expense by Category - {} (Total: {:.2})", state.get_month_title(), total)
         };
-        
+
         let paragraph = Paragraph::new(lines)
             .block(
                 Block::default()

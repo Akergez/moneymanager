@@ -8,6 +8,7 @@ A terminal-based money management application built with Rust, featuring expense
 - 💰 **Income Management**: Record income/top-ups with categories
 - 📈 **Visual Analytics**: View your spending with pie charts, bar charts, and line charts
 - 🖥️ **Terminal UI**: Beautiful TUI built with Ratatui
+- 🖱️ **Mouse Support**: Click on tabs to switch between views
 - 📱 **Responsive Design**: Adapts to mobile-like narrow terminal resolutions
 - 💾 **SQLite Database**: Persistent storage with SQLite
 
@@ -74,6 +75,15 @@ money_manager -d /path/to/custom.db
 | `←/→` | Sort columns / Navigate months |
 | `r` | Refresh data |
 | `q` | Quit |
+
+### Mouse Support
+
+| Action | Effect |
+|--------|--------|
+| Click on tab | Switch to that tab |
+| Scroll wheel | Scroll through lists |
+| Click on table header | Sort by that column |
+| Click category (Line Chart) | Toggle category selection |
 
 ### Tabs
 

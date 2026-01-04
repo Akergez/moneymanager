@@ -217,6 +217,42 @@ impl super::expenses_widget::ViewState for LineChartViewState {
             _ => ViewInputResult::NotConsumed,
         }
     }
+
+    fn handle_mouse(&mut self, mouse: crossterm::event::MouseEvent, area: ratatui::layout::Rect) -> super::expenses_widget::ViewInputResult {
+        use crossterm::event::{MouseEventKind, MouseButton};
+        use super::expenses_widget::ViewInputResult;
+
+        match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                self.pending_category_action = Some(CategoryAction::Previous);
+                ViewInputResult::Consumed
+            }
+            MouseEventKind::ScrollDown => {
+                self.pending_category_action = Some(CategoryAction::Next);
+                ViewInputResult::Consumed
+            }
+            // Click in category list area (left 25 columns) to select/toggle
+            MouseEventKind::Down(MouseButton::Left) => {
+                let x = mouse.column;
+                let y = mouse.row;
+
+                // Category list is in the left 25 columns (after border)
+                if x >= area.x && x < area.x + 25 && y > area.y + 1 {
+                    // Calculate which category was clicked
+                    // Header is row 0, so categories start at row 2 (after title and border)
+                    let category_row = (y - area.y - 2) as usize;
+
+                    // Select the category that was clicked
+                    self.category_list_state.select(Some(category_row));
+                    // Then toggle it
+                    self.pending_category_action = Some(CategoryAction::Toggle);
+                    return ViewInputResult::Consumed;
+                }
+                ViewInputResult::NotConsumed
+            }
+            _ => ViewInputResult::NotConsumed,
+        }
+    }
 }
 
 /// Widget for rendering the line chart

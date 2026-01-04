@@ -1,6 +1,6 @@
 //! Top-ups view as a StatefulWidget
 
-use crossterm::event::KeyCode;
+use crossterm::event::{KeyCode, MouseEvent, MouseEventKind, MouseButton};
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Rect},
@@ -97,6 +97,54 @@ impl ViewState for TopUpsViewState {
             KeyCode::PageDown => {
                 self.page_down();
                 ViewInputResult::Consumed
+            }
+            _ => ViewInputResult::NotConsumed,
+        }
+    }
+    
+    fn handle_mouse(&mut self, mouse: MouseEvent, area: Rect) -> ViewInputResult {
+        match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                self.scroll_up();
+                ViewInputResult::Consumed
+            }
+            MouseEventKind::ScrollDown => {
+                self.scroll_down();
+                ViewInputResult::Consumed
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                let x = mouse.column;
+                let y = mouse.row;
+                
+                // Click on header row to sort
+                if x >= area.x && x < area.x + area.width && y == area.y + 1 {
+                    let relative_x = x - area.x - 1;
+                    let is_narrow = area.width < 60;
+                    
+                    if is_narrow {
+                        if relative_x < 10 {
+                            self.sort.set_column(SortColumn::CategoryId);
+                        } else if relative_x < 18 {
+                            self.sort.set_column(SortColumn::Amount);
+                        } else {
+                            self.sort.set_column(SortColumn::Date);
+                        }
+                    } else {
+                        if relative_x < 10 {
+                            self.sort.set_column(SortColumn::Id);
+                        } else if relative_x < 30 {
+                            self.sort.set_column(SortColumn::CategoryId);
+                        } else if relative_x < 42 {
+                            self.sort.set_column(SortColumn::Amount);
+                        } else if relative_x < 54 {
+                            self.sort.set_column(SortColumn::Date);
+                        } else {
+                            self.sort.set_column(SortColumn::Comment);
+                        }
+                    }
+                    return ViewInputResult::Consumed;
+                }
+                ViewInputResult::NotConsumed
             }
             _ => ViewInputResult::NotConsumed,
         }
