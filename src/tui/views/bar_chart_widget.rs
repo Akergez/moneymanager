@@ -69,10 +69,17 @@ impl<'a> StatefulWidget for BarChartView<'a> {
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         let monthly_data = state.get_monthly_expenses(self.expenses);
 
+        // Responsive title based on width
+        let title = if area.width < 60 {
+            "Monthly Expenses"
+        } else {
+            "Monthly Expenses (Last 12 Months)"
+        };
+
         if monthly_data.is_empty() {
             let paragraph = Paragraph::new("No monthly expense data available")
                 .alignment(Alignment::Center)
-                .block(Block::default().borders(Borders::ALL).title("Monthly Expenses"));
+                .block(Block::default().borders(Borders::ALL).title(title));
             Widget::render(paragraph, area, buf);
             return;
         }
@@ -97,15 +104,24 @@ impl<'a> StatefulWidget for BarChartView<'a> {
             })
             .collect();
 
+        // Responsive bar width and gap
+        let (bar_width, bar_gap) = if area.width < 60 {
+            (3, 0)  // Compact for narrow screens
+        } else if area.width < 80 {
+            (4, 1)  // Medium
+        } else {
+            (5, 1)  // Original for wide screens
+        };
+
         let chart = BarChart::default()
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title("Monthly Expenses (Last 12 Months)")
+                    .title(title)
             )
             .data(BarGroup::default().bars(&bars))
-            .bar_width(5)
-            .bar_gap(1)
+            .bar_width(bar_width)
+            .bar_gap(bar_gap)
             .max(max_amount)
             .style(Style::default().fg(Color::White));
 

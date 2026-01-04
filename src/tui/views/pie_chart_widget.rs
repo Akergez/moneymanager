@@ -201,13 +201,36 @@ impl<'a> StatefulWidget for PieChartView<'a> {
         let data = state.get_expense_by_category(self.expenses, self.categories);
         let total: f64 = data.iter().map(|(_, amt)| amt).sum();
 
+        // Responsive column width based on screen size
+        let name_width = if area.width < 60 {
+            10  // Narrow screens
+        } else if area.width < 80 {
+            15  // Medium screens
+        } else {
+            20  // Wide screens
+        };
+        
+        // Responsive max bar width
+        let max_bar_width = if area.width < 60 {
+            15
+        } else if area.width < 80 {
+            30
+        } else {
+            50
+        };
+
         if data.is_empty() {
+            let title = if area.width < 60 {
+                format!("{} ({:.0})", state.get_month_title(), total)
+            } else {
+                format!("Expense by Category - {} (Total: {:.2})", state.get_month_title(), total)
+            };
             let paragraph = Paragraph::new("No expense data available")
                 .alignment(Alignment::Center)
                 .block(
                     Block::default()
                         .borders(Borders::ALL)
-                        .title(format!("Expense by Category - {} (Total: {:.2})", state.get_month_title(), total))
+                        .title(title)
                 );
             Widget::render(paragraph, area, buf);
             return;
@@ -216,7 +239,7 @@ impl<'a> StatefulWidget for PieChartView<'a> {
         // Create text-based bar chart representation
         let mut lines: Vec<Line> = vec![
             Line::from(vec![
-                Span::styled("Total Expenses: ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                Span::styled("Total: ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
                 Span::styled(format!("{:.2}", total), Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
             ]),
             Line::from(""),
@@ -224,29 +247,50 @@ impl<'a> StatefulWidget for PieChartView<'a> {
 
         for (name, amount) in data.iter() {
             let percentage = (amount / total) * 100.0;
-            let bar_width = (percentage / 2.0) as usize;
-            let bar = "█".repeat(bar_width.min(50));
+            let bar_width = ((percentage / 100.0) * max_bar_width as f64) as usize;
+            let bar = "█".repeat(bar_width.min(max_bar_width));
 
             let color = color_from_name(name);
+            
+            // Truncate name for narrow screens
+            let display_name = if name.len() > name_width {
+                format!("{:.width$}", name, width = name_width - 1)
+            } else {
+                format!("{:width$}", name, width = name_width)
+            };
 
             lines.push(Line::from(vec![
-                Span::styled(format!("{:20}", name), Style::default().fg(color).add_modifier(Modifier::BOLD)),
+                Span::styled(display_name, Style::default().fg(color).add_modifier(Modifier::BOLD)),
                 Span::raw(" "),
                 Span::styled(bar, Style::default().fg(color)),
             ]));
 
+            // Responsive amount formatting
+            let padding = " ".repeat(name_width + 1);
+            let amount_text = if area.width < 60 {
+                format!("{:.0} ({:.0}%)", amount, percentage)
+            } else {
+                format!("{:.2} ({:.1}%)", amount, percentage)
+            };
+            
             lines.push(Line::from(vec![
-                Span::raw("                     "),
-                Span::styled(format!("{:.2} ({:.1}%)", amount, percentage), Style::default().fg(Color::White)),
+                Span::raw(padding),
+                Span::styled(amount_text, Style::default().fg(Color::White)),
             ]));
             lines.push(Line::from(""));
         }
 
+        let title = if area.width < 60 {
+            format!("{} ({:.0})", state.get_month_title(), total)
+        } else {
+            format!("Expense by Category - {} (Total: {:.2})", state.get_month_title(), total)
+        };
+        
         let paragraph = Paragraph::new(lines)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title(format!("Expense by Category - {} (Total: {:.2})", state.get_month_title(), total))
+                    .title(title)
             )
             .scroll((state.scroll_offset as u16, 0));
 

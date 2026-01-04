@@ -143,7 +143,16 @@ impl StatefulWidget for CategoryFormWidget {
             return;
         }
 
-        let popup_area = Self::centered_rect(60, 40, area);
+        // Responsive sizing: use more screen space on narrow displays
+        let (percent_x, percent_y) = if area.width < 60 {
+            (95, 60)  // Almost full width for mobile-like resolution
+        } else if area.width < 80 {
+            (80, 50)  // Larger popup for medium screens
+        } else {
+            (60, 40)  // Original size for wide screens
+        };
+        
+        let popup_area = Self::centered_rect(percent_x, percent_y, area);
 
         // Clear the area
         Widget::render(Clear, popup_area, buf);
@@ -172,8 +181,13 @@ impl StatefulWidget for CategoryFormWidget {
             .block(Block::default().borders(Borders::ALL).title("Category Name"));
         Widget::render(input, chunks[0], buf);
 
-        // Instructions
-        let instructions = Paragraph::new("Press Enter to submit, Esc to cancel")
+        // Instructions - responsive text
+        let instructions_text = if area.width < 60 {
+            "Enter:OK | Esc:Back"
+        } else {
+            "Press Enter to submit, Esc to cancel"
+        };
+        let instructions = Paragraph::new(instructions_text)
             .style(Style::default().fg(Color::Gray))
             .alignment(Alignment::Center);
         Widget::render(instructions, chunks[1], buf);

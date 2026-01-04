@@ -291,7 +291,16 @@ impl StatefulWidget for ExpenseFormWidget {
             return;
         }
 
-        let popup_area = Self::centered_rect(70, 60, area);
+        // Responsive sizing: use more screen space on narrow displays
+        let (percent_x, percent_y) = if area.width < 60 {
+            (95, 90)  // Almost full screen for mobile-like resolution
+        } else if area.width < 80 {
+            (85, 75)  // Larger popup for medium screens
+        } else {
+            (70, 60)  // Original size for wide screens
+        };
+        
+        let popup_area = Self::centered_rect(percent_x, percent_y, area);
 
         Widget::render(Clear, popup_area, buf);
 
@@ -361,8 +370,14 @@ impl StatefulWidget for ExpenseFormWidget {
             .block(Block::default().borders(Borders::ALL).title("Comment (optional)"));
         Widget::render(comment_input, chunks[3], buf);
 
-        // Instructions
-        let instructions_text = if state.current_field == ExpenseFormField::Category {
+        // Instructions - responsive text based on width
+        let instructions_text = if area.width < 60 {
+            if state.current_field == ExpenseFormField::Category {
+                "↑/↓:Select | Enter:Next | Esc:Back"
+            } else {
+                "Tab:Next | Enter:OK | Esc:Back"
+            }
+        } else if state.current_field == ExpenseFormField::Category {
             "↑/↓: Select category | Enter/Tab: Next field | Esc: Cancel"
         } else {
             "Tab: Next field | Enter: Submit | Esc: Cancel"

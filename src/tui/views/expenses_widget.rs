@@ -171,14 +171,26 @@ impl<'a> StatefulWidget for ExpensesView<'a> {
         let total: f64 = sorted_expenses.iter().map(|e| e.amount).sum();
         let sort = &state.sort;
 
-        // Build headers with sort indicators
-        let headers = vec![
-            format!("ID{}", Self::sort_indicator(sort.column, SortColumn::Id, sort.order)),
-            format!("Category{}", Self::sort_indicator(sort.column, SortColumn::CategoryId, sort.order)),
-            format!("Amount{}", Self::sort_indicator(sort.column, SortColumn::Amount, sort.order)),
-            format!("Date{}", Self::sort_indicator(sort.column, SortColumn::Date, sort.order)),
-            format!("Comment{}", Self::sort_indicator(sort.column, SortColumn::Comment, sort.order)),
-        ];
+        // Responsive: determine if narrow screen
+        let is_narrow = area.width < 60;
+        let is_medium = area.width < 80;
+
+        // Build headers with sort indicators (shorter for narrow screens)
+        let headers = if is_narrow {
+            vec![
+                format!("Cat{}", Self::sort_indicator(sort.column, SortColumn::CategoryId, sort.order)),
+                format!("Amt{}", Self::sort_indicator(sort.column, SortColumn::Amount, sort.order)),
+                format!("Date{}", Self::sort_indicator(sort.column, SortColumn::Date, sort.order)),
+            ]
+        } else {
+            vec![
+                format!("ID{}", Self::sort_indicator(sort.column, SortColumn::Id, sort.order)),
+                format!("Category{}", Self::sort_indicator(sort.column, SortColumn::CategoryId, sort.order)),
+                format!("Amount{}", Self::sort_indicator(sort.column, SortColumn::Amount, sort.order)),
+                format!("Date{}", Self::sort_indicator(sort.column, SortColumn::Date, sort.order)),
+                format!("Comment{}", Self::sort_indicator(sort.column, SortColumn::Comment, sort.order)),
+            ]
+        };
 
         let header_style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
         let header_cells: Vec<Cell> = headers
@@ -187,36 +199,75 @@ impl<'a> StatefulWidget for ExpensesView<'a> {
             .collect();
         let header = Row::new(header_cells).height(1).bottom_margin(1);
 
-        // Build rows
+        // Build rows - responsive columns
         let rows: Vec<Row> = sorted_expenses
             .iter()
             .skip(state.scroll_offset)
             .map(|exp| {
-                let cells = vec![
-                    Cell::from(Self::format_uuid_short(&exp.id)),
-                    Cell::from(self.get_category_name(&exp.category_id)),
-                    Cell::from(format!("{:.2}", exp.amount)),
-                    Cell::from(exp.date.format("%Y-%m-%d").to_string()),
-                    Cell::from(exp.comment.clone().unwrap_or_default()),
-                ];
+                let cells = if is_narrow {
+                    // Narrow: show only essential columns
+                    let cat_name = self.get_category_name(&exp.category_id);
+                    let short_cat = if cat_name.len() > 10 {
+                        format!("{:.9}", cat_name)
+                    } else {
+                        cat_name
+                    };
+                    vec![
+                        Cell::from(short_cat),
+                        Cell::from(format!("{:.0}", exp.amount)),
+                        Cell::from(exp.date.format("%m-%d").to_string()),
+                    ]
+                } else {
+                    vec![
+                        Cell::from(Self::format_uuid_short(&exp.id)),
+                        Cell::from(self.get_category_name(&exp.category_id)),
+                        Cell::from(format!("{:.2}", exp.amount)),
+                        Cell::from(exp.date.format("%Y-%m-%d").to_string()),
+                        Cell::from(exp.comment.clone().unwrap_or_default()),
+                    ]
+                };
                 Row::new(cells).height(1)
             })
             .collect();
 
-        let widths = [
-            Constraint::Length(10),
-            Constraint::Length(20),
-            Constraint::Length(12),
-            Constraint::Length(12),
-            Constraint::Min(20),
-        ];
+        // Responsive column widths
+        let widths: Vec<Constraint> = if is_narrow {
+            vec![
+                Constraint::Length(10),  // Category
+                Constraint::Length(8),   // Amount
+                Constraint::Length(6),   // Date (MM-DD)
+            ]
+        } else if is_medium {
+            vec![
+                Constraint::Length(8),
+                Constraint::Length(15),
+                Constraint::Length(10),
+                Constraint::Length(10),
+                Constraint::Min(10),
+            ]
+        } else {
+            vec![
+                Constraint::Length(10),
+                Constraint::Length(20),
+                Constraint::Length(12),
+                Constraint::Length(12),
+                Constraint::Min(20),
+            ]
+        };
+
+        // Responsive title
+        let title = if is_narrow {
+            format!("{} | {:.0}", sorted_expenses.len(), total)
+        } else {
+            format!("Expenses (Total: {} | Sum: {:.2})", sorted_expenses.len(), total)
+        };
 
         let table = Table::new(rows, widths)
             .header(header)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title(format!("Expenses (Total: {} | Sum: {:.2})", sorted_expenses.len(), total))
+                    .title(title)
             )
             .style(Style::default().fg(Color::White))
             .row_highlight_style(Style::default().add_modifier(Modifier::BOLD));
