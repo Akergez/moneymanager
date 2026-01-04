@@ -1,16 +1,24 @@
 //! Expense form as a StatefulWidget
 
-use crossterm::event::KeyCode;
+use crossterm::event::{KeyCode, MouseEvent, MouseEventKind, MouseButton};
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
+    text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph, StatefulWidget, Widget, Wrap},
 };
 use chrono::NaiveDate;
 use diesel::SqliteConnection;
 use crate::models::{Category, Expense};
 use super::category_form_widget::FormInputResult;
+
+/// Button action for this form
+#[derive(Debug, Clone, Copy)]
+pub enum FormButtonAction {
+    Confirm,
+    Cancel,
+}
 
 /// Fields in the expense form
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -53,6 +61,8 @@ pub struct ExpenseFormState {
     pub comment: String,
     pub error_message: Option<String>,
     categories: Vec<(Vec<u8>, String)>,
+    pub pending_button_action: Option<FormButtonAction>,
+    pub button_area: Option<Rect>,
 }
 
 impl Default for ExpenseFormState {
@@ -72,6 +82,8 @@ impl ExpenseFormState {
             comment: String::new(),
             error_message: None,
             categories: Vec::new(),
+            pending_button_action: None,
+            button_area: None,
         }
     }
 
@@ -79,6 +91,7 @@ impl ExpenseFormState {
         self.clear();
         self.set_categories(categories);
         self.is_active = true;
+        self.button_area = None;
     }
 
     pub fn close(&mut self) {
@@ -93,6 +106,7 @@ impl ExpenseFormState {
         self.date = chrono::Local::now().format("%Y-%m-%d").to_string();
         self.comment.clear();
         self.error_message = None;
+        self.pending_button_action = None;
     }
 
     pub fn set_categories(&mut self, categories: &[Category]) {
@@ -198,6 +212,30 @@ impl ExpenseFormState {
 
     /// Handle keyboard input, returns the result of the input handling
     pub fn handle_input(&mut self, key: KeyCode, conn: &mut SqliteConnection) -> FormInputResult {
+        // Process any pending button actions first
+        if let Some(action) = self.pending_button_action.take() {
+            match action {
+                FormButtonAction::Confirm => {
+                    // Force submission regardless of current field
+                    if self.current_field == ExpenseFormField::Category {
+                        self.current_field = ExpenseFormField::Comment; // Move to last field for submission
+                    }
+                    return match self.submit(conn) {
+                        Ok(false) => FormInputResult::SubmittedNeedsReload,
+                        Ok(true) => FormInputResult::Consumed,
+                        Err(e) => {
+                            self.set_error(e);
+                            FormInputResult::Consumed
+                        }
+                    };
+                }
+                FormButtonAction::Cancel => {
+                    self.close();
+                    return FormInputResult::Closed;
+                }
+            }
+        }
+
         match key {
             KeyCode::Esc => {
                 self.close();
@@ -243,6 +281,38 @@ impl ExpenseFormState {
             }
             _ => FormInputResult::Consumed,
         }
+    }
+
+    /// Handle mouse input
+    pub fn handle_mouse(&mut self, mouse: MouseEvent) -> bool {
+        if !self.is_active {
+            return false;
+        }
+
+        if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+            if let Some(button_area) = self.button_area {
+                let x = mouse.column;
+                let y = mouse.row;
+
+                // Check if click is in button row
+                if y >= button_area.y && y < button_area.y + button_area.height {
+                    let content_end = button_area.x + button_area.width;
+                    let confirm_start = content_end.saturating_sub(9);
+                    let cancel_end = confirm_start.saturating_sub(2);
+                    let cancel_start = cancel_end.saturating_sub(8);
+
+                    if x >= confirm_start && x < content_end {
+                        self.pending_button_action = Some(FormButtonAction::Confirm);
+                        return true;
+                    }
+                    if x >= cancel_start && x < cancel_end {
+                        self.pending_button_action = Some(FormButtonAction::Cancel);
+                        return true;
+                    }
+                }
+            }
+        }
+        false
     }
 }
 
@@ -293,13 +363,13 @@ impl StatefulWidget for ExpenseFormWidget {
 
         // Responsive sizing: use more screen space on narrow displays
         let (percent_x, percent_y) = if area.width < 60 {
-            (95, 90)  // Almost full screen for mobile-like resolution
+            (95, 95)  // Almost full screen for mobile-like resolution
         } else if area.width < 80 {
-            (85, 75)  // Larger popup for medium screens
+            (85, 80)  // Larger popup for medium screens
         } else {
-            (70, 60)  // Original size for wide screens
+            (70, 70)  // Original size for wide screens
         };
-        
+
         let popup_area = Self::centered_rect(percent_x, percent_y, area);
 
         Widget::render(Clear, popup_area, buf);
@@ -320,10 +390,14 @@ impl StatefulWidget for ExpenseFormWidget {
                 Constraint::Length(3),  // Amount
                 Constraint::Length(3),  // Date
                 Constraint::Length(3),  // Comment
-                Constraint::Length(3),  // Instructions
+                Constraint::Length(2),  // Instructions
                 Constraint::Min(1),     // Error/Categories
+                Constraint::Length(2),  // Buttons
             ])
             .split(inner);
+
+        // Save button area for mouse handling
+        state.button_area = Some(chunks[6]);
 
         // Category selector
         let cat_style = if state.current_field == ExpenseFormField::Category {
@@ -373,14 +447,14 @@ impl StatefulWidget for ExpenseFormWidget {
         // Instructions - responsive text based on width
         let instructions_text = if area.width < 60 {
             if state.current_field == ExpenseFormField::Category {
-                "↑/↓:Select | Enter:Next | Esc:Back"
+                "↑/↓:Select | Tab:Next | Esc:Back"
             } else {
-                "Tab:Next | Enter:OK | Esc:Back"
+                "Tab:Next | Esc:Back"
             }
         } else if state.current_field == ExpenseFormField::Category {
-            "↑/↓: Select category | Enter/Tab: Next field | Esc: Cancel"
+            "↑/↓: Select category | Tab: Next field | Esc: Cancel"
         } else {
-            "Tab: Next field | Enter: Submit | Esc: Cancel"
+            "Tab: Next field | Esc: Cancel"
         };
         let instructions = Paragraph::new(instructions_text)
             .style(Style::default().fg(Color::Gray))
@@ -417,6 +491,22 @@ impl StatefulWidget for ExpenseFormWidget {
                 );
             Widget::render(list, chunks[5], buf);
         }
+
+        // Buttons - right aligned
+        let button_area = chunks[6];
+        let available_width = button_area.width as usize;
+        let buttons_width = 8 + 2 + 9; // "[Cancel]" + "  " + "[Confirm]"
+        let left_padding = available_width.saturating_sub(buttons_width);
+
+        let buttons_line = Line::from(vec![
+            Span::raw(" ".repeat(left_padding)),
+            Span::styled("[Cancel]", Style::default().fg(Color::Red)),
+            Span::raw("  "),
+            Span::styled("[Confirm]", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+        ]);
+
+        let buttons = Paragraph::new(vec![buttons_line]);
+        Widget::render(buttons, button_area, buf);
     }
 }
 

@@ -3,9 +3,10 @@
 use crossterm::event::{KeyCode, MouseEvent, MouseEventKind, MouseButton};
 use ratatui::{
     buffer::Buffer,
-    layout::{Constraint, Rect},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Cell, Row, StatefulWidget, Table, TableState},
+    text::{Line, Span},
+    widgets::{Block, Borders, Cell, Paragraph, Row, StatefulWidget, Table, TableState, Widget},
 };
 use crate::models::{Category, Expense};
 use super::state::{SortableState, SortColumn, SortOrder};
@@ -128,8 +129,13 @@ impl ViewState for ExpensesViewState {
             _ => ViewInputResult::NotConsumed,
         }
     }
-    
+
     fn handle_mouse(&mut self, mouse: MouseEvent, area: Rect) -> ViewInputResult {
+        // Button bar is 3 rows at the bottom
+        let button_bar_height = 3u16;
+        let button_bar_start = area.y + area.height.saturating_sub(button_bar_height);
+        let is_in_button_bar = mouse.row >= button_bar_start;
+
         match mouse.kind {
             // Scroll wheel support
             MouseEventKind::ScrollUp => {
@@ -140,19 +146,27 @@ impl ViewState for ExpensesViewState {
                 self.scroll_down();
                 ViewInputResult::Consumed
             }
-            // Click on header row to change sort column
+            // Click on header row to change sort column or button
             MouseEventKind::Down(MouseButton::Left) => {
                 let x = mouse.column;
                 let y = mouse.row;
-                
-                // Check if click is within the view area and on header row (row 1 inside border)
+
+                if is_in_button_bar {
+                    // Check for create button (near right edge)
+                    if mouse.column >= area.x + area.width - 12 && mouse.column < area.x + area.width - 1 {
+                        return ViewInputResult::OpenExpenseForm;
+                    }
+                    return ViewInputResult::NotConsumed;
+                }
+
+                // Check if click is within the table area and on header row (row 1 inside border)
                 if x >= area.x && x < area.x + area.width && y == area.y + 1 {
                     let relative_x = x - area.x - 1; // -1 for border
-                    
+
                     // Determine which column was clicked based on widths
                     // Widths: ID(10), Category(20), Amount(12), Date(12), Comment(rest)
                     let is_narrow = area.width < 60;
-                    
+
                     if is_narrow {
                         // Narrow: Cat(10), Amt(8), Date(6)
                         if relative_x < 10 {
@@ -194,39 +208,52 @@ impl<'a> ExpensesView<'a> {
     pub fn new(expenses: &'a [Expense], categories: &'a [Category]) -> Self {
         Self { expenses, categories }
     }
-
-    fn get_category_name(&self, category_id: &[u8]) -> String {
-        self.categories
-            .iter()
-            .find(|c| c.id.as_slice() == category_id)
-            .map(|c| c.name.clone())
-            .unwrap_or_else(|| "Unknown".to_string())
-    }
-
-    fn format_uuid_short(id: &[u8]) -> String {
-        id.iter()
-            .take(4)
-            .map(|b| format!("{:02x}", b))
-            .collect()
-    }
-
-    fn sort_indicator(current: SortColumn, target: SortColumn, order: SortOrder) -> &'static str {
-        if current == target {
-            match order {
-                SortOrder::Ascending => " ▲",
-                SortOrder::Descending => " ▼",
-            }
-        } else {
-            ""
-        }
-    }
 }
 
 impl<'a> StatefulWidget for ExpensesView<'a> {
     type State = ExpensesViewState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        let sorted_expenses = state.sort_expenses(self.expenses);
+        // Split into table on top and button bar at bottom
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(5),       // Table
+                Constraint::Length(3),    // Button bar
+            ])
+            .split(area);
+
+
+        // Render table
+        render_expenses_table(chunks[0], buf, state, self.expenses, self.categories);
+
+        // Render button bar
+        render_button_bar(chunks[1], buf);
+    }
+}
+
+fn render_button_bar(area: Rect, buf: &mut Buffer) {
+    let available_width = area.width.saturating_sub(2) as usize;
+    let button_width = 10; // "[+ Create]"
+    let left_padding = available_width.saturating_sub(button_width);
+
+    let line = Line::from(vec![
+        Span::raw(" ".repeat(left_padding)),
+        Span::styled("[+ Create]", Style::default().fg(Color::Green)),
+    ]);
+
+    let paragraph = Paragraph::new(vec![line])
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::DarkGray))
+        );
+
+    Widget::render(paragraph, area, buf);
+}
+
+fn render_expenses_table(area: Rect, buf: &mut Buffer, state: &mut ExpensesViewState, expenses: &[Expense], categories: &[Category]) {
+        let sorted_expenses = state.sort_expenses(expenses);
         let total: f64 = sorted_expenses.iter().map(|e| e.amount).sum();
         let sort = &state.sort;
 
@@ -237,17 +264,17 @@ impl<'a> StatefulWidget for ExpensesView<'a> {
         // Build headers with sort indicators (shorter for narrow screens)
         let headers = if is_narrow {
             vec![
-                format!("Cat{}", Self::sort_indicator(sort.column, SortColumn::CategoryId, sort.order)),
-                format!("Amt{}", Self::sort_indicator(sort.column, SortColumn::Amount, sort.order)),
-                format!("Date{}", Self::sort_indicator(sort.column, SortColumn::Date, sort.order)),
+                format!("Cat{}", sort_indicator(sort.column, SortColumn::CategoryId, sort.order)),
+                format!("Amt{}", sort_indicator(sort.column, SortColumn::Amount, sort.order)),
+                format!("Date{}", sort_indicator(sort.column, SortColumn::Date, sort.order)),
             ]
         } else {
             vec![
-                format!("ID{}", Self::sort_indicator(sort.column, SortColumn::Id, sort.order)),
-                format!("Category{}", Self::sort_indicator(sort.column, SortColumn::CategoryId, sort.order)),
-                format!("Amount{}", Self::sort_indicator(sort.column, SortColumn::Amount, sort.order)),
-                format!("Date{}", Self::sort_indicator(sort.column, SortColumn::Date, sort.order)),
-                format!("Comment{}", Self::sort_indicator(sort.column, SortColumn::Comment, sort.order)),
+                format!("ID{}", sort_indicator(sort.column, SortColumn::Id, sort.order)),
+                format!("Category{}", sort_indicator(sort.column, SortColumn::CategoryId, sort.order)),
+                format!("Amount{}", sort_indicator(sort.column, SortColumn::Amount, sort.order)),
+                format!("Date{}", sort_indicator(sort.column, SortColumn::Date, sort.order)),
+                format!("Comment{}", sort_indicator(sort.column, SortColumn::Comment, sort.order)),
             ]
         };
 
@@ -265,7 +292,7 @@ impl<'a> StatefulWidget for ExpensesView<'a> {
             .map(|exp| {
                 let cells = if is_narrow {
                     // Narrow: show only essential columns
-                    let cat_name = self.get_category_name(&exp.category_id);
+                    let cat_name = get_category_name(categories, &exp.category_id);
                     let short_cat = if cat_name.len() > 10 {
                         format!("{:.9}", cat_name)
                     } else {
@@ -278,8 +305,8 @@ impl<'a> StatefulWidget for ExpensesView<'a> {
                     ]
                 } else {
                     vec![
-                        Cell::from(Self::format_uuid_short(&exp.id)),
-                        Cell::from(self.get_category_name(&exp.category_id)),
+                        Cell::from(format_uuid_short(&exp.id)),
+                        Cell::from(get_category_name(categories, &exp.category_id)),
                         Cell::from(format!("{:.2}", exp.amount)),
                         Cell::from(exp.date.format("%Y-%m-%d").to_string()),
                         Cell::from(exp.comment.clone().unwrap_or_default()),
@@ -333,6 +360,31 @@ impl<'a> StatefulWidget for ExpensesView<'a> {
 
         // Render using StatefulWidget
         StatefulWidget::render(table, area, buf, &mut state.table_state);
+}
+
+fn get_category_name(categories: &[Category], category_id: &[u8]) -> String {
+    categories
+        .iter()
+        .find(|c| c.id.as_slice() == category_id)
+        .map(|c| c.name.clone())
+        .unwrap_or_else(|| "Unknown".to_string())
+}
+
+fn format_uuid_short(id: &[u8]) -> String {
+    id.iter()
+        .take(4)
+        .map(|b| format!("{:02x}", b))
+        .collect()
+}
+
+fn sort_indicator(current: SortColumn, target: SortColumn, order: SortOrder) -> &'static str {
+    if current == target {
+        match order {
+            SortOrder::Ascending => " ▲",
+            SortOrder::Descending => " ▼",
+        }
+    } else {
+        ""
     }
 }
 

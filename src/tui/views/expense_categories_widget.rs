@@ -1,11 +1,12 @@
 //! Expense categories view as a StatefulWidget
 
-use crossterm::event::{KeyCode, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, MouseEvent, MouseEventKind, MouseButton};
 use ratatui::{
     buffer::Buffer,
-    layout::{Constraint, Rect},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Cell, Row, StatefulWidget, Table, TableState},
+    text::{Line, Span},
+    widgets::{Block, Borders, Cell, Paragraph, Row, StatefulWidget, Table, TableState, Widget},
 };
 use crate::models::Category;
 use super::expenses_widget::{ViewInputResult, ViewState};
@@ -62,8 +63,13 @@ impl ViewState for ExpenseCategoriesViewState {
             _ => ViewInputResult::NotConsumed,
         }
     }
-    
-    fn handle_mouse(&mut self, mouse: MouseEvent, _area: Rect) -> ViewInputResult {
+
+    fn handle_mouse(&mut self, mouse: MouseEvent, area: Rect) -> ViewInputResult {
+        // Button bar is 3 rows at the bottom
+        let button_bar_height = 3u16;
+        let button_bar_start = area.y + area.height.saturating_sub(button_bar_height);
+        let is_in_button_bar = mouse.row >= button_bar_start;
+
         match mouse.kind {
             MouseEventKind::ScrollUp => {
                 self.scroll_up();
@@ -72,6 +78,15 @@ impl ViewState for ExpenseCategoriesViewState {
             MouseEventKind::ScrollDown => {
                 self.scroll_down();
                 ViewInputResult::Consumed
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                if is_in_button_bar {
+                    // Check for create button (near right edge)
+                    if mouse.column >= area.x + area.width - 12 && mouse.column < area.x + area.width - 1 {
+                        return ViewInputResult::OpenCategoryForm;
+                    }
+                }
+                ViewInputResult::NotConsumed
             }
             _ => ViewInputResult::NotConsumed,
         }
@@ -87,16 +102,51 @@ impl<'a> ExpenseCategoriesView<'a> {
     pub fn new(categories: &'a [Category]) -> Self {
         Self { categories }
     }
-
-    fn format_uuid_short(id: &[u8]) -> String {
-        id.iter().take(4).map(|b| format!("{:02x}", b)).collect()
-    }
 }
 
 impl<'a> StatefulWidget for ExpenseCategoriesView<'a> {
     type State = ExpenseCategoriesViewState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+        // Split into table on top and button bar at bottom
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(5),       // Table
+                Constraint::Length(3),    // Button bar
+            ])
+            .split(area);
+
+
+        // Render table
+        render_table(chunks[0], buf, state, self.categories);
+
+        // Render button bar
+        render_button_bar(chunks[1], buf);
+    }
+}
+
+fn render_button_bar(area: Rect, buf: &mut Buffer) {
+    let available_width = area.width.saturating_sub(2) as usize;
+    let button_width = 10; // "[+ Create]"
+    let left_padding = available_width.saturating_sub(button_width);
+
+    let line = Line::from(vec![
+        Span::raw(" ".repeat(left_padding)),
+        Span::styled("[+ Create]", Style::default().fg(Color::Green)),
+    ]);
+
+    let paragraph = Paragraph::new(vec![line])
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::DarkGray))
+        );
+
+    Widget::render(paragraph, area, buf);
+}
+
+fn render_table(area: Rect, buf: &mut Buffer, state: &mut ExpenseCategoriesViewState, categories: &[Category]) {
         // Responsive: determine if narrow screen
         let is_narrow = area.width < 60;
         
@@ -115,7 +165,7 @@ impl<'a> StatefulWidget for ExpenseCategoriesView<'a> {
         };
 
         // Responsive rows
-        let rows: Vec<Row> = self.categories
+        let rows: Vec<Row> = categories
             .iter()
             .skip(state.scroll_offset)
             .map(|cat| {
@@ -125,7 +175,7 @@ impl<'a> StatefulWidget for ExpenseCategoriesView<'a> {
                     ]).height(1)
                 } else {
                     Row::new(vec![
-                        Cell::from(Self::format_uuid_short(&cat.id)),
+                        Cell::from(format_uuid_short(&cat.id)),
                         Cell::from(cat.name.clone()),
                     ]).height(1)
                 }
@@ -141,9 +191,9 @@ impl<'a> StatefulWidget for ExpenseCategoriesView<'a> {
 
         // Responsive title
         let title = if is_narrow {
-            format!("Categories ({})", self.categories.len())
+            format!("Categories ({})", categories.len())
         } else {
-            format!("Expense Categories ({})", self.categories.len())
+            format!("Expense Categories ({})", categories.len())
         };
 
         let table = Table::new(rows, widths)
@@ -153,5 +203,8 @@ impl<'a> StatefulWidget for ExpenseCategoriesView<'a> {
             .row_highlight_style(Style::default().add_modifier(Modifier::BOLD));
 
         StatefulWidget::render(table, area, buf, &mut state.table_state);
-    }
+}
+
+fn format_uuid_short(id: &[u8]) -> String {
+    id.iter().take(4).map(|b| format!("{:02x}", b)).collect()
 }

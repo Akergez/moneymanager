@@ -189,10 +189,43 @@ impl AppState {
     }
 
     /// Handle mouse input for tab switching and view interactions
-    pub fn handle_mouse(&mut self, mouse: MouseEvent, area: Rect) {
-        // Don't handle mouse if a form is active
-        if self.category_form.is_active || self.expense_form.is_active
-            || self.top_up_category_form.is_active || self.top_up_form.is_active {
+    pub fn handle_mouse(&mut self, mouse: MouseEvent, area: Rect, conn: &mut SqliteConnection) {
+        // Handle mouse in active forms first
+        if self.category_form.is_active {
+            if self.category_form.handle_mouse(mouse) {
+                // Button was clicked, process the pending action
+                let result = self.category_form.handle_input(KeyCode::Null, conn);
+                if result == FormInputResult::SubmittedNeedsReload {
+                    let _ = self.reload_data(conn);
+                }
+            }
+            return;
+        }
+        if self.expense_form.is_active {
+            if self.expense_form.handle_mouse(mouse) {
+                let result = self.expense_form.handle_input(KeyCode::Null, conn);
+                if result == FormInputResult::SubmittedNeedsReload {
+                    let _ = self.reload_data(conn);
+                }
+            }
+            return;
+        }
+        if self.top_up_category_form.is_active {
+            if self.top_up_category_form.handle_mouse(mouse) {
+                let result = self.top_up_category_form.handle_input(KeyCode::Null, conn);
+                if result == FormInputResult::SubmittedNeedsReload {
+                    let _ = self.reload_data(conn);
+                }
+            }
+            return;
+        }
+        if self.top_up_form.is_active {
+            if self.top_up_form.handle_mouse(mouse) {
+                let result = self.top_up_form.handle_input(KeyCode::Null, conn);
+                if result == FormInputResult::SubmittedNeedsReload {
+                    let _ = self.reload_data(conn);
+                }
+            }
             return;
         }
 
@@ -201,8 +234,8 @@ impl AppState {
             let x = mouse.column;
             let y = mouse.row;
 
-            // Tab bar is in the first 3 rows (height of 3)
-            if y < 3 {
+            // Tab bar is in the last 3 rows (at the bottom)
+            if y >= area.height.saturating_sub(3) {
                 // Calculate tab positions based on screen width
                 // Tab bar content starts after the border (x=1)
                 let content_start = 1u16;
@@ -246,8 +279,8 @@ impl AppState {
             }
         }
 
-        // Calculate content area (between tab bar and footer)
-        // Tab bar: rows 0-2, Footer: last 3 rows
+        // Calculate content area (between footer and tab bar)
+        // Footer: rows 0-2, Tab bar: last 3 rows
         let content_area = Rect {
             x: area.x,
             y: area.y + 3,
@@ -256,7 +289,7 @@ impl AppState {
         };
 
         // Delegate to current view for scroll and other interactions
-        let _ = match self.current_tab {
+        let view_result = match self.current_tab {
             Tab::ExpenseCategories => self.expense_categories_view.handle_mouse(mouse, content_area),
             Tab::Expenses => self.expenses_view.handle_mouse(mouse, content_area),
             Tab::TopUpCategories => self.top_up_categories_view.handle_mouse(mouse, content_area),
@@ -265,6 +298,23 @@ impl AppState {
             Tab::ExpenseBarChart => self.bar_chart_view.handle_mouse(mouse, content_area),
             Tab::ExpenseLineChart => self.line_chart_view.handle_mouse(mouse, content_area),
         };
+
+        // Handle view results - open forms if requested
+        match view_result {
+            ViewInputResult::OpenCategoryForm => {
+                self.category_form.open();
+            }
+            ViewInputResult::OpenExpenseForm => {
+                self.expense_form.open(&self.categories);
+            }
+            ViewInputResult::OpenTopUpCategoryForm => {
+                self.top_up_category_form.open();
+            }
+            ViewInputResult::OpenTopUpForm => {
+                self.top_up_form.open(&self.top_up_categories);
+            }
+            _ => {}
+        }
     }
 }
 

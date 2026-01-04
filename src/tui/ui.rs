@@ -26,9 +26,9 @@ pub fn draw(frame: &mut Frame, state: &mut AppState) {
         ])
         .split(frame.area());
 
-    draw_tabs(frame, state, chunks[0]);
+    draw_footer(frame, state, chunks[0]);
     draw_content(frame, state, chunks[1]);
-    draw_footer(frame, state, chunks[2]);
+    draw_tabs(frame, state, chunks[2]);
 
     // Render active form on top
     if state.category_form.is_active {
@@ -153,7 +153,7 @@ fn draw_content(frame: &mut Frame, state: &mut AppState, area: Rect) {
 fn draw_footer(frame: &mut Frame, state: &AppState, area: Rect) {
     let is_narrow = area.width < 60;
     let is_medium = area.width < 80;
-    
+
     let footer_text = if state.category_form.is_active {
         if is_narrow {
             "Enter:OK | Esc:Back"
@@ -227,11 +227,11 @@ fn draw_footer(frame: &mut Frame, state: &AppState, area: Rect) {
             }
             Tab::ExpenseLineChart => {
                 if is_narrow {
-                    "↑/↓:Cat | Space:Tog | ←/→:Mo | q:Quit"
+                    "↑/↓:Focus | ←/→:Nav | Space:Tog | q:Quit"
                 } else if is_medium {
-                    "↑/↓:Cat | Space:Tog | a:All | c:Clear | ←/→:Mo | q:Quit"
+                    "↑/↓:Focus | ←/→:Nav | Space:Tog | a:All | c:Clear | q:Quit"
                 } else {
-                    "↑/↓: Select Cat | Space: Toggle | a: All | c: Clear | ←/→: Month | q: Quit"
+                    "↑/↓: Focus | ←/→: Month/Cat | Space: Toggle | a: All | c: Clear | q: Quit"
                 }
             }
             _ => {

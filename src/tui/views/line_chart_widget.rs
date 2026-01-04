@@ -5,7 +5,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, StatefulWidget, Widget},
+    widgets::{Block, Borders, ListState, Paragraph, StatefulWidget, Widget},
 };
 use chrono::{Datelike, NaiveDate};
 use std::collections::{HashMap, HashSet};
@@ -19,6 +19,22 @@ pub enum CategoryAction {
     Previous,
     Toggle,
     SelectAll,
+    ClickAt { x: u16, y: u16 },
+}
+
+/// Button action for navigation
+#[derive(Debug, Clone, Copy)]
+pub enum ButtonAction {
+    PrevMonth,
+    NextMonth,
+}
+
+/// Focus area for the line chart view
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LineChartFocus {
+    #[default]
+    Chart,
+    CategorySelector,
 }
 
 /// State for the line chart view
@@ -30,6 +46,8 @@ pub struct LineChartViewState {
     pub category_list_state: ListState,
     pub scroll_offset: usize,
     pub pending_category_action: Option<CategoryAction>,
+    pub pending_button_action: Option<ButtonAction>,
+    pub focus: LineChartFocus,
 }
 
 impl Default for LineChartViewState {
@@ -42,6 +60,8 @@ impl Default for LineChartViewState {
             category_list_state: ListState::default(),
             scroll_offset: 0,
             pending_category_action: None,
+            pending_button_action: None,
+            focus: LineChartFocus::default(),
         }
     }
 }
@@ -185,25 +205,38 @@ impl super::expenses_widget::ViewState for LineChartViewState {
         use super::expenses_widget::ViewInputResult;
 
         match key {
-            KeyCode::Left => {
-                self.previous_month();
-                ViewInputResult::Consumed
-            }
-            KeyCode::Right => {
-                self.next_month();
-                ViewInputResult::Consumed
-            }
-            // Arrow keys for category navigation
+            // Up/Down to switch focus between chart and category selector
             KeyCode::Up => {
-                self.pending_category_action = Some(CategoryAction::Previous);
+                self.focus = LineChartFocus::Chart;
                 ViewInputResult::Consumed
             }
             KeyCode::Down => {
-                self.pending_category_action = Some(CategoryAction::Next);
+                self.focus = LineChartFocus::CategorySelector;
+                ViewInputResult::Consumed
+            }
+            // Left/Right behavior depends on focus
+            KeyCode::Left => {
+                match self.focus {
+                    LineChartFocus::Chart => self.previous_month(),
+                    LineChartFocus::CategorySelector => {
+                        self.pending_category_action = Some(CategoryAction::Previous);
+                    }
+                }
+                ViewInputResult::Consumed
+            }
+            KeyCode::Right => {
+                match self.focus {
+                    LineChartFocus::Chart => self.next_month(),
+                    LineChartFocus::CategorySelector => {
+                        self.pending_category_action = Some(CategoryAction::Next);
+                    }
+                }
                 ViewInputResult::Consumed
             }
             KeyCode::Char(' ') => {
-                self.pending_category_action = Some(CategoryAction::Toggle);
+                if self.focus == LineChartFocus::CategorySelector {
+                    self.pending_category_action = Some(CategoryAction::Toggle);
+                }
                 ViewInputResult::Consumed
             }
             KeyCode::Char('a') | KeyCode::Char('A') => {
@@ -222,33 +255,60 @@ impl super::expenses_widget::ViewState for LineChartViewState {
         use crossterm::event::{MouseEventKind, MouseButton};
         use super::expenses_widget::ViewInputResult;
 
+        // Calculate areas: chart (min 10), button bar (3), category selector (5)
+        let category_area_height = 5u16;
+        let button_bar_height = 3u16;
+        let category_area_start = area.y + area.height.saturating_sub(category_area_height);
+        let button_bar_start = category_area_start.saturating_sub(button_bar_height);
+
+        let is_in_category_area = mouse.row >= category_area_start;
+        let is_in_button_bar = mouse.row >= button_bar_start && mouse.row < category_area_start;
+
         match mouse.kind {
             MouseEventKind::ScrollUp => {
-                self.pending_category_action = Some(CategoryAction::Previous);
+                if is_in_category_area {
+                    self.pending_category_action = Some(CategoryAction::Previous);
+                } else {
+                    self.previous_month();
+                }
                 ViewInputResult::Consumed
             }
             MouseEventKind::ScrollDown => {
-                self.pending_category_action = Some(CategoryAction::Next);
+                if is_in_category_area {
+                    self.pending_category_action = Some(CategoryAction::Next);
+                } else {
+                    self.next_month();
+                }
                 ViewInputResult::Consumed
             }
-            // Click in category list area (left 25 columns) to select/toggle
+            // Click to set focus and optionally toggle category or button
             MouseEventKind::Down(MouseButton::Left) => {
-                let x = mouse.column;
-                let y = mouse.row;
+                if is_in_category_area {
+                    self.focus = LineChartFocus::CategorySelector;
+                    // Pass click position to be resolved during render
+                    self.pending_category_action = Some(CategoryAction::ClickAt {
+                        x: mouse.column,
+                        y: mouse.row
+                    });
+                } else if is_in_button_bar {
+                    // Buttons are right-aligned: [◀ Prev]  [Next ▶]
+                    // Calculate button positions from right edge
+                    let content_end = area.x + area.width - 1; // -1 for border
+                    // [Next ▶] is at the right end (8 chars)
+                    let next_start = content_end.saturating_sub(8);
+                    // [◀ Prev] is before Next with 2 char gap (8 chars)
+                    let prev_end = next_start.saturating_sub(2);
+                    let prev_start = prev_end.saturating_sub(8);
 
-                // Category list is in the left 25 columns (after border)
-                if x >= area.x && x < area.x + 25 && y > area.y + 1 {
-                    // Calculate which category was clicked
-                    // Header is row 0, so categories start at row 2 (after title and border)
-                    let category_row = (y - area.y - 2) as usize;
-
-                    // Select the category that was clicked
-                    self.category_list_state.select(Some(category_row));
-                    // Then toggle it
-                    self.pending_category_action = Some(CategoryAction::Toggle);
-                    return ViewInputResult::Consumed;
+                    if mouse.column >= next_start && mouse.column < content_end {
+                        self.pending_button_action = Some(ButtonAction::NextMonth);
+                    } else if mouse.column >= prev_start && mouse.column < prev_end {
+                        self.pending_button_action = Some(ButtonAction::PrevMonth);
+                    }
+                } else {
+                    self.focus = LineChartFocus::Chart;
                 }
-                ViewInputResult::NotConsumed
+                ViewInputResult::Consumed
             }
             _ => ViewInputResult::NotConsumed,
         }
@@ -271,53 +331,205 @@ impl<'a> StatefulWidget for LineChartView<'a> {
     type State = LineChartViewState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        // Process any pending category actions
+        // Split into chart on top, button bar in middle, and category selector on bottom
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(10),      // Chart
+                Constraint::Length(3),    // Button bar
+                Constraint::Length(5),    // Category selector
+            ])
+            .split(area);
+
+        // Process any pending button actions
+        if let Some(action) = state.pending_button_action.take() {
+            match action {
+                ButtonAction::PrevMonth => state.previous_month(),
+                ButtonAction::NextMonth => state.next_month(),
+            }
+        }
+
+        // Process any pending category actions (need chunks[2] for click detection)
         if let Some(action) = state.pending_category_action.take() {
             match action {
                 CategoryAction::Next => state.select_next_category(self.categories.len()),
                 CategoryAction::Previous => state.select_previous_category(self.categories.len()),
                 CategoryAction::Toggle => state.toggle_selected_category(self.categories),
                 CategoryAction::SelectAll => state.select_all_categories(self.categories),
+                CategoryAction::ClickAt { x, y } => {
+                    // Calculate which category was clicked based on position
+                    if let Some(idx) = find_category_at_position(x, y, chunks[2], self.categories) {
+                        state.category_list_state.select(Some(idx));
+                        state.toggle_selected_category(self.categories);
+                    }
+                }
             }
         }
 
-        // Split into category selector on left and chart on right
-        let chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Length(25), Constraint::Min(40)])
-            .split(area);
-
-        // Render category selector
-        render_category_selector(chunks[0], buf, state, self.categories);
-
         // Render line chart
-        render_line_chart(chunks[1], buf, state, self.expenses, self.categories);
+        render_line_chart(chunks[0], buf, state, self.expenses, self.categories);
+
+        // Render button bar
+        render_button_bar(chunks[1], buf);
+
+        // Render category selector at bottom
+        render_category_selector(chunks[2], buf, state, self.categories);
     }
 }
 
-fn render_category_selector(area: Rect, buf: &mut Buffer, state: &mut LineChartViewState, categories: &[Category]) {
-    let items: Vec<ListItem> = categories
-        .iter()
-        .map(|cat| {
-            let is_selected = state.selected_categories.contains(&cat.id);
-            let checkbox = if is_selected { "[✓] " } else { "[ ] " };
-            let color = color_from_name(&cat.name);
-            ListItem::new(Line::from(vec![
-                Span::styled(checkbox, Style::default().fg(if is_selected { Color::Green } else { Color::Gray })),
-                Span::styled(&cat.name, Style::default().fg(color)),
-            ]))
-        })
-        .collect();
+fn render_button_bar(area: Rect, buf: &mut Buffer) {
+    let available_width = area.width.saturating_sub(2) as usize;
+    let buttons_width = 18; // "[◀ Prev]" + "  " + "[Next ▶]"
+    let left_padding = available_width.saturating_sub(buttons_width);
 
-    let list = List::new(items)
+    let line = Line::from(vec![
+        Span::raw(" ".repeat(left_padding)),
+        Span::styled("[◀ Prev]", Style::default().fg(Color::Cyan)),
+        Span::raw("  "),
+        Span::styled("[Next ▶]", Style::default().fg(Color::Cyan)),
+    ]);
+
+    let paragraph = Paragraph::new(vec![line])
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Categories (↑↓:nav Space:toggle)")
-        )
-        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+                .border_style(Style::default().fg(Color::DarkGray))
+        );
 
-    StatefulWidget::render(list, area, buf, &mut state.category_list_state);
+    Widget::render(paragraph, area, buf);
+}
+
+fn render_category_selector(area: Rect, buf: &mut Buffer, state: &mut LineChartViewState, categories: &[Category]) {
+    let is_focused = state.focus == LineChartFocus::CategorySelector;
+    let content_width = area.width.saturating_sub(2) as usize; // Account for borders
+
+    // Build lines with category spans, tracking positions for click detection
+    let mut lines: Vec<Line> = vec![];
+    let mut current_line: Vec<Span> = vec![];
+    let mut current_len = 0usize;
+
+    for (i, cat) in categories.iter().enumerate() {
+        let is_selected = state.selected_categories.contains(&cat.id);
+        let is_highlighted = is_focused && state.category_list_state.selected() == Some(i);
+        let checkbox = if is_selected { "✓" } else { " " };
+        let color = color_from_name(&cat.name);
+
+        // Build the category text: [X] Name
+        let cat_text = format!("[{}] {}", checkbox, cat.name);
+        let cat_len = cat_text.chars().count();
+
+        // Separator before item (except first on a line)
+        let separator = if current_len > 0 { "  " } else { "" };
+        let separator_len = separator.len();
+
+        // Check if we need to wrap
+        if current_len > 0 && current_len + separator_len + cat_len > content_width {
+            lines.push(Line::from(std::mem::take(&mut current_line)));
+            current_len = 0;
+        }
+
+        // Add separator if not at start of line
+        if current_len > 0 {
+            current_line.push(Span::raw("  "));
+            current_len += 2;
+        }
+
+        // Style for this category
+        let style = if is_highlighted {
+            Style::default().fg(color).add_modifier(Modifier::REVERSED)
+        } else if is_selected {
+            Style::default().fg(color).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(color)
+        };
+
+        current_line.push(Span::styled(cat_text, style));
+        current_len += cat_len;
+    }
+
+    if !current_line.is_empty() {
+        lines.push(Line::from(current_line));
+    }
+
+    let border_style = if is_focused {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+
+    let title = if is_focused {
+        "Categories (←/→:nav Space:toggle a:All c:Clear)"
+    } else {
+        "Categories (↓:focus)"
+    };
+
+    let paragraph = Paragraph::new(lines)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(border_style)
+                .title(title)
+        );
+
+    Widget::render(paragraph, area, buf);
+}
+
+/// Find which category index was clicked based on the mouse position
+fn find_category_at_position(x: u16, y: u16, area: Rect, categories: &[Category]) -> Option<usize> {
+    // Check if click is within the category area (accounting for border)
+    if x < area.x + 1 || x >= area.x + area.width - 1 {
+        return None;
+    }
+    if y < area.y + 1 || y >= area.y + area.height - 1 {
+        return None;
+    }
+
+    let content_width = area.width.saturating_sub(2) as usize;
+    let content_start_x = (area.x + 1) as usize;
+    let content_start_y = (area.y + 1) as usize;
+
+    let click_x = x as usize;
+    let click_y = y as usize;
+
+    // Relative position within content area
+    let rel_x = click_x - content_start_x;
+    let rel_y = click_y - content_start_y;
+
+    // Simulate the same layout logic as render_category_selector
+    let mut current_x = 0usize;
+    let mut current_y = 0usize;
+
+    for (i, cat) in categories.iter().enumerate() {
+        // Category text: "[X] Name" - use chars().count() to match render logic
+        // Checkbox is either "✓" (1 char) or " " (1 char)
+        let cat_len = 4 + cat.name.chars().count(); // "[" + checkbox + "] " = 4 chars + name chars
+
+        // Separator before item (except first on a line)
+        let separator_len = if current_x > 0 { 2 } else { 0 };
+
+        // Check if we need to wrap
+        if current_x > 0 && current_x + separator_len + cat_len > content_width {
+            current_y += 1;
+            current_x = 0;
+        }
+
+        // Add separator if not at start of line
+        let item_start = if current_x > 0 {
+            current_x + 2
+        } else {
+            current_x
+        };
+        let item_end = item_start + cat_len;
+
+        // Check if click is within this category
+        if rel_y == current_y && rel_x >= item_start && rel_x < item_end {
+            return Some(i);
+        }
+
+        current_x = item_end;
+    }
+
+    None
 }
 
 fn render_line_chart(area: Rect, buf: &mut Buffer, state: &mut LineChartViewState, expenses: &[Expense], categories: &[Category]) {
@@ -328,13 +540,27 @@ fn render_line_chart(area: Rect, buf: &mut Buffer, state: &mut LineChartViewStat
     // Calculate line color from selected categories
     let line_color = calculate_mixed_color(state, categories);
 
+    let is_focused = state.focus == LineChartFocus::Chart;
+    let border_style = if is_focused {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+
+    let title = if is_focused {
+        format!("Cumulative Daily Expenses - {} (←/→: Month)", state.get_month_title())
+    } else {
+        format!("Cumulative Daily Expenses - {} (↑:focus)", state.get_month_title())
+    };
+
     if cumulative_data.is_empty() || max_value == 0.0 {
         let paragraph = Paragraph::new("No expense data for selected categories")
             .alignment(Alignment::Center)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title(format!("Cumulative Daily Expenses - {}", state.get_month_title()))
+                    .border_style(border_style)
+                    .title(title)
             );
         Widget::render(paragraph, area, buf);
         return;
@@ -352,10 +578,12 @@ fn render_line_chart(area: Rect, buf: &mut Buffer, state: &mut LineChartViewStat
         return;
     }
 
+    // Total line at top
+    let total_text = format!("{:.2}", total);
     let mut lines: Vec<Line> = vec![
         Line::from(vec![
             Span::styled("Total: ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-            Span::styled(format!("{:.2}", total), Style::default().fg(line_color).add_modifier(Modifier::BOLD)),
+            Span::styled(total_text, Style::default().fg(line_color).add_modifier(Modifier::BOLD)),
         ]),
         Line::from(""),
     ];
@@ -448,7 +676,8 @@ fn render_line_chart(area: Rect, buf: &mut Buffer, state: &mut LineChartViewStat
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(format!("Cumulative Daily Expenses - {} (←/→: Month)", state.get_month_title()))
+                .border_style(border_style)
+                .title(title)
         )
         .scroll((state.scroll_offset as u16, 0));
 

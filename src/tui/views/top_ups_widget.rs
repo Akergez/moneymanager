@@ -3,9 +3,10 @@
 use crossterm::event::{KeyCode, MouseEvent, MouseEventKind, MouseButton};
 use ratatui::{
     buffer::Buffer,
-    layout::{Constraint, Rect},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Cell, Row, StatefulWidget, Table, TableState},
+    text::{Line, Span},
+    widgets::{Block, Borders, Cell, Paragraph, Row, StatefulWidget, Table, TableState, Widget},
 };
 use crate::models::{TopUp, TopUpCategory};
 use super::state::{SortableState, SortColumn, SortOrder};
@@ -101,8 +102,13 @@ impl ViewState for TopUpsViewState {
             _ => ViewInputResult::NotConsumed,
         }
     }
-    
+
     fn handle_mouse(&mut self, mouse: MouseEvent, area: Rect) -> ViewInputResult {
+        // Button bar is 3 rows at the bottom
+        let button_bar_height = 3u16;
+        let button_bar_start = area.y + area.height.saturating_sub(button_bar_height);
+        let is_in_button_bar = mouse.row >= button_bar_start;
+
         match mouse.kind {
             MouseEventKind::ScrollUp => {
                 self.scroll_up();
@@ -115,12 +121,20 @@ impl ViewState for TopUpsViewState {
             MouseEventKind::Down(MouseButton::Left) => {
                 let x = mouse.column;
                 let y = mouse.row;
-                
+
+                if is_in_button_bar {
+                    // Check for create button (near right edge)
+                    if mouse.column >= area.x + area.width - 12 && mouse.column < area.x + area.width - 1 {
+                        return ViewInputResult::OpenTopUpForm;
+                    }
+                    return ViewInputResult::NotConsumed;
+                }
+
                 // Click on header row to sort
                 if x >= area.x && x < area.x + area.width && y == area.y + 1 {
                     let relative_x = x - area.x - 1;
                     let is_narrow = area.width < 60;
-                    
+
                     if is_narrow {
                         if relative_x < 10 {
                             self.sort.set_column(SortColumn::CategoryId);
@@ -161,36 +175,52 @@ impl<'a> TopUpsView<'a> {
     pub fn new(top_ups: &'a [TopUp], categories: &'a [TopUpCategory]) -> Self {
         Self { top_ups, categories }
     }
-
-    fn get_category_name(&self, category_id: &[u8]) -> String {
-        self.categories
-            .iter()
-            .find(|c| c.id.as_slice() == category_id)
-            .map(|c| c.name.clone())
-            .unwrap_or_else(|| "Unknown".to_string())
-    }
-
-    fn format_uuid_short(id: &[u8]) -> String {
-        id.iter().take(4).map(|b| format!("{:02x}", b)).collect()
-    }
-
-    fn sort_indicator(current: SortColumn, target: SortColumn, order: SortOrder) -> &'static str {
-        if current == target {
-            match order {
-                SortOrder::Ascending => " ▲",
-                SortOrder::Descending => " ▼",
-            }
-        } else {
-            ""
-        }
-    }
 }
 
 impl<'a> StatefulWidget for TopUpsView<'a> {
     type State = TopUpsViewState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        let sorted = state.sort_top_ups(self.top_ups);
+        // Split into table on top and button bar at bottom
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(5),       // Table
+                Constraint::Length(3),    // Button bar
+            ])
+            .split(area);
+
+
+        // Render table
+        render_top_ups_table(chunks[0], buf, state, self.top_ups, self.categories);
+
+        // Render button bar
+        render_button_bar(chunks[1], buf);
+    }
+}
+
+fn render_button_bar(area: Rect, buf: &mut Buffer) {
+    let available_width = area.width.saturating_sub(2) as usize;
+    let button_width = 10; // "[+ Create]"
+    let left_padding = available_width.saturating_sub(button_width);
+
+    let line = Line::from(vec![
+        Span::raw(" ".repeat(left_padding)),
+        Span::styled("[+ Create]", Style::default().fg(Color::Green)),
+    ]);
+
+    let paragraph = Paragraph::new(vec![line])
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::DarkGray))
+        );
+
+    Widget::render(paragraph, area, buf);
+}
+
+fn render_top_ups_table(area: Rect, buf: &mut Buffer, state: &mut TopUpsViewState, top_ups: &[TopUp], categories: &[TopUpCategory]) {
+        let sorted = state.sort_top_ups(top_ups);
         let total: f64 = sorted.iter().map(|t| t.amount).sum();
         let sort = &state.sort;
 
@@ -201,17 +231,17 @@ impl<'a> StatefulWidget for TopUpsView<'a> {
         // Build headers with sort indicators (shorter for narrow screens)
         let headers = if is_narrow {
             vec![
-                format!("Cat{}", Self::sort_indicator(sort.column, SortColumn::CategoryId, sort.order)),
-                format!("Amt{}", Self::sort_indicator(sort.column, SortColumn::Amount, sort.order)),
-                format!("Date{}", Self::sort_indicator(sort.column, SortColumn::Date, sort.order)),
+                format!("Cat{}", sort_indicator(sort.column, SortColumn::CategoryId, sort.order)),
+                format!("Amt{}", sort_indicator(sort.column, SortColumn::Amount, sort.order)),
+                format!("Date{}", sort_indicator(sort.column, SortColumn::Date, sort.order)),
             ]
         } else {
             vec![
-                format!("ID{}", Self::sort_indicator(sort.column, SortColumn::Id, sort.order)),
-                format!("Category{}", Self::sort_indicator(sort.column, SortColumn::CategoryId, sort.order)),
-                format!("Amount{}", Self::sort_indicator(sort.column, SortColumn::Amount, sort.order)),
-                format!("Date{}", Self::sort_indicator(sort.column, SortColumn::Date, sort.order)),
-                format!("Comment{}", Self::sort_indicator(sort.column, SortColumn::Comment, sort.order)),
+                format!("ID{}", sort_indicator(sort.column, SortColumn::Id, sort.order)),
+                format!("Category{}", sort_indicator(sort.column, SortColumn::CategoryId, sort.order)),
+                format!("Amount{}", sort_indicator(sort.column, SortColumn::Amount, sort.order)),
+                format!("Date{}", sort_indicator(sort.column, SortColumn::Date, sort.order)),
+                format!("Comment{}", sort_indicator(sort.column, SortColumn::Comment, sort.order)),
             ]
         };
 
@@ -226,7 +256,7 @@ impl<'a> StatefulWidget for TopUpsView<'a> {
             .map(|t| {
                 let cells = if is_narrow {
                     // Narrow: show only essential columns
-                    let cat_name = self.get_category_name(&t.category_id);
+                    let cat_name = get_category_name(categories, &t.category_id);
                     let short_cat = if cat_name.len() > 10 {
                         format!("{:.9}", cat_name)
                     } else {
@@ -239,8 +269,8 @@ impl<'a> StatefulWidget for TopUpsView<'a> {
                     ]
                 } else {
                     vec![
-                        Cell::from(Self::format_uuid_short(&t.id)),
-                        Cell::from(self.get_category_name(&t.category_id)),
+                        Cell::from(format_uuid_short(&t.id)),
+                        Cell::from(get_category_name(categories, &t.category_id)),
                         Cell::from(format!("{:.2}", t.amount)),
                         Cell::from(t.date.format("%Y-%m-%d").to_string()),
                         Cell::from(t.comment.clone().unwrap_or_default()),
@@ -289,5 +319,27 @@ impl<'a> StatefulWidget for TopUpsView<'a> {
             .row_highlight_style(Style::default().add_modifier(Modifier::BOLD));
 
         StatefulWidget::render(table, area, buf, &mut state.table_state);
+}
+
+fn get_category_name(categories: &[TopUpCategory], category_id: &[u8]) -> String {
+    categories
+        .iter()
+        .find(|c| c.id.as_slice() == category_id)
+        .map(|c| c.name.clone())
+        .unwrap_or_else(|| "Unknown".to_string())
+}
+
+fn format_uuid_short(id: &[u8]) -> String {
+    id.iter().take(4).map(|b| format!("{:02x}", b)).collect()
+}
+
+fn sort_indicator(current: SortColumn, target: SortColumn, order: SortOrder) -> &'static str {
+    if current == target {
+        match order {
+            SortOrder::Ascending => " ▲",
+            SortOrder::Descending => " ▼",
+        }
+    } else {
+        ""
     }
 }

@@ -1,10 +1,11 @@
 //! Category form as a StatefulWidget
 
-use crossterm::event::KeyCode;
+use crossterm::event::{KeyCode, MouseEvent, MouseEventKind, MouseButton};
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, StatefulWidget, Widget, Wrap},
 };
 use diesel::SqliteConnection;
@@ -21,12 +22,21 @@ pub enum FormInputResult {
     Closed,
 }
 
+/// Button action for this form
+#[derive(Debug, Clone, Copy)]
+pub enum FormButtonAction {
+    Confirm,
+    Cancel,
+}
+
 /// State for the category form
 #[derive(Debug, Clone, Default)]
 pub struct CategoryFormState {
     pub name: String,
     pub error_message: Option<String>,
     pub is_active: bool,
+    pub pending_button_action: Option<FormButtonAction>,
+    pub button_area: Option<Rect>,
 }
 
 impl CategoryFormState {
@@ -37,6 +47,7 @@ impl CategoryFormState {
     pub fn open(&mut self) {
         self.clear();
         self.is_active = true;
+        self.button_area = None;
     }
 
     pub fn close(&mut self) {
@@ -47,6 +58,7 @@ impl CategoryFormState {
     pub fn clear(&mut self) {
         self.name.clear();
         self.error_message = None;
+        self.pending_button_action = None;
     }
 
     pub fn push_char(&mut self, c: char) {
@@ -79,6 +91,25 @@ impl CategoryFormState {
 
     /// Handle keyboard input, returns the result of the input handling
     pub fn handle_input(&mut self, key: KeyCode, conn: &mut SqliteConnection) -> FormInputResult {
+        // Process any pending button actions first
+        if let Some(action) = self.pending_button_action.take() {
+            match action {
+                FormButtonAction::Confirm => {
+                    return match self.submit(conn) {
+                        Ok(()) => FormInputResult::SubmittedNeedsReload,
+                        Err(e) => {
+                            self.set_error(e);
+                            FormInputResult::Consumed
+                        }
+                    };
+                }
+                FormButtonAction::Cancel => {
+                    self.close();
+                    return FormInputResult::Closed;
+                }
+            }
+        }
+
         match key {
             KeyCode::Esc => {
                 self.close();
@@ -103,6 +134,39 @@ impl CategoryFormState {
             }
             _ => FormInputResult::Consumed,
         }
+    }
+
+    /// Handle mouse input
+    pub fn handle_mouse(&mut self, mouse: MouseEvent) -> bool {
+        if !self.is_active {
+            return false;
+        }
+
+        if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+            if let Some(button_area) = self.button_area {
+                let x = mouse.column;
+                let y = mouse.row;
+
+                // Check if click is in button row
+                if y >= button_area.y && y < button_area.y + button_area.height {
+                    // Buttons are right-aligned: [Cancel]  [Confirm]
+                    let content_end = button_area.x + button_area.width;
+                    let confirm_start = content_end.saturating_sub(9); // "[Confirm]" = 9 chars
+                    let cancel_end = confirm_start.saturating_sub(2);
+                    let cancel_start = cancel_end.saturating_sub(8); // "[Cancel]" = 8 chars
+
+                    if x >= confirm_start && x < content_end {
+                        self.pending_button_action = Some(FormButtonAction::Confirm);
+                        return true;
+                    }
+                    if x >= cancel_start && x < cancel_end {
+                        self.pending_button_action = Some(FormButtonAction::Cancel);
+                        return true;
+                    }
+                }
+            }
+        }
+        false
     }
 }
 
@@ -145,11 +209,11 @@ impl StatefulWidget for CategoryFormWidget {
 
         // Responsive sizing: use more screen space on narrow displays
         let (percent_x, percent_y) = if area.width < 60 {
-            (95, 60)  // Almost full width for mobile-like resolution
+            (95, 70)  // Almost full width for mobile-like resolution
         } else if area.width < 80 {
-            (80, 50)  // Larger popup for medium screens
+            (80, 55)  // Larger popup for medium screens
         } else {
-            (60, 40)  // Original size for wide screens
+            (60, 45)  // Original size for wide screens
         };
         
         let popup_area = Self::centered_rect(percent_x, percent_y, area);
@@ -169,11 +233,15 @@ impl StatefulWidget for CategoryFormWidget {
             .direction(Direction::Vertical)
             .margin(1)
             .constraints([
-                Constraint::Length(3),
-                Constraint::Length(1),
-                Constraint::Min(1),
+                Constraint::Length(3),  // Name input
+                Constraint::Length(1),  // Instructions
+                Constraint::Min(1),     // Error message
+                Constraint::Length(2),  // Buttons
             ])
             .split(inner);
+
+        // Save button area for mouse handling
+        state.button_area = Some(chunks[3]);
 
         // Name input
         let input = Paragraph::new(state.name.as_str())
@@ -200,6 +268,22 @@ impl StatefulWidget for CategoryFormWidget {
                 .wrap(Wrap { trim: true });
             Widget::render(error_msg, chunks[2], buf);
         }
+
+        // Buttons - right aligned
+        let button_area = chunks[3];
+        let available_width = button_area.width as usize;
+        let buttons_width = 8 + 2 + 9; // "[Cancel]" + "  " + "[Confirm]"
+        let left_padding = available_width.saturating_sub(buttons_width);
+
+        let buttons_line = Line::from(vec![
+            Span::raw(" ".repeat(left_padding)),
+            Span::styled("[Cancel]", Style::default().fg(Color::Red)),
+            Span::raw("  "),
+            Span::styled("[Confirm]", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+        ]);
+
+        let buttons = Paragraph::new(vec![buttons_line]);
+        Widget::render(buttons, button_area, buf);
     }
 }
 

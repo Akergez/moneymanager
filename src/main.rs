@@ -94,7 +94,7 @@ fn run_app<B: ratatui::backend::Backend>(
                 state.handle_input(key.code, key.modifiers, conn);
             }
             Event::Mouse(mouse) => {
-                state.handle_mouse(mouse, frame_area);
+                state.handle_mouse(mouse, frame_area, conn);
             }
             Event::Tick => {}
         }
