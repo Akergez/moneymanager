@@ -1,6 +1,6 @@
 [package]
 name = "money_manager"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 authors = ["Your Name <your.email@example.com>"]
 description = "A terminal-based money management application with expense and income tracking"
