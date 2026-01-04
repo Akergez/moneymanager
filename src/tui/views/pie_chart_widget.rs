@@ -10,20 +10,7 @@ use ratatui::{
 use chrono::Datelike;
 use std::collections::HashMap;
 use crate::models::{Category, Expense};
-
-/// Color palette for chart elements
-const CHART_COLORS: [Color; 10] = [
-    Color::Cyan,
-    Color::Green,
-    Color::Yellow,
-    Color::Blue,
-    Color::Magenta,
-    Color::Red,
-    Color::LightCyan,
-    Color::LightGreen,
-    Color::LightYellow,
-    Color::LightBlue,
-];
+use crate::tui::utils::color_from_name;
 
 /// Display mode for the pie chart
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -235,12 +222,12 @@ impl<'a> StatefulWidget for PieChartView<'a> {
             Line::from(""),
         ];
 
-        for (i, (name, amount)) in data.iter().enumerate() {
+        for (name, amount) in data.iter() {
             let percentage = (amount / total) * 100.0;
             let bar_width = (percentage / 2.0) as usize;
             let bar = "█".repeat(bar_width.min(50));
 
-            let color = CHART_COLORS[i % CHART_COLORS.len()];
+            let color = color_from_name(name);
 
             lines.push(Line::from(vec![
                 Span::styled(format!("{:20}", name), Style::default().fg(color).add_modifier(Modifier::BOLD)),

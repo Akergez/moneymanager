@@ -10,20 +10,7 @@ use ratatui::{
 use chrono::Datelike;
 use std::collections::HashMap;
 use crate::models::Expense;
-
-/// Color palette for chart elements
-const CHART_COLORS: [Color; 10] = [
-    Color::Cyan,
-    Color::Green,
-    Color::Yellow,
-    Color::Blue,
-    Color::Magenta,
-    Color::Red,
-    Color::LightCyan,
-    Color::LightGreen,
-    Color::LightYellow,
-    Color::LightBlue,
-];
+use crate::tui::utils::color_from_name;
 
 /// State for the bar chart view
 #[derive(Debug, Clone, Default)]
@@ -94,17 +81,17 @@ impl<'a> StatefulWidget for BarChartView<'a> {
 
         let bars: Vec<Bar> = monthly_data
             .iter()
-            .enumerate()
-            .map(|(i, (month, amount))| {
+            .map(|(month, amount)| {
                 let label = month.split('-').nth(1).unwrap_or(month);
+                let color = color_from_name(month);
                 Bar::default()
                     .value(*amount as u64)
                     .label(Line::from(label))
-                    .style(Style::default().fg(CHART_COLORS[i % CHART_COLORS.len()]))
+                    .style(Style::default().fg(color))
                     .value_style(
                         Style::default()
                             .fg(Color::Black)
-                            .bg(CHART_COLORS[i % CHART_COLORS.len()])
+                            .bg(color)
                             .add_modifier(Modifier::BOLD)
                     )
             })
