@@ -140,7 +140,7 @@ fn draw_content(frame: &mut Frame, state: &mut AppState, area: Rect) {
         }
         Tab::ExpenseBarChart => {
             frame.render_stateful_widget(
-                BarChartView::new(&state.expenses),
+                BarChartView::new(&state.expenses, &state.categories),
                 area,
                 &mut state.bar_chart_view,
             );
@@ -161,7 +161,7 @@ fn draw_content(frame: &mut Frame, state: &mut AppState, area: Rect) {
         }
         Tab::TopUpBarChart => {
             frame.render_stateful_widget(
-                TopUpBarChartView::new(&state.top_ups),
+                TopUpBarChartView::new(&state.top_ups, &state.top_up_categories),
                 area,
                 &mut state.top_up_bar_chart_view,
             );

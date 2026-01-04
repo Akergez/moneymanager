@@ -6,7 +6,7 @@ use ratatui::{
     widgets::StatefulWidget,
 };
 use crate::models::{TopUpCategory, TopUp};
-use super::generic_chart::{GenericPieChartState, render_pie_chart_button_bar, render_pie_chart_content};
+use super::generic_chart::{GenericPieChartState, ChartType, render_pie_chart_button_bar, render_pie_chart_content};
 
 /// State for the top-up pie chart view (wrapper around generic state)
 #[derive(Debug, Clone, Default)]
@@ -72,6 +72,7 @@ impl<'a> StatefulWidget for TopUpPieChartView<'a> {
             state.0.scroll_offset,
             &title,
             "No top-up data available",
+            ChartType::TopUp,
         );
 
         render_pie_chart_button_bar(chunks[1], buf, state.0.mode);
