@@ -8,7 +8,7 @@ use super::types::Tab;
 use super::views::{
     ExpensesViewState, TopUpsViewState,
     ExpenseCategoriesViewState, TopUpCategoriesViewState,
-    PieChartViewState, BarChartViewState,
+    PieChartViewState, BarChartViewState, LineChartViewState,
     ViewInputResult, ViewState,
 };
 use super::forms::{CategoryFormState, ExpenseFormState, TopUpCategoryFormState, TopUpFormState, FormInputResult};
@@ -31,6 +31,7 @@ pub struct AppState {
     pub top_up_categories_view: TopUpCategoriesViewState,
     pub pie_chart_view: PieChartViewState,
     pub bar_chart_view: BarChartViewState,
+    pub line_chart_view: LineChartViewState,
 
     // Form states
     pub category_form: CategoryFormState,
@@ -59,6 +60,7 @@ impl AppState {
             top_up_categories_view: TopUpCategoriesViewState::new(),
             pie_chart_view: PieChartViewState::new(),
             bar_chart_view: BarChartViewState::new(),
+            line_chart_view: LineChartViewState::new(),
             category_form: CategoryFormState::new(),
             expense_form: ExpenseFormState::new(),
             top_up_category_form: TopUpCategoryFormState::new(),
@@ -95,6 +97,7 @@ impl AppState {
             Tab::TopUps => &mut self.top_ups_view,
             Tab::ExpensePieChart => &mut self.pie_chart_view,
             Tab::ExpenseBarChart => &mut self.bar_chart_view,
+            Tab::ExpenseLineChart => &mut self.line_chart_view,
         }
     }
 
@@ -175,6 +178,7 @@ impl AppState {
             KeyCode::Char('4') => self.current_tab = Tab::TopUps,
             KeyCode::Char('5') => self.current_tab = Tab::ExpensePieChart,
             KeyCode::Char('6') => self.current_tab = Tab::ExpenseBarChart,
+            KeyCode::Char('7') => self.current_tab = Tab::ExpenseLineChart,
 
             // Reload
             KeyCode::Char('r') | KeyCode::Char('R') => { let _ = self.reload_data(conn); }

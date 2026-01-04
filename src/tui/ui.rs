@@ -12,7 +12,7 @@ use super::types::Tab;
 use super::views::{
     ExpensesView, TopUpsView,
     ExpenseCategoriesView, TopUpCategoriesView,
-    PieChartView, BarChartView,
+    PieChartView, BarChartView, LineChartView,
 };
 use super::forms::{CategoryFormWidget, ExpenseFormWidget, TopUpCategoryFormWidget, TopUpFormWidget};
 
@@ -66,6 +66,7 @@ fn draw_tabs(frame: &mut Frame, state: &AppState, area: Rect) {
         "4:TopUps",
         "5:Pie Chart",
         "6:Bar Chart",
+        "7:Line Chart",
     ];
 
     let tabs = Tabs::new(tab_titles)
@@ -77,6 +78,7 @@ fn draw_tabs(frame: &mut Frame, state: &AppState, area: Rect) {
             Tab::TopUps => 3,
             Tab::ExpensePieChart => 4,
             Tab::ExpenseBarChart => 5,
+            Tab::ExpenseLineChart => 6,
         })
         .style(Style::default().fg(Color::White))
         .highlight_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
@@ -128,6 +130,13 @@ fn draw_content(frame: &mut Frame, state: &mut AppState, area: Rect) {
                 &mut state.bar_chart_view,
             );
         }
+        Tab::ExpenseLineChart => {
+            frame.render_stateful_widget(
+                LineChartView::new(&state.expenses, &state.categories),
+                area,
+                &mut state.line_chart_view,
+            );
+        }
     }
 }
 
@@ -156,6 +165,9 @@ fn draw_footer(frame: &mut Frame, state: &AppState, area: Rect) {
             }
             Tab::ExpensePieChart => {
                 "←/→: Month | m: Toggle Mode | ↑/↓: Scroll | r: Refresh | q: Quit"
+            }
+            Tab::ExpenseLineChart => {
+                "↑/↓: Select Cat | Space: Toggle | a: All | c: Clear | ←/→: Month | q: Quit"
             }
             _ => {
                 "Tab: Switch | ↑/↓: Scroll | r: Refresh | q: Quit"
