@@ -1,6 +1,6 @@
 [package]
 name = "money_manager"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 authors = ["Your Name <your.email@example.com>"]
 description = "A terminal-based money management application with expense and income tracking"
@@ -14,8 +14,14 @@ categories = ["command-line-utilities", "finance"]
 [dependencies]
 diesel = { version = "2.3.5", features = ["sqlite", "chrono"] }
 diesel_migrations = "2.3"
+# Required for bundled SQLite on platforms without system libsqlite3 (e.g., Termux/Android)
+libsqlite3-sys = { version = "0.30", features = ["bundled"], optional = false }
 ratatui = "0.29"
 crossterm = "0.28"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.11", features = ["v4", "serde"] }
 clap = { version = "4", features = ["derive"] }
+
+[lints.rust]
+unused_crate_dependencies = "allow"
+
