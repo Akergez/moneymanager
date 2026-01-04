@@ -11,7 +11,7 @@ use super::views::{
     PieChartViewState, BarChartViewState,
     ViewInputResult, ViewState,
 };
-use super::forms::{CategoryFormState, ExpenseFormState, FormInputResult};
+use super::forms::{CategoryFormState, ExpenseFormState, TopUpCategoryFormState, TopUpFormState, FormInputResult};
 
 /// Main application state
 pub struct AppState {
@@ -35,6 +35,8 @@ pub struct AppState {
     // Form states
     pub category_form: CategoryFormState,
     pub expense_form: ExpenseFormState,
+    pub top_up_category_form: TopUpCategoryFormState,
+    pub top_up_form: TopUpFormState,
 }
 
 impl AppState {
@@ -59,6 +61,8 @@ impl AppState {
             bar_chart_view: BarChartViewState::new(),
             category_form: CategoryFormState::new(),
             expense_form: ExpenseFormState::new(),
+            top_up_category_form: TopUpCategoryFormState::new(),
+            top_up_form: TopUpFormState::new(),
         })
     }
 
@@ -113,6 +117,22 @@ impl AppState {
             return;
         }
 
+        if self.top_up_category_form.is_active {
+            let result = self.top_up_category_form.handle_input(key, conn);
+            if result == FormInputResult::SubmittedNeedsReload {
+                let _ = self.reload_data(conn);
+            }
+            return;
+        }
+
+        if self.top_up_form.is_active {
+            let result = self.top_up_form.handle_input(key, conn);
+            if result == FormInputResult::SubmittedNeedsReload {
+                let _ = self.reload_data(conn);
+            }
+            return;
+        }
+
         // Delegate to current view
         let view_result = self.current_view_mut().handle_input(key);
 
@@ -124,6 +144,14 @@ impl AppState {
             }
             ViewInputResult::OpenExpenseForm => {
                 self.expense_form.open(&self.categories);
+                return;
+            }
+            ViewInputResult::OpenTopUpCategoryForm => {
+                self.top_up_category_form.open();
+                return;
+            }
+            ViewInputResult::OpenTopUpForm => {
+                self.top_up_form.open(&self.top_up_categories);
                 return;
             }
             ViewInputResult::Consumed => return,

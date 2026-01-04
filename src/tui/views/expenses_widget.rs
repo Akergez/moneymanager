@@ -21,6 +21,10 @@ pub enum ViewInputResult {
     OpenCategoryForm,
     /// Request to open expense form
     OpenExpenseForm,
+    /// Request to open top up category form
+    OpenTopUpCategoryForm,
+    /// Request to open top up form
+    OpenTopUpForm,
 }
 
 /// Trait for view states that can handle input

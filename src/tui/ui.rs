@@ -14,7 +14,7 @@ use super::views::{
     ExpenseCategoriesView, TopUpCategoriesView,
     PieChartView, BarChartView,
 };
-use super::forms::{CategoryFormWidget, ExpenseFormWidget};
+use super::forms::{CategoryFormWidget, ExpenseFormWidget, TopUpCategoryFormWidget, TopUpFormWidget};
 
 pub fn draw(frame: &mut Frame, state: &mut AppState) {
     let chunks = Layout::default()
@@ -42,6 +42,18 @@ pub fn draw(frame: &mut Frame, state: &mut AppState) {
             ExpenseFormWidget::new(),
             frame.area(),
             &mut state.expense_form,
+        );
+    } else if state.top_up_category_form.is_active {
+        frame.render_stateful_widget(
+            TopUpCategoryFormWidget::new(),
+            frame.area(),
+            &mut state.top_up_category_form,
+        );
+    } else if state.top_up_form.is_active {
+        frame.render_stateful_widget(
+            TopUpFormWidget::new(),
+            frame.area(),
+            &mut state.top_up_form,
         );
     }
 }
@@ -124,6 +136,10 @@ fn draw_footer(frame: &mut Frame, state: &AppState, area: Rect) {
         "Enter: Submit | Esc: Cancel | Type to edit"
     } else if state.expense_form.is_active {
         "Tab: Next Field | Enter: Submit | Esc: Cancel | Type to edit"
+    } else if state.top_up_category_form.is_active {
+        "Enter: Submit | Esc: Cancel | Type to edit"
+    } else if state.top_up_form.is_active {
+        "Tab: Next Field | Enter: Submit | Esc: Cancel | Type to edit"
     } else {
         match state.current_tab {
             Tab::ExpenseCategories => {
@@ -132,8 +148,11 @@ fn draw_footer(frame: &mut Frame, state: &AppState, area: Rect) {
             Tab::Expenses => {
                 "n: New Expense | Tab: Switch | ←/→: Sort | ↑/↓: Scroll | r: Refresh | q: Quit"
             }
+            Tab::TopUpCategories => {
+                "n: New Category | Tab: Switch | ↑/↓: Scroll | r: Refresh | q: Quit"
+            }
             Tab::TopUps => {
-                "Tab: Switch | ←/→: Sort | ↑/↓: Scroll | r: Refresh | q: Quit"
+                "n: New Top Up | Tab: Switch | ←/→: Sort | ↑/↓: Scroll | r: Refresh | q: Quit"
             }
             Tab::ExpensePieChart => {
                 "Tab: Switch | m: Toggle Mode | r: Refresh | q: Quit"

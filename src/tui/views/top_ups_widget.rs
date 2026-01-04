@@ -73,6 +73,7 @@ impl TopUpsViewState {
 impl ViewState for TopUpsViewState {
     fn handle_input(&mut self, key: KeyCode) -> ViewInputResult {
         match key {
+            KeyCode::Char('n') | KeyCode::Char('N') => ViewInputResult::OpenTopUpForm,
             KeyCode::Left => {
                 self.sort.prev_column();
                 ViewInputResult::Consumed

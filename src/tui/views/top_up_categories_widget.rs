@@ -42,6 +42,7 @@ impl TopUpCategoriesViewState {
 impl ViewState for TopUpCategoriesViewState {
     fn handle_input(&mut self, key: KeyCode) -> ViewInputResult {
         match key {
+            KeyCode::Char('n') | KeyCode::Char('N') => ViewInputResult::OpenTopUpCategoryForm,
             KeyCode::Up => {
                 self.scroll_up();
                 ViewInputResult::Consumed
