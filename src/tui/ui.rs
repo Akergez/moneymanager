@@ -155,7 +155,7 @@ fn draw_footer(frame: &mut Frame, state: &AppState, area: Rect) {
                 "n: New Top Up | Tab: Switch | ←/→: Sort | ↑/↓: Scroll | r: Refresh | q: Quit"
             }
             Tab::ExpensePieChart => {
-                "Tab: Switch | m: Toggle Mode | r: Refresh | q: Quit"
+                "←/→: Month | m: Toggle Mode | ↑/↓: Scroll | r: Refresh | q: Quit"
             }
             _ => {
                 "Tab: Switch | ↑/↓: Scroll | r: Refresh | q: Quit"

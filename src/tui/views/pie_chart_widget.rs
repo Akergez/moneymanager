@@ -29,31 +29,38 @@ const CHART_COLORS: [Color; 10] = [
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum PieChartMode {
     #[default]
-    CurrentMonth,
+    SelectedMonth,
     AllTime,
 }
 
 impl PieChartMode {
     pub fn toggle(&self) -> Self {
         match self {
-            PieChartMode::CurrentMonth => PieChartMode::AllTime,
-            PieChartMode::AllTime => PieChartMode::CurrentMonth,
-        }
-    }
-
-    pub fn title(&self) -> &str {
-        match self {
-            PieChartMode::CurrentMonth => "Current Month",
-            PieChartMode::AllTime => "All Time",
+            PieChartMode::SelectedMonth => PieChartMode::AllTime,
+            PieChartMode::AllTime => PieChartMode::SelectedMonth,
         }
     }
 }
 
 /// State for the pie chart view
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct PieChartViewState {
     pub mode: PieChartMode,
     pub scroll_offset: usize,
+    pub selected_year: i32,
+    pub selected_month: u32,
+}
+
+impl Default for PieChartViewState {
+    fn default() -> Self {
+        let now = chrono::Local::now();
+        Self {
+            mode: PieChartMode::default(),
+            scroll_offset: 0,
+            selected_year: now.year(),
+            selected_month: now.month(),
+        }
+    }
 }
 
 impl PieChartViewState {
@@ -71,6 +78,48 @@ impl PieChartViewState {
 
     pub fn scroll_down(&mut self) {
         self.scroll_offset += 1;
+    }
+
+    pub fn previous_month(&mut self) {
+        if self.selected_month == 1 {
+            self.selected_month = 12;
+            self.selected_year -= 1;
+        } else {
+            self.selected_month -= 1;
+        }
+    }
+
+    pub fn next_month(&mut self) {
+        if self.selected_month == 12 {
+            self.selected_month = 1;
+            self.selected_year += 1;
+        } else {
+            self.selected_month += 1;
+        }
+    }
+
+    pub fn get_month_title(&self) -> String {
+        match self.mode {
+            PieChartMode::SelectedMonth => {
+                let month_name = match self.selected_month {
+                    1 => "January",
+                    2 => "February",
+                    3 => "March",
+                    4 => "April",
+                    5 => "May",
+                    6 => "June",
+                    7 => "July",
+                    8 => "August",
+                    9 => "September",
+                    10 => "October",
+                    11 => "November",
+                    12 => "December",
+                    _ => "Unknown",
+                };
+                format!("{} {}", month_name, self.selected_year)
+            }
+            PieChartMode::AllTime => "All Time".to_string(),
+        }
     }
 
 
@@ -104,13 +153,10 @@ impl PieChartViewState {
 
     fn filter_expenses<'a>(&self, expenses: &'a [Expense]) -> Vec<&'a Expense> {
         match self.mode {
-            PieChartMode::CurrentMonth => {
-                let now = chrono::Local::now();
-                let (current_month, current_year) = (now.month(), now.year());
-
+            PieChartMode::SelectedMonth => {
                 expenses
                     .iter()
-                    .filter(|e| e.date.month() == current_month && e.date.year() == current_year)
+                    .filter(|e| e.date.month() == self.selected_month && e.date.year() == self.selected_year)
                     .collect()
             }
             PieChartMode::AllTime => expenses.iter().collect(),
@@ -134,6 +180,14 @@ impl super::expenses_widget::ViewState for PieChartViewState {
             }
             KeyCode::Down => {
                 self.scroll_down();
+                ViewInputResult::Consumed
+            }
+            KeyCode::Left => {
+                self.previous_month();
+                ViewInputResult::Consumed
+            }
+            KeyCode::Right => {
+                self.next_month();
                 ViewInputResult::Consumed
             }
             _ => ViewInputResult::NotConsumed,
@@ -166,7 +220,7 @@ impl<'a> StatefulWidget for PieChartView<'a> {
                 .block(
                     Block::default()
                         .borders(Borders::ALL)
-                        .title(format!("Expense by Category - {} (Total: {:.2})", state.mode.title(), total))
+                        .title(format!("Expense by Category - {} (Total: {:.2})", state.get_month_title(), total))
                 );
             Widget::render(paragraph, area, buf);
             return;
@@ -205,7 +259,7 @@ impl<'a> StatefulWidget for PieChartView<'a> {
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title(format!("Expense by Category - {} (Total: {:.2})", state.mode.title(), total))
+                    .title(format!("Expense by Category - {} (Total: {:.2})", state.get_month_title(), total))
             )
             .scroll((state.scroll_offset as u16, 0));
 
