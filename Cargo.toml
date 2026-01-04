@@ -1,12 +1,12 @@
 [package]
 name = "money_manager"
 version = "0.1.0"
-edition = "2024"
+edition = "2026"
 authors = ["Your Name <your.email@example.com>"]
 description = "A terminal-based money management application with expense and income tracking"
 license = "GPL-3.0"
-repository = "https://gitlab.com/your-username/money_manager"
-homepage = "https://gitlab.com/your-username/money_manager"
+repository = "https://gitlab.com/ragusseven/money-manager"
+homepage = "https://gitlab.com/ragusseven/money-manager"
 readme = "README.md"
 keywords = ["finance", "tui", "terminal", "budget", "expenses"]
 categories = ["command-line-utilities", "finance"]
