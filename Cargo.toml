@@ -13,7 +13,9 @@ categories = ["command-line-utilities", "finance"]
 
 [dependencies]
 diesel = { version = "2.3.5", features = ["sqlite", "chrono"] }
+diesel_migrations = "2.3"
 ratatui = "0.29"
 crossterm = "0.28"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.11", features = ["v4", "serde"] }
+clap = { version = "4", features = ["derive"] }

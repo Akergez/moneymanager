@@ -41,6 +41,27 @@ Available platforms:
 money_manager
 ```
 
+### Command Line Options
+
+| Option | Description |
+|--------|-------------|
+| `-d, --database <PATH>` | Path to the SQLite database file (default: `money_manager.db` in current directory) |
+| `-h, --help` | Print help information |
+| `-V, --version` | Print version information |
+
+**Examples:**
+
+```bash
+# Use default database in current directory
+money_manager
+
+# Use a specific database file
+money_manager --database ~/finances/my_budget.db
+
+# Short form
+money_manager -d /path/to/custom.db
+```
+
 ### Keyboard Shortcuts
 
 | Key | Action |
@@ -69,13 +90,9 @@ money_manager
 
 ## Database
 
-The application uses SQLite for data persistence. On first run, it will create a `money_manager.db` file in the current directory.
+The application uses SQLite for data persistence. By default, it looks for `money_manager.db` in the current working directory. If the database file doesn't exist, it will be created automatically with all necessary tables.
 
-### Running Migrations
-
-```bash
-diesel migration run
-```
+You can specify a custom database location using the `--database` option.
 
 ## Development
 
