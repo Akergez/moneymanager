@@ -1,0 +1,212 @@
+stages:
+  - test
+  - build
+  - release
+  - publish
+
+variables:
+  CARGO_HOME: ${CI_PROJECT_DIR}/.cargo
+  RUSTFLAGS: "-D warnings"
+
+# Cache cargo dependencies
+.cargo-cache: &cargo-cache
+  cache:
+    key: ${CI_JOB_NAME}
+    paths:
+      - .cargo/registry
+      - .cargo/git
+      - target/
+
+# Test stage
+test:
+  stage: test
+  image: rust:latest
+  <<: *cargo-cache
+  before_script:
+    - apt-get update && apt-get install -y libsqlite3-dev
+  script:
+    - cargo fmt --check
+    - cargo clippy -- -D warnings
+    - cargo test --verbose
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Build for Linux x86_64 (AMD64)
+build-linux-amd64:
+  stage: build
+  image: rust:latest
+  <<: *cargo-cache
+  before_script:
+    - apt-get update && apt-get install -y libsqlite3-dev
+  script:
+    - cargo build --release --target x86_64-unknown-linux-gnu
+    - mkdir -p artifacts
+    - cp target/x86_64-unknown-linux-gnu/release/money_manager artifacts/money_manager-linux-amd64
+  artifacts:
+    paths:
+      - artifacts/money_manager-linux-amd64
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_TAG
+
+# Build for Linux ARM64 (aarch64)
+build-linux-arm64:
+  stage: build
+  image: rust:latest
+  <<: *cargo-cache
+  before_script:
+    - apt-get update && apt-get install -y gcc-aarch64-linux-gnu libsqlite3-dev
+    - rustup target add aarch64-unknown-linux-gnu
+    - |
+      mkdir -p .cargo
+      cat > .cargo/config.toml << EOF
+      [target.aarch64-unknown-linux-gnu]
+      linker = "aarch64-linux-gnu-gcc"
+      EOF
+  script:
+    - cargo build --release --target aarch64-unknown-linux-gnu
+    - mkdir -p artifacts
+    - cp target/aarch64-unknown-linux-gnu/release/money_manager artifacts/money_manager-linux-arm64
+  artifacts:
+    paths:
+      - artifacts/money_manager-linux-arm64
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_TAG
+
+# Build for macOS x86_64 (AMD64) - using cross-compilation
+build-macos-amd64:
+  stage: build
+  image: rust:latest
+  <<: *cargo-cache
+  before_script:
+    - apt-get update && apt-get install -y clang libsqlite3-dev
+    - rustup target add x86_64-apple-darwin
+    # Note: macOS cross-compilation requires additional setup (osxcross)
+    # This job may need adjustment based on your GitLab runner configuration
+  script:
+    - echo "macOS AMD64 cross-compilation - requires osxcross or macOS runner"
+    - echo "Skipping for now - use a macOS runner for native builds"
+  artifacts:
+    paths:
+      - artifacts/money_manager-macos-amd64
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_TAG
+  allow_failure: true
+
+# Build for macOS ARM64 (Apple Silicon) - using cross-compilation
+build-macos-arm64:
+  stage: build
+  image: rust:latest
+  <<: *cargo-cache
+  before_script:
+    - apt-get update && apt-get install -y clang libsqlite3-dev
+    - rustup target add aarch64-apple-darwin
+    # Note: macOS cross-compilation requires additional setup (osxcross)
+    # This job may need adjustment based on your GitLab runner configuration
+  script:
+    - echo "macOS ARM64 cross-compilation - requires osxcross or macOS runner"
+    - echo "Skipping for now - use a macOS runner for native builds"
+  artifacts:
+    paths:
+      - artifacts/money_manager-macos-arm64
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_TAG
+  allow_failure: true
+
+# Build for Windows x86_64 (AMD64)
+build-windows-amd64:
+  stage: build
+  image: rust:latest
+  <<: *cargo-cache
+  before_script:
+    - apt-get update && apt-get install -y gcc-mingw-w64-x86-64 libsqlite3-dev
+    - rustup target add x86_64-pc-windows-gnu
+  script:
+    - cargo build --release --target x86_64-pc-windows-gnu
+    - mkdir -p artifacts
+    - cp target/x86_64-pc-windows-gnu/release/money_manager.exe artifacts/money_manager-windows-amd64.exe
+  artifacts:
+    paths:
+      - artifacts/money_manager-windows-amd64.exe
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_TAG
+  allow_failure: true
+
+# Create GitLab Release with binaries
+release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  needs:
+    - job: build-linux-amd64
+      artifacts: true
+    - job: build-linux-arm64
+      artifacts: true
+    - job: build-windows-amd64
+      artifacts: true
+      optional: true
+    - job: build-macos-amd64
+      artifacts: true
+      optional: true
+    - job: build-macos-arm64
+      artifacts: true
+      optional: true
+  script:
+    - echo "Creating release for ${CI_COMMIT_TAG}"
+  release:
+    tag_name: ${CI_COMMIT_TAG}
+    name: "Release ${CI_COMMIT_TAG}"
+    description: |
+      ## Money Manager ${CI_COMMIT_TAG}
+      
+      ### Downloads
+      
+      | Platform | Architecture | Download |
+      |----------|--------------|----------|
+      | Linux    | AMD64 (x86_64) | [money_manager-linux-amd64](${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/artifacts/money_manager-linux-amd64?job=build-linux-amd64) |
+      | Linux    | ARM64 (aarch64) | [money_manager-linux-arm64](${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/artifacts/money_manager-linux-arm64?job=build-linux-arm64) |
+      | Windows  | AMD64 (x86_64) | [money_manager-windows-amd64.exe](${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/artifacts/money_manager-windows-amd64.exe?job=build-windows-amd64) |
+      
+      ### Installation from crates.io
+      
+      ```bash
+      cargo install money_manager
+      ```
+    assets:
+      links:
+        - name: "money_manager-linux-amd64"
+          url: "${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/artifacts/money_manager-linux-amd64?job=build-linux-amd64"
+          filepath: "/binaries/money_manager-linux-amd64"
+          link_type: package
+        - name: "money_manager-linux-arm64"
+          url: "${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/artifacts/money_manager-linux-arm64?job=build-linux-arm64"
+          filepath: "/binaries/money_manager-linux-arm64"
+          link_type: package
+        - name: "money_manager-windows-amd64.exe"
+          url: "${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/artifacts/money_manager-windows-amd64.exe?job=build-windows-amd64"
+          filepath: "/binaries/money_manager-windows-amd64.exe"
+          link_type: package
+  rules:
+    - if: $CI_COMMIT_TAG
+
+# Publish to crates.io
+publish-crates-io:
+  stage: publish
+  image: rust:latest
+  <<: *cargo-cache
+  before_script:
+    - apt-get update && apt-get install -y libsqlite3-dev
+  script:
+    - echo "Publishing to crates.io..."
+    - cargo publish --token ${CRATES_IO_TOKEN}
+  rules:
+    - if: $CI_COMMIT_TAG
+  when: manual  # Require manual trigger to publish
+  needs:
+    - job: release
+
