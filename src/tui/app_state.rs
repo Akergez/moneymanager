@@ -10,6 +10,7 @@ use super::views::{
     ExpensesViewState, TopUpsViewState,
     ExpenseCategoriesViewState, TopUpCategoriesViewState,
     PieChartViewState, BarChartViewState, LineChartViewState,
+    TopUpPieChartViewState, TopUpBarChartViewState,
     ViewInputResult, ViewState,
 };
 use super::forms::{CategoryFormState, ExpenseFormState, TopUpCategoryFormState, TopUpFormState, FormInputResult};
@@ -33,6 +34,8 @@ pub struct AppState {
     pub pie_chart_view: PieChartViewState,
     pub bar_chart_view: BarChartViewState,
     pub line_chart_view: LineChartViewState,
+    pub top_up_pie_chart_view: TopUpPieChartViewState,
+    pub top_up_bar_chart_view: TopUpBarChartViewState,
 
     // Form states
     pub category_form: CategoryFormState,
@@ -62,6 +65,8 @@ impl AppState {
             pie_chart_view: PieChartViewState::new(),
             bar_chart_view: BarChartViewState::new(),
             line_chart_view: LineChartViewState::new(),
+            top_up_pie_chart_view: TopUpPieChartViewState::new(),
+            top_up_bar_chart_view: TopUpBarChartViewState::new(),
             category_form: CategoryFormState::new(),
             expense_form: ExpenseFormState::new(),
             top_up_category_form: TopUpCategoryFormState::new(),
@@ -99,6 +104,8 @@ impl AppState {
             Tab::ExpensePieChart => &mut self.pie_chart_view,
             Tab::ExpenseBarChart => &mut self.bar_chart_view,
             Tab::ExpenseLineChart => &mut self.line_chart_view,
+            Tab::TopUpPieChart => &mut self.top_up_pie_chart_view,
+            Tab::TopUpBarChart => &mut self.top_up_bar_chart_view,
         }
     }
 
@@ -180,6 +187,8 @@ impl AppState {
             KeyCode::Char('5') => self.current_tab = Tab::ExpensePieChart,
             KeyCode::Char('6') => self.current_tab = Tab::ExpenseBarChart,
             KeyCode::Char('7') => self.current_tab = Tab::ExpenseLineChart,
+            KeyCode::Char('8') => self.current_tab = Tab::TopUpPieChart,
+            KeyCode::Char('9') => self.current_tab = Tab::TopUpBarChart,
 
             // Reload
             KeyCode::Char('r') | KeyCode::Char('R') => { let _ = self.reload_data(conn); }
@@ -243,14 +252,14 @@ impl AppState {
 
                 // Determine tab widths based on screen width (matching ui.rs logic)
                 let tab_widths: Vec<u16> = if area.width < 60 {
-                    // Ultra-compact: "1:EC", "2:Ex", "3:TC", "4:TU", "5:Pie", "6:Bar", "7:Ln"
-                    vec![4, 4, 4, 4, 5, 5, 4]
+                    // Ultra-compact: "1:EC", "2:Ex", "3:TC", "4:TU", "5:Pie", "6:Bar", "7:Ln", "8:TPie", "9:TBar"
+                    vec![4, 4, 4, 4, 5, 5, 4, 6, 6]
                 } else if area.width < 80 {
-                    // Compact: "1:Cat", "2:Exp", "3:Cat", "4:Top", "5:Pie", "6:Bar", "7:Line"
-                    vec![5, 5, 5, 5, 5, 5, 6]
+                    // Compact: "1:Cat", "2:Exp", "3:Cat", "4:Top", "5:Pie", "6:Bar", "7:Line", "8:TPie", "9:TBar"
+                    vec![5, 5, 5, 5, 5, 5, 6, 6, 6]
                 } else {
-                    // Full: "1:Exp.Cat", "2:Expenses", "3:TopUp.Cat", "4:TopUps", "5:Pie Chart", "6:Bar Chart", "7:Line Chart"
-                    vec![9, 10, 11, 8, 11, 11, 12]
+                    // Full: "1:Exp.Cat", "2:Expenses", "3:TopUp.Cat", "4:TopUps", "5:Pie Chart", "6:Bar Chart", "7:Line Chart", "8:TopUp Pie", "9:TopUp Bar"
+                    vec![9, 10, 11, 8, 11, 11, 12, 11, 11]
                 };
 
                 // Find which tab was clicked
@@ -270,6 +279,8 @@ impl AppState {
                             4 => Tab::ExpensePieChart,
                             5 => Tab::ExpenseBarChart,
                             6 => Tab::ExpenseLineChart,
+                            7 => Tab::TopUpPieChart,
+                            8 => Tab::TopUpBarChart,
                             _ => return,
                         };
                         return;
@@ -297,6 +308,8 @@ impl AppState {
             Tab::ExpensePieChart => self.pie_chart_view.handle_mouse(mouse, content_area),
             Tab::ExpenseBarChart => self.bar_chart_view.handle_mouse(mouse, content_area),
             Tab::ExpenseLineChart => self.line_chart_view.handle_mouse(mouse, content_area),
+            Tab::TopUpPieChart => self.top_up_pie_chart_view.handle_mouse(mouse, content_area),
+            Tab::TopUpBarChart => self.top_up_bar_chart_view.handle_mouse(mouse, content_area),
         };
 
         // Handle view results - open forms if requested

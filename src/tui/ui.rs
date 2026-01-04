@@ -13,6 +13,7 @@ use super::views::{
     ExpensesView, TopUpsView,
     ExpenseCategoriesView, TopUpCategoriesView,
     PieChartView, BarChartView, LineChartView,
+    TopUpPieChartView, TopUpBarChartView,
 };
 use super::forms::{CategoryFormWidget, ExpenseFormWidget, TopUpCategoryFormWidget, TopUpFormWidget};
 
@@ -62,10 +63,10 @@ fn draw_tabs(frame: &mut Frame, state: &AppState, area: Rect) {
     // Use compact tab titles for narrow screens (mobile-like resolution)
     let tab_titles: Vec<&str> = if area.width < 60 {
         // Ultra-compact for very narrow screens
-        vec!["1:EC", "2:Ex", "3:TC", "4:TU", "5:Pie", "6:Bar", "7:Ln"]
+        vec!["1:EC", "2:Ex", "3:TC", "4:TU", "5:Pie", "6:Bar", "7:Ln", "8:TPie", "9:TBar"]
     } else if area.width < 80 {
         // Compact for medium screens
-        vec!["1:Cat", "2:Exp", "3:Cat", "4:Top", "5:Pie", "6:Bar", "7:Line"]
+        vec!["1:Cat", "2:Exp", "3:Cat", "4:Top", "5:Pie", "6:Bar", "7:Line", "8:TPie", "9:TBar"]
     } else {
         // Full names for wider screens
         vec![
@@ -76,6 +77,8 @@ fn draw_tabs(frame: &mut Frame, state: &AppState, area: Rect) {
             "5:Pie Chart",
             "6:Bar Chart",
             "7:Line Chart",
+            "8:TopUp Pie",
+            "9:TopUp Bar",
         ]
     };
 
@@ -89,6 +92,8 @@ fn draw_tabs(frame: &mut Frame, state: &AppState, area: Rect) {
             Tab::ExpensePieChart => 4,
             Tab::ExpenseBarChart => 5,
             Tab::ExpenseLineChart => 6,
+            Tab::TopUpPieChart => 7,
+            Tab::TopUpBarChart => 8,
         })
         .style(Style::default().fg(Color::White))
         .highlight_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
@@ -145,6 +150,20 @@ fn draw_content(frame: &mut Frame, state: &mut AppState, area: Rect) {
                 LineChartView::new(&state.expenses, &state.categories),
                 area,
                 &mut state.line_chart_view,
+            );
+        }
+        Tab::TopUpPieChart => {
+            frame.render_stateful_widget(
+                TopUpPieChartView::new(&state.top_ups, &state.top_up_categories),
+                area,
+                &mut state.top_up_pie_chart_view,
+            );
+        }
+        Tab::TopUpBarChart => {
+            frame.render_stateful_widget(
+                TopUpBarChartView::new(&state.top_ups),
+                area,
+                &mut state.top_up_bar_chart_view,
             );
         }
     }
@@ -232,6 +251,24 @@ fn draw_footer(frame: &mut Frame, state: &AppState, area: Rect) {
                     "↑/↓:Focus | ←/→:Nav | Space:Tog | a:All | c:Clear | q:Quit"
                 } else {
                     "↑/↓: Focus | ←/→: Month/Cat | Space: Toggle | a: All | c: Clear | q: Quit"
+                }
+            }
+            Tab::TopUpPieChart => {
+                if is_narrow {
+                    "←/→:Mo | m:Mode | ↑/↓:Nav | q:Quit"
+                } else if is_medium {
+                    "←/→:Month | m:Mode | ↑/↓:Scroll | r:Refresh | q:Quit"
+                } else {
+                    "←/→: Month | m: Toggle Mode | ↑/↓: Scroll | r: Refresh | q: Quit"
+                }
+            }
+            Tab::TopUpBarChart => {
+                if is_narrow {
+                    "Tab:Switch | ↑/↓:Nav | q:Quit"
+                } else if is_medium {
+                    "Tab:Switch | ↑/↓:Scroll | r:Refresh | q:Quit"
+                } else {
+                    "Tab: Switch | ↑/↓: Scroll | r: Refresh | q: Quit"
                 }
             }
             _ => {
