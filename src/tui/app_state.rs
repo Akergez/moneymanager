@@ -185,10 +185,10 @@ impl AppState {
             KeyCode::Char('3') => self.current_tab = Tab::TopUpCategories,
             KeyCode::Char('4') => self.current_tab = Tab::TopUps,
             KeyCode::Char('5') => self.current_tab = Tab::ExpensePieChart,
-            KeyCode::Char('6') => self.current_tab = Tab::ExpenseBarChart,
-            KeyCode::Char('7') => self.current_tab = Tab::ExpenseLineChart,
-            KeyCode::Char('8') => self.current_tab = Tab::TopUpPieChart,
-            KeyCode::Char('9') => self.current_tab = Tab::TopUpBarChart,
+            KeyCode::Char('6') => self.current_tab = Tab::TopUpPieChart,
+            KeyCode::Char('7') => self.current_tab = Tab::ExpenseBarChart,
+            KeyCode::Char('8') => self.current_tab = Tab::TopUpBarChart,
+            KeyCode::Char('9') => self.current_tab = Tab::ExpenseLineChart,
 
             // Reload
             KeyCode::Char('r') | KeyCode::Char('R') => { let _ = self.reload_data(conn); }
@@ -277,10 +277,10 @@ impl AppState {
                             2 => Tab::TopUpCategories,
                             3 => Tab::TopUps,
                             4 => Tab::ExpensePieChart,
-                            5 => Tab::ExpenseBarChart,
-                            6 => Tab::ExpenseLineChart,
-                            7 => Tab::TopUpPieChart,
-                            8 => Tab::TopUpBarChart,
+                            5 => Tab::TopUpPieChart,
+                            6 => Tab::ExpenseBarChart,
+                            7 => Tab::TopUpBarChart,
+                            8 => Tab::ExpenseLineChart,
                             _ => return,
                         };
                         return;

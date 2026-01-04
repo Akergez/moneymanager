@@ -8,10 +8,10 @@ pub enum Tab {
     TopUpCategories,
     TopUps,
     ExpensePieChart,
+    TopUpPieChart,      // Pie charts together
     ExpenseBarChart,
+    TopUpBarChart,      // Bar charts together
     ExpenseLineChart,
-    TopUpPieChart,
-    TopUpBarChart,
 }
 
 impl Tab {
@@ -21,25 +21,25 @@ impl Tab {
             Tab::Expenses => Tab::TopUpCategories,
             Tab::TopUpCategories => Tab::TopUps,
             Tab::TopUps => Tab::ExpensePieChart,
-            Tab::ExpensePieChart => Tab::ExpenseBarChart,
-            Tab::ExpenseBarChart => Tab::ExpenseLineChart,
-            Tab::ExpenseLineChart => Tab::TopUpPieChart,
-            Tab::TopUpPieChart => Tab::TopUpBarChart,
-            Tab::TopUpBarChart => Tab::ExpenseCategories,
+            Tab::ExpensePieChart => Tab::TopUpPieChart,
+            Tab::TopUpPieChart => Tab::ExpenseBarChart,
+            Tab::ExpenseBarChart => Tab::TopUpBarChart,
+            Tab::TopUpBarChart => Tab::ExpenseLineChart,
+            Tab::ExpenseLineChart => Tab::ExpenseCategories,
         }
     }
 
     pub fn previous(&self) -> Self {
         match self {
-            Tab::ExpenseCategories => Tab::TopUpBarChart,
+            Tab::ExpenseCategories => Tab::ExpenseLineChart,
             Tab::Expenses => Tab::ExpenseCategories,
             Tab::TopUpCategories => Tab::Expenses,
             Tab::TopUps => Tab::TopUpCategories,
             Tab::ExpensePieChart => Tab::TopUps,
-            Tab::ExpenseBarChart => Tab::ExpensePieChart,
-            Tab::ExpenseLineChart => Tab::ExpenseBarChart,
-            Tab::TopUpPieChart => Tab::ExpenseLineChart,
-            Tab::TopUpBarChart => Tab::TopUpPieChart,
+            Tab::TopUpPieChart => Tab::ExpensePieChart,
+            Tab::ExpenseBarChart => Tab::TopUpPieChart,
+            Tab::TopUpBarChart => Tab::ExpenseBarChart,
+            Tab::ExpenseLineChart => Tab::TopUpBarChart,
         }
     }
 }

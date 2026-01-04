@@ -63,10 +63,10 @@ fn draw_tabs(frame: &mut Frame, state: &AppState, area: Rect) {
     // Use compact tab titles for narrow screens (mobile-like resolution)
     let tab_titles: Vec<&str> = if area.width < 60 {
         // Ultra-compact for very narrow screens
-        vec!["1:EC", "2:Ex", "3:TC", "4:TU", "5:Pie", "6:Bar", "7:Ln", "8:TPie", "9:TBar"]
+        vec!["1:EC", "2:Ex", "3:TC", "4:TU", "5:Pie", "6:TPie", "7:Bar", "8:TBar", "9:Ln"]
     } else if area.width < 80 {
         // Compact for medium screens
-        vec!["1:Cat", "2:Exp", "3:Cat", "4:Top", "5:Pie", "6:Bar", "7:Line", "8:TPie", "9:TBar"]
+        vec!["1:Cat", "2:Exp", "3:Cat", "4:Top", "5:Pie", "6:TPie", "7:Bar", "8:TBar", "9:Line"]
     } else {
         // Full names for wider screens
         vec![
@@ -75,10 +75,10 @@ fn draw_tabs(frame: &mut Frame, state: &AppState, area: Rect) {
             "3:TopUp.Cat",
             "4:TopUps",
             "5:Pie Chart",
-            "6:Bar Chart",
-            "7:Line Chart",
-            "8:TopUp Pie",
-            "9:TopUp Bar",
+            "6:TopUp Pie",
+            "7:Bar Chart",
+            "8:TopUp Bar",
+            "9:Line Chart",
         ]
     };
 
@@ -90,10 +90,10 @@ fn draw_tabs(frame: &mut Frame, state: &AppState, area: Rect) {
             Tab::TopUpCategories => 2,
             Tab::TopUps => 3,
             Tab::ExpensePieChart => 4,
-            Tab::ExpenseBarChart => 5,
-            Tab::ExpenseLineChart => 6,
-            Tab::TopUpPieChart => 7,
-            Tab::TopUpBarChart => 8,
+            Tab::TopUpPieChart => 5,
+            Tab::ExpenseBarChart => 6,
+            Tab::TopUpBarChart => 7,
+            Tab::ExpenseLineChart => 8,
         })
         .style(Style::default().fg(Color::White))
         .highlight_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));

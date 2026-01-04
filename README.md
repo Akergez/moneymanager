@@ -68,11 +68,11 @@ money_manager -d /path/to/custom.db
 
 | Key | Action |
 |-----|--------|
-| `1-7` | Switch between tabs |
+| `1-9` | Switch between tabs |
 | `Tab` | Switch to next tab |
 | `n` | Create new entry |
 | `↑/↓` | Navigate list |
-| `←/→` | Sort columns / Navigate months |
+| `←/→` | Sort columns / Navigate months / Scroll charts |
 | `r` | Refresh data |
 | `q` | Quit |
 
@@ -91,9 +91,11 @@ money_manager -d /path/to/custom.db
 2. **Expenses**: View and add expenses
 3. **Top-Up Categories**: Manage income categories
 4. **Top-Ups**: View and add income
-5. **Pie Chart**: Expense breakdown by category
-6. **Bar Chart**: Monthly expense overview
-7. **Line Chart**: Expense trends over time
+5. **Expense Pie Chart**: Expense breakdown by category
+6. **Top-Up Pie Chart**: Income breakdown by category
+7. **Expense Bar Chart**: Monthly expense overview
+8. **Top-Up Bar Chart**: Monthly income overview
+9. **Line Chart**: Expense trends over time
 
 ## Responsive Design
 
