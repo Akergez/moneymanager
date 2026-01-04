@@ -5,6 +5,7 @@ pub mod expenses_widget;
 pub mod top_ups_widget;
 pub mod expense_categories_widget;
 pub mod top_up_categories_widget;
+pub mod generic_chart;
 pub mod pie_chart_widget;
 pub mod bar_chart_widget;
 pub mod line_chart_widget;
