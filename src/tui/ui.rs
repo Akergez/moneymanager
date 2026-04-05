@@ -3,7 +3,8 @@
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Paragraph, Tabs},
+    text::{Line, Span},
+    widgets::{Block, Borders, Paragraph},
     Frame,
 };
 
@@ -17,15 +18,58 @@ use super::views::{
 };
 use super::forms::{CategoryFormWidget, ExpenseFormWidget, TopUpCategoryFormWidget, TopUpFormWidget};
 
+/// Tab titles based on available terminal width.
+pub fn tab_titles_for_width(area_width: u16) -> Vec<&'static str> {
+    if area_width < 60 {
+        vec!["1:EC", "2:Ex", "3:TC", "4:TU", "5:Pie", "6:TPie", "7:Bar", "8:TBar", "9:Ln"]
+    } else if area_width < 80 {
+        vec!["1:Cat", "2:Exp", "3:Cat", "4:Top", "5:Pie", "6:TPie", "7:Bar", "8:TBar", "9:Line"]
+    } else {
+        vec!["1:Exp.Cat", "2:Expenses", "3:TopUp.Cat", "4:TopUps",
+             "5:Pie Chart", "6:TopUp Pie", "7:Bar Chart", "8:TopUp Bar", "9:Line Chart"]
+    }
+}
+
+/// Compute which tab indices go on each row given the content width.
+/// Tabs on the same row are separated by " | " (3 chars).
+pub fn compute_tab_rows(titles: &[&str], content_width: usize) -> Vec<Vec<usize>> {
+    let mut rows: Vec<Vec<usize>> = vec![vec![]];
+    let mut current_width = 0usize;
+    for (i, title) in titles.iter().enumerate() {
+        let w = title.len();
+        let sep = if current_width == 0 { 0 } else { 3 };
+        if current_width > 0 && current_width + sep + w > content_width {
+            rows.push(vec![]);
+            current_width = w;
+        } else {
+            current_width += sep + w;
+        }
+        rows.last_mut().unwrap().push(i);
+    }
+    rows
+}
+
+/// Total widget height (including borders) needed for the tab bar.
+pub fn tabs_needed_height(area_width: u16) -> u16 {
+    let titles = tab_titles_for_width(area_width);
+    let content_width = area_width.saturating_sub(2) as usize;
+    let rows = compute_tab_rows(&titles, content_width);
+    (rows.len() as u16 + 2).max(3)
+}
+
 pub fn draw(frame: &mut Frame, state: &mut AppState) {
+    let area = frame.area();
+    let tab_height = tabs_needed_height(area.width);
+    state.tab_bar_height = tab_height;
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),
             Constraint::Min(0),
-            Constraint::Length(3),
+            Constraint::Length(tab_height),
         ])
-        .split(frame.area());
+        .split(area);
 
     draw_footer(frame, state, chunks[0]);
     draw_content(frame, state, chunks[1]);
@@ -60,45 +104,41 @@ pub fn draw(frame: &mut Frame, state: &mut AppState) {
 }
 
 fn draw_tabs(frame: &mut Frame, state: &AppState, area: Rect) {
-    // Use compact tab titles for narrow screens (mobile-like resolution)
-    let tab_titles: Vec<&str> = if area.width < 60 {
-        // Ultra-compact for very narrow screens
-        vec!["1:EC", "2:Ex", "3:TC", "4:TU", "5:Pie", "6:TPie", "7:Bar", "8:TBar", "9:Ln"]
-    } else if area.width < 80 {
-        // Compact for medium screens
-        vec!["1:Cat", "2:Exp", "3:Cat", "4:Top", "5:Pie", "6:TPie", "7:Bar", "8:TBar", "9:Line"]
-    } else {
-        // Full names for wider screens
-        vec![
-            "1:Exp.Cat",
-            "2:Expenses",
-            "3:TopUp.Cat",
-            "4:TopUps",
-            "5:Pie Chart",
-            "6:TopUp Pie",
-            "7:Bar Chart",
-            "8:TopUp Bar",
-            "9:Line Chart",
-        ]
+    let titles = tab_titles_for_width(area.width);
+    let content_width = area.width.saturating_sub(2) as usize;
+    let rows = compute_tab_rows(&titles, content_width);
+
+    let selected_idx = match state.current_tab {
+        Tab::ExpenseCategories => 0,
+        Tab::Expenses => 1,
+        Tab::TopUpCategories => 2,
+        Tab::TopUps => 3,
+        Tab::ExpensePieChart => 4,
+        Tab::TopUpPieChart => 5,
+        Tab::ExpenseBarChart => 6,
+        Tab::TopUpBarChart => 7,
+        Tab::ExpenseLineChart => 8,
     };
 
-    let tabs = Tabs::new(tab_titles)
-        .block(Block::default().borders(Borders::ALL).title("Money Manager"))
-        .select(match state.current_tab {
-            Tab::ExpenseCategories => 0,
-            Tab::Expenses => 1,
-            Tab::TopUpCategories => 2,
-            Tab::TopUps => 3,
-            Tab::ExpensePieChart => 4,
-            Tab::TopUpPieChart => 5,
-            Tab::ExpenseBarChart => 6,
-            Tab::TopUpBarChart => 7,
-            Tab::ExpenseLineChart => 8,
-        })
-        .style(Style::default().fg(Color::White))
-        .highlight_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+    let lines: Vec<Line> = rows.iter().map(|row_tabs| {
+        let mut spans: Vec<Span> = vec![];
+        for (i, &tab_idx) in row_tabs.iter().enumerate() {
+            if i > 0 {
+                spans.push(Span::styled(" | ", Style::default().fg(Color::DarkGray)));
+            }
+            let style = if tab_idx == selected_idx {
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD).add_modifier(Modifier::REVERSED)
+            } else {
+                Style::default().fg(Color::White)
+            };
+            spans.push(Span::styled(titles[tab_idx], style));
+        }
+        Line::from(spans)
+    }).collect();
 
-    frame.render_widget(tabs, area);
+    let paragraph = Paragraph::new(lines)
+        .block(Block::default().borders(Borders::ALL).title("Money Manager"));
+    frame.render_widget(paragraph, area);
 }
 
 fn draw_content(frame: &mut Frame, state: &mut AppState, area: Rect) {

@@ -2,7 +2,7 @@
 
 use ratatui::{
     buffer::Buffer,
-    layout::{Alignment, Rect},
+    layout::{Alignment, Position, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Bar, BarChart, BarGroup, Block, Borders, ListState, Paragraph, Widget},
@@ -44,6 +44,8 @@ pub enum ButtonAction {
     PrevMonth,
     NextMonth,
     ToggleMode,
+    HideTop,
+    RestoreTop,
 }
 
 /// Display mode for pie charts
@@ -106,10 +108,11 @@ impl ChartableCategory for crate::models::TopUpCategory {
 #[derive(Debug, Clone)]
 pub struct GenericPieChartState {
     pub mode: ChartMode,
-    pub scroll_offset: usize,
     pub selected_year: i32,
     pub selected_month: u32,
     pub pending_button_action: Option<ButtonAction>,
+    /// Number of top (largest) categories currently hidden
+    pub hidden_count: usize,
 }
 
 impl Default for GenericPieChartState {
@@ -117,10 +120,10 @@ impl Default for GenericPieChartState {
         let now = chrono::Local::now();
         Self {
             mode: ChartMode::default(),
-            scroll_offset: 0,
             selected_year: now.year(),
             selected_month: now.month(),
             pending_button_action: None,
+            hidden_count: 0,
         }
     }
 }
@@ -132,14 +135,15 @@ impl GenericPieChartState {
 
     pub fn toggle_mode(&mut self) {
         self.mode = self.mode.toggle();
+        self.hidden_count = 0;
     }
 
-    pub fn scroll_up(&mut self) {
-        self.scroll_offset = self.scroll_offset.saturating_sub(1);
+    pub fn hide_top(&mut self) {
+        self.hidden_count += 1;
     }
 
-    pub fn scroll_down(&mut self) {
-        self.scroll_offset += 1;
+    pub fn restore_top(&mut self) {
+        self.hidden_count = self.hidden_count.saturating_sub(1);
     }
 
     pub fn previous_month(&mut self) {
@@ -149,6 +153,7 @@ impl GenericPieChartState {
         } else {
             self.selected_month -= 1;
         }
+        self.hidden_count = 0;
     }
 
     pub fn next_month(&mut self) {
@@ -158,6 +163,7 @@ impl GenericPieChartState {
         } else {
             self.selected_month += 1;
         }
+        self.hidden_count = 0;
     }
 
     pub fn get_month_title(&self) -> String {
@@ -239,11 +245,11 @@ impl GenericPieChartState {
                 ViewInputResult::Consumed
             }
             KeyCode::Up => {
-                self.scroll_up();
+                self.restore_top();
                 ViewInputResult::Consumed
             }
             KeyCode::Down => {
-                self.scroll_down();
+                self.hide_top();
                 ViewInputResult::Consumed
             }
             KeyCode::Left => {
@@ -268,14 +274,6 @@ impl GenericPieChartState {
         let is_in_button_bar = mouse.row >= button_bar_start;
 
         match mouse.kind {
-            MouseEventKind::ScrollUp => {
-                self.scroll_up();
-                ViewInputResult::Consumed
-            }
-            MouseEventKind::ScrollDown => {
-                self.scroll_down();
-                ViewInputResult::Consumed
-            }
             MouseEventKind::Down(MouseButton::Left) => {
                 if is_in_button_bar {
                     let mode_text_len = match self.mode {
@@ -284,11 +282,16 @@ impl GenericPieChartState {
                     };
                     let content_end = area.x + area.width - 1;
 
+                    // Layout (right to left): [Next ▶]  [Monthly]  [◀ Prev]  [▲ Show]  [▼ Hide]
                     let next_start = content_end.saturating_sub(8);
                     let mode_end = next_start.saturating_sub(2);
                     let mode_start = mode_end.saturating_sub(mode_text_len as u16);
                     let prev_end = mode_start.saturating_sub(2);
                     let prev_start = prev_end.saturating_sub(8);
+                    let show_end = prev_start.saturating_sub(2);
+                    let show_start = show_end.saturating_sub(8);
+                    let hide_end = show_start.saturating_sub(2);
+                    let hide_start = hide_end.saturating_sub(8);
 
                     if mouse.column >= next_start && mouse.column < content_end {
                         self.pending_button_action = Some(ButtonAction::NextMonth);
@@ -300,6 +303,14 @@ impl GenericPieChartState {
                     }
                     if mouse.column >= prev_start && mouse.column < prev_end {
                         self.pending_button_action = Some(ButtonAction::PrevMonth);
+                        return ViewInputResult::Consumed;
+                    }
+                    if mouse.column >= show_start && mouse.column < show_end {
+                        self.pending_button_action = Some(ButtonAction::RestoreTop);
+                        return ViewInputResult::Consumed;
+                    }
+                    if mouse.column >= hide_start && mouse.column < hide_end {
+                        self.pending_button_action = Some(ButtonAction::HideTop);
                         return ViewInputResult::Consumed;
                     }
                 }
@@ -316,23 +327,36 @@ impl GenericPieChartState {
                 ButtonAction::PrevMonth => self.previous_month(),
                 ButtonAction::NextMonth => self.next_month(),
                 ButtonAction::ToggleMode => self.toggle_mode(),
+                ButtonAction::HideTop => self.hide_top(),
+                ButtonAction::RestoreTop => self.restore_top(),
             }
         }
     }
 }
 
 /// Render the button bar for pie charts
-pub fn render_pie_chart_button_bar(area: Rect, buf: &mut Buffer, mode: ChartMode) {
+pub fn render_pie_chart_button_bar(area: Rect, buf: &mut Buffer, mode: ChartMode, hidden_count: usize) {
     let mode_text = match mode {
         ChartMode::SelectedMonth => "[Monthly]",
         ChartMode::AllTime => "[All Time]",
     };
     let available_width = area.width.saturating_sub(2) as usize;
-    let buttons_width = 8 + 2 + mode_text.len() + 2 + 8;
+    // [▼ Hide]  [▲ Show]  [◀ Prev]  [Monthly]  [Next ▶]
+    let buttons_width = 8 + 2 + 8 + 2 + 8 + 2 + mode_text.len() + 2 + 8;
     let left_padding = available_width.saturating_sub(buttons_width);
+
+    let show_style = if hidden_count > 0 {
+        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
 
     let line = Line::from(vec![
         Span::raw(" ".repeat(left_padding)),
+        Span::styled("[▼ Hide]", Style::default().fg(Color::Cyan)),
+        Span::raw("  "),
+        Span::styled("[▲ Show]", show_style),
+        Span::raw("  "),
         Span::styled("[◀ Prev]", Style::default().fg(Color::Cyan)),
         Span::raw("  "),
         Span::styled(mode_text, Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
@@ -350,90 +374,250 @@ pub fn render_pie_chart_button_bar(area: Rect, buf: &mut Buffer, mode: ChartMode
     Widget::render(paragraph, area, buf);
 }
 
-/// Render pie chart content for any chartable data
-pub fn render_pie_chart_content(
+/// Worst aspect ratio for a row of items laid along a strip of length `strip_len`
+fn worst_ratio(row: &[f64], strip_len: f64) -> f64 {
+    if row.is_empty() || strip_len <= 0.0 { return f64::MAX; }
+    let s: f64 = row.iter().sum();
+    if s <= 0.0 { return f64::MAX; }
+    let max_a = row.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let min_a = row.iter().cloned().fold(f64::INFINITY, f64::min);
+    if min_a <= 0.0 { return f64::MAX; }
+    let s2 = s * s;
+    let w2 = strip_len * strip_len;
+    f64::max(w2 * max_a / s2, s2 / (w2 * min_a))
+}
+
+/// Recursive squarify: items are (area_value, original_index)
+fn squarify_recursive(
+    items: &[(f64, usize)],
+    x: f64, y: f64, w: f64, h: f64,
+    result: &mut Vec<(Rect, usize)>,
+) {
+    if items.is_empty() || w < 1.0 || h < 1.0 { return; }
+    if items.len() == 1 {
+        result.push((
+            Rect::new(x.round() as u16, y.round() as u16,
+                      w.round().max(1.0) as u16, h.round().max(1.0) as u16),
+            items[0].1,
+        ));
+        return;
+    }
+
+    let total: f64 = items.iter().map(|(a, _)| a).sum();
+    if total <= 0.0 { return; }
+    // Terminal cells are ~2x taller than wide; use visual dimensions for aspect ratio
+    const CELL_ASPECT: f64 = 2.0;
+    let vh = h * CELL_ASPECT;
+    let strip = w.min(vh);
+
+    // Scale item areas to visual area units for correct aspect ratio comparison
+    let scale = (w * vh) / total;
+    let scaled: Vec<f64> = items.iter().map(|(a, _)| a * scale).collect();
+
+    // Find how many items belong in the first row/strip
+    let mut row_end = 1;
+    while row_end < items.len() {
+        let current = worst_ratio(&scaled[..row_end], strip);
+        let next = worst_ratio(&scaled[..=row_end], strip);
+        if next <= current {
+            row_end += 1;
+        } else {
+            break;
+        }
+    }
+
+    let row_sum: f64 = scaled[..row_end].iter().sum();
+    let row_fraction = row_sum / (w * vh);
+
+    // Determine strip orientation using visual dimensions
+    let (strip_rect, remaining_rect) = if w <= vh {
+        // Horizontal strip across width
+        let strip_h = (h * row_fraction).round().max(1.0).min(h);
+        let strip_r = Rect::new(x.round() as u16, y.round() as u16,
+                                 w.round() as u16, strip_h as u16);
+        let remaining_y = y + strip_h;
+        let remaining_h = h - strip_h;
+        let remaining_r = Rect::new(x.round() as u16, remaining_y.round() as u16,
+                                     w.round() as u16, remaining_h.round() as u16);
+        (strip_r, remaining_r)
+    } else {
+        // Vertical strip along height
+        let strip_w = (w * row_fraction).round().max(1.0).min(w);
+        let strip_r = Rect::new(x.round() as u16, y.round() as u16,
+                                 strip_w as u16, h.round() as u16);
+        let remaining_x = x + strip_w;
+        let remaining_w = w - strip_w;
+        let remaining_r = Rect::new(remaining_x.round() as u16, y.round() as u16,
+                                     remaining_w.round() as u16, h.round() as u16);
+        (strip_r, remaining_r)
+    };
+
+    // Layout items within the strip
+    let row_items = &items[..row_end];
+    let row_areas = &scaled[..row_end];
+    let row_total: f64 = row_areas.iter().sum();
+
+    if strip_rect.width >= strip_rect.height {
+        // Lay items left-to-right
+        let mut cx = strip_rect.x as f64;
+        for (i, (_, orig_idx)) in row_items.iter().enumerate() {
+            let strip_right = (strip_rect.x + strip_rect.width) as f64;
+            let tw = if i == row_items.len() - 1 {
+                strip_right - cx
+            } else {
+                strip_rect.width as f64 * row_areas[i] / row_total
+            };
+            let tw = tw.round().max(1.0);
+            let actual_w = tw.min(strip_right - cx);
+            if actual_w >= 1.0 {
+                result.push((
+                    Rect::new(cx.round() as u16, strip_rect.y,
+                              actual_w as u16, strip_rect.height),
+                    *orig_idx,
+                ));
+            }
+            cx += actual_w;
+        }
+    } else {
+        // Lay items top-to-bottom
+        let mut cy = strip_rect.y as f64;
+        for (i, (_, orig_idx)) in row_items.iter().enumerate() {
+            let strip_bottom = (strip_rect.y + strip_rect.height) as f64;
+            let th = if i == row_items.len() - 1 {
+                strip_bottom - cy
+            } else {
+                strip_rect.height as f64 * row_areas[i] / row_total
+            };
+            let th = th.round().max(1.0);
+            let actual_h = th.min(strip_bottom - cy);
+            if actual_h >= 1.0 {
+                result.push((
+                    Rect::new(strip_rect.x, cy.round() as u16,
+                              strip_rect.width, actual_h as u16),
+                    *orig_idx,
+                ));
+            }
+            cy += actual_h;
+        }
+    }
+
+    // Recurse on remaining items
+    if remaining_rect.width > 0 && remaining_rect.height > 0 {
+        squarify_recursive(
+            &items[row_end..],
+            remaining_rect.x as f64, remaining_rect.y as f64,
+            remaining_rect.width as f64, remaining_rect.height as f64,
+            result,
+        );
+    }
+}
+
+/// Draw a colored border outline around a tile using box-drawing characters.
+fn draw_tile_border(buf: &mut Buffer, rect: Rect, color: Color) {
+    if rect.width == 0 || rect.height == 0 { return; }
+    let x0 = rect.x;
+    let y0 = rect.y;
+    let x1 = rect.x + rect.width - 1;
+    let y1 = rect.y + rect.height - 1;
+
+    let mut set = |x: u16, y: u16, ch: char| {
+        if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
+            cell.set_char(ch);
+            cell.set_fg(color);
+        }
+    };
+
+    if rect.width == 1 && rect.height == 1 {
+        set(x0, y0, '█');
+    } else if rect.width == 1 {
+        for y in y0..=y1 { set(x0, y, '│'); }
+    } else if rect.height == 1 {
+        for x in x0..=x1 { set(x, y0, '─'); }
+    } else {
+        set(x0, y0, '┌'); set(x1, y0, '┐');
+        set(x0, y1, '└'); set(x1, y1, '┘');
+        for x in (x0 + 1)..x1 { set(x, y0, '─'); set(x, y1, '─'); }
+        for y in (y0 + 1)..y1 { set(x0, y, '│'); set(x1, y, '│'); }
+    }
+}
+
+/// Render text inside a treemap tile (name + amount without decimals + %)
+fn render_tile_text(buf: &mut Buffer, tile: Rect, name: &str, amount: f64, pct: f64, color: Color) {
+    // Text lives inside the border: need at least 3×3
+    if tile.width < 3 || tile.height < 3 { return; }
+    let inner_w = (tile.width - 2) as usize;
+    let inner_h = tile.height - 2;
+    if inner_w < 2 || inner_h < 1 { return; }
+
+    let tx = tile.x + 1;
+    let ty = tile.y + 1;
+
+    let name_display: String = name.chars().take(inner_w).collect();
+    buf.set_string(tx, ty, &name_display,
+        Style::default().fg(color).add_modifier(Modifier::BOLD));
+
+    if inner_h >= 2 {
+        let info = if inner_w >= 8 {
+            format!("{:.0} {:.0}%", amount, pct)
+        } else {
+            format!("{:.0}%", pct)
+        };
+        let info_display: String = info.chars().take(inner_w).collect();
+        buf.set_string(tx, ty + 1, &info_display, Style::default().fg(color));
+    }
+}
+
+/// Render squarified treemap for any chartable data.
+/// `full_total` is the total including any hidden categories — used for percentage display.
+pub fn render_treemap_content(
     area: Rect,
     buf: &mut Buffer,
     data: &[(String, f64)],
-    scroll_offset: usize,
+    full_total: f64,
     title: &str,
     empty_message: &str,
-    chart_type: ChartType,
+    _chart_type: ChartType,
 ) {
-    let total: f64 = data.iter().map(|(_, amt)| amt).sum();
-
-    let name_width = if area.width < 60 {
-        10
-    } else if area.width < 80 {
-        15
-    } else {
-        20
-    };
-
-    let max_bar_width = if area.width < 60 {
-        15
-    } else if area.width < 80 {
-        30
-    } else {
-        50
-    };
+    let block = Block::default().borders(Borders::ALL).title(title);
 
     if data.is_empty() {
         let paragraph = Paragraph::new(empty_message)
             .alignment(Alignment::Center)
-            .block(Block::default().borders(Borders::ALL).title(title));
+            .block(block);
         Widget::render(paragraph, area, buf);
         return;
     }
 
-    let total_text = format!("{:.2}", total);
-    let total_color = chart_type.total_color();
-    let mut lines: Vec<Line> = vec![
-        Line::from(vec![
-            Span::styled("Total: ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-            Span::styled(total_text, Style::default().fg(total_color).add_modifier(Modifier::BOLD)),
-        ]),
-        Line::from(""),
-    ];
+    let inner = block.inner(area);
+    Widget::render(block, area, buf);
 
-    for (name, amount) in data.iter() {
-        let percentage = (amount / total) * 100.0;
-        let bar_width = ((percentage / 100.0) * max_bar_width as f64) as usize;
-        let bar = "█".repeat(bar_width.min(max_bar_width));
+    if inner.width < 2 || inner.height < 2 { return; }
 
+    let total: f64 = data.iter().map(|(_, a)| a).sum();
+    let pct_base = if full_total > 0.0 { full_total } else { total };
+
+    let indexed: Vec<(f64, usize)> = data.iter()
+        .enumerate()
+        .map(|(i, (_, a))| (*a, i))
+        .collect();
+
+    let mut tiles: Vec<(Rect, usize)> = Vec::new();
+    squarify_recursive(
+        &indexed,
+        inner.x as f64, inner.y as f64,
+        inner.width as f64, inner.height as f64,
+        &mut tiles,
+    );
+
+    for (tile_rect, data_idx) in tiles {
+        if tile_rect.width == 0 || tile_rect.height == 0 { continue; }
+        let (name, amount) = &data[data_idx];
         let color = color_from_name(name);
+        let pct = (amount / pct_base) * 100.0;
 
-        let display_name = if name.len() > name_width {
-            format!("{:.width$}", name, width = name_width - 1)
-        } else {
-            format!("{:width$}", name, width = name_width)
-        };
-
-        lines.push(Line::from(vec![
-            Span::styled(display_name, Style::default().fg(color).add_modifier(Modifier::BOLD)),
-            Span::raw(" "),
-            Span::styled(bar, Style::default().fg(color)),
-        ]));
-
-        let padding = " ".repeat(name_width + 1);
-        let amount_text = if area.width < 60 {
-            format!("{:.0} ({:.0}%)", amount, percentage)
-        } else {
-            format!("{:.2} ({:.1}%)", amount, percentage)
-        };
-
-        lines.push(Line::from(vec![
-            Span::raw(padding),
-            Span::styled(amount_text, Style::default().fg(Color::White)),
-        ]));
-        lines.push(Line::from(""));
+        draw_tile_border(buf, tile_rect, color);
+        render_tile_text(buf, tile_rect, name, *amount, pct, color);
     }
-
-    let paragraph = Paragraph::new(lines)
-        .block(Block::default().borders(Borders::ALL).title(title))
-        .scroll((scroll_offset as u16, 0));
-
-    Widget::render(paragraph, area, buf);
 }
 
 /// Focus area for bar chart view
@@ -445,13 +629,31 @@ pub enum BarChartFocus {
 }
 
 /// Shared state for bar chart views with category selection
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct GenericBarChartState {
     pub selected_categories: HashSet<Vec<u8>>,
     pub category_list_state: ListState,
     pub pending_category_action: Option<CategoryAction>,
     pub focus: BarChartFocus,
     pub scroll_offset: usize,
+    /// Whether scroll has been initialized to the last month
+    pub initialized: bool,
+    /// Actual rendered height of the category selector (set each frame, used by mouse handler)
+    pub category_selector_height: u16,
+}
+
+impl Default for GenericBarChartState {
+    fn default() -> Self {
+        Self {
+            selected_categories: HashSet::new(),
+            category_list_state: ListState::default(),
+            pending_category_action: None,
+            focus: BarChartFocus::default(),
+            scroll_offset: 0,
+            initialized: false,
+            category_selector_height: 5,
+        }
+    }
 }
 
 impl GenericBarChartState {
@@ -612,8 +814,7 @@ impl GenericBarChartState {
         use crossterm::event::{MouseEventKind, MouseButton};
         use super::expenses_widget::ViewInputResult;
 
-        // Calculate areas: chart (min), category selector (5)
-        let category_area_height = 5u16;
+        let category_area_height = self.category_selector_height;
         let category_area_start = area.y + area.height.saturating_sub(category_area_height);
 
         let is_in_category_area = mouse.row >= category_area_start;
@@ -713,6 +914,42 @@ pub fn calculate_bar_color_from_categories<C: ChartableCategory>(
     )
 }
 
+/// Compute max_scroll for a bar chart given data length and available area width.
+/// Used to initialise scroll_offset to the last month on first render.
+/// Compute (bar_width, bar_gap) given terminal width and max label length across all bars
+fn bar_dimensions(area_width: u16, max_label_len: u16) -> (u16, u16) {
+    let (base_width, base_gap) = if area_width < 60 {
+        (3u16, 0u16)
+    } else if area_width < 80 {
+        (4u16, 1u16)
+    } else {
+        (5u16, 1u16)
+    };
+    // Width must fit the label; gap must be at least 1 to prevent label overlap
+    let bar_width = base_width.max(max_label_len);
+    let bar_gap = base_gap.max(1);
+    (bar_width, bar_gap)
+}
+
+pub fn bar_chart_max_scroll(data_len: usize, area_width: u16, max_label_len: u16) -> usize {
+    let (bar_width, bar_gap) = bar_dimensions(area_width, max_label_len);
+    let chart_inner_width = area_width.saturating_sub(2) as usize;
+    let bar_total_width = (bar_width + bar_gap) as usize;
+    let visible_bars = if bar_total_width > 0 { (chart_inner_width / bar_total_width).max(1) } else { data_len.max(1) };
+    data_len.saturating_sub(visible_bars)
+}
+
+/// Compact amount label for bar chart (fits in narrow bars)
+pub fn format_bar_amount(amount: f64) -> String {
+    if amount >= 1_000_000.0 {
+        format!("{:.1}M", amount / 1_000_000.0)
+    } else if amount >= 1_000.0 {
+        format!("{:.1}k", amount / 1_000.0)
+    } else {
+        format!("{:.0}", amount)
+    }
+}
+
 /// Render bar chart for any monthly data with horizontal scrolling support
 pub fn render_bar_chart(
     area: Rect,
@@ -735,13 +972,13 @@ pub fn render_bar_chart(
         return 0;
     }
 
-    let (bar_width, bar_gap) = if area.width < 60 {
-        (3u16, 0u16)
-    } else if area.width < 80 {
-        (4u16, 1u16)
-    } else {
-        (5u16, 1u16)
-    };
+    // Compute minimum label width across all data points
+    let max_label_len = monthly_data.iter()
+        .map(|(_, amt)| format_bar_amount(*amt).len())
+        .max()
+        .unwrap_or(0) as u16;
+
+    let (bar_width, bar_gap) = bar_dimensions(area.width, max_label_len);
 
     // Calculate how many bars can fit in the chart area
     let chart_inner_width = area.width.saturating_sub(2) as usize; // Account for borders
@@ -768,17 +1005,23 @@ pub fn render_bar_chart(
     let bars: Vec<Bar> = visible_data
         .iter()
         .map(|(month, amount)| {
-            let label = month.split('-').nth(1).unwrap_or(month);
+            let month_label = month.split('-').nth(1).unwrap_or(month);
             Bar::default()
                 .value(*amount as u64)
-                .label(Line::from(label))
-                .style(Style::default().fg(bar_color))
+                // Month shown inside the bar when there is enough height
+                .text_value(month_label.to_string())
                 .value_style(
                     Style::default()
                         .fg(Color::Black)
                         .bg(bar_color)
                         .add_modifier(Modifier::BOLD)
                 )
+                // Amount shown below the bar — always visible
+                .label(Line::from(Span::styled(
+                    format_bar_amount(*amount),
+                    Style::default().fg(Color::White),
+                )))
+                .style(Style::default().fg(bar_color))
         })
         .collect();
 
@@ -860,6 +1103,31 @@ pub fn find_category_at_position<C: ChartableCategory>(x: u16, y: u16, area: Rec
     }
 
     None
+}
+
+/// Calculate the height (rows) needed to display all categories in the selector panel.
+/// Returns the total widget height including borders (minimum 3).
+pub fn category_selector_needed_height<C: ChartableCategory>(categories: &[C], area_width: u16) -> u16 {
+    if categories.is_empty() {
+        return 3;
+    }
+    let content_width = area_width.saturating_sub(2) as usize;
+    if content_width == 0 {
+        return (categories.len() as u16) + 2;
+    }
+    let mut current_len = 0usize;
+    let mut lines = 1usize;
+    for cat in categories {
+        let cat_len = 4 + cat.name().chars().count(); // "[X] Name"
+        let sep = if current_len > 0 { 2 } else { 0 };
+        if current_len > 0 && current_len + sep + cat_len > content_width {
+            lines += 1;
+            current_len = cat_len;
+        } else {
+            current_len += sep + cat_len;
+        }
+    }
+    (lines as u16 + 2).max(3) // +2 borders
 }
 
 /// Render category selector for bar chart views

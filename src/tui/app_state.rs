@@ -6,6 +6,7 @@ use diesel::prelude::*;
 use crate::models::{Category, Expense, TopUpCategory, TopUp};
 
 use super::types::Tab;
+use super::ui::{tab_titles_for_width, compute_tab_rows};
 use super::views::{
     ExpensesViewState, TopUpsViewState,
     ExpenseCategoriesViewState, TopUpCategoriesViewState,
@@ -37,6 +38,9 @@ pub struct AppState {
     pub top_up_pie_chart_view: TopUpPieChartViewState,
     pub top_up_bar_chart_view: TopUpBarChartViewState,
 
+    /// Height of the tab bar (updated each frame by ui::draw, used by mouse handler)
+    pub tab_bar_height: u16,
+
     // Form states
     pub category_form: CategoryFormState,
     pub expense_form: ExpenseFormState,
@@ -67,6 +71,7 @@ impl AppState {
             line_chart_view: LineChartViewState::new(),
             top_up_pie_chart_view: TopUpPieChartViewState::new(),
             top_up_bar_chart_view: TopUpBarChartViewState::new(),
+            tab_bar_height: 3,
             category_form: CategoryFormState::new(),
             expense_form: ExpenseFormState::new(),
             top_up_category_form: TopUpCategoryFormState::new(),
@@ -243,60 +248,58 @@ impl AppState {
             let x = mouse.column;
             let y = mouse.row;
 
-            // Tab bar is in the last 3 rows (at the bottom)
-            if y >= area.height.saturating_sub(3) {
-                // Calculate tab positions based on screen width
-                // Tab bar content starts after the border (x=1)
-                let content_start = 1u16;
-                let click_x = x.saturating_sub(content_start);
-
-                // Determine tab widths based on screen width (matching ui.rs logic)
-                let tab_widths: Vec<u16> = if area.width < 60 {
-                    // Ultra-compact: "1:EC", "2:Ex", "3:TC", "4:TU", "5:Pie", "6:Bar", "7:Ln", "8:TPie", "9:TBar"
-                    vec![4, 4, 4, 4, 5, 5, 4, 6, 6]
-                } else if area.width < 80 {
-                    // Compact: "1:Cat", "2:Exp", "3:Cat", "4:Top", "5:Pie", "6:Bar", "7:Line", "8:TPie", "9:TBar"
-                    vec![5, 5, 5, 5, 5, 5, 6, 6, 6]
-                } else {
-                    // Full: "1:Exp.Cat", "2:Expenses", "3:TopUp.Cat", "4:TopUps", "5:Pie Chart", "6:Bar Chart", "7:Line Chart", "8:TopUp Pie", "9:TopUp Bar"
-                    vec![9, 10, 11, 8, 11, 11, 12, 11, 11]
-                };
-
-                // Find which tab was clicked
-                let mut current_pos = 0u16;
-                for (idx, &width) in tab_widths.iter().enumerate() {
-                    // Add separator width (tabs have " | " between them, ~3 chars)
-                    let separator = if idx > 0 { 3 } else { 0 };
-                    let tab_start = current_pos + separator;
-                    let tab_end = tab_start + width;
-
-                    if click_x >= tab_start && click_x < tab_end {
-                        self.current_tab = match idx {
-                            0 => Tab::ExpenseCategories,
-                            1 => Tab::Expenses,
-                            2 => Tab::TopUpCategories,
-                            3 => Tab::TopUps,
-                            4 => Tab::ExpensePieChart,
-                            5 => Tab::TopUpPieChart,
-                            6 => Tab::ExpenseBarChart,
-                            7 => Tab::TopUpBarChart,
-                            8 => Tab::ExpenseLineChart,
-                            _ => return,
-                        };
-                        return;
-                    }
-                    current_pos = tab_end;
+            // Tab bar occupies the last tab_bar_height rows
+            let tab_bar_top = area.y + area.height.saturating_sub(self.tab_bar_height);
+            if y >= tab_bar_top {
+                // Row within the tab bar (0 = top border)
+                let bar_row = y - tab_bar_top;
+                // Ignore border rows
+                if bar_row == 0 || bar_row >= self.tab_bar_height.saturating_sub(1) {
+                    return;
                 }
+                // Content row index (0-based, inside borders)
+                let content_row = (bar_row - 1) as usize;
+
+                let titles = tab_titles_for_width(area.width);
+                let content_width = area.width.saturating_sub(2) as usize;
+                let rows = compute_tab_rows(&titles, content_width);
+
+                if let Some(row_tabs) = rows.get(content_row) {
+                    // x position inside the border
+                    let click_x = x.saturating_sub(area.x + 1) as usize;
+                    let mut current_pos = 0usize;
+                    for (i, &tab_idx) in row_tabs.iter().enumerate() {
+                        let sep = if i > 0 { 3 } else { 0 };
+                        let tab_start = current_pos + sep;
+                        let tab_end = tab_start + titles[tab_idx].len();
+                        if click_x >= tab_start && click_x < tab_end {
+                            self.current_tab = match tab_idx {
+                                0 => Tab::ExpenseCategories,
+                                1 => Tab::Expenses,
+                                2 => Tab::TopUpCategories,
+                                3 => Tab::TopUps,
+                                4 => Tab::ExpensePieChart,
+                                5 => Tab::TopUpPieChart,
+                                6 => Tab::ExpenseBarChart,
+                                7 => Tab::TopUpBarChart,
+                                8 => Tab::ExpenseLineChart,
+                                _ => return,
+                            };
+                            return;
+                        }
+                        current_pos = tab_end;
+                    }
+                }
+                return;
             }
         }
 
-        // Calculate content area (between footer and tab bar)
-        // Footer: rows 0-2, Tab bar: last 3 rows
+        // Calculate content area (between header and tab bar)
         let content_area = Rect {
             x: area.x,
             y: area.y + 3,
             width: area.width,
-            height: area.height.saturating_sub(6),
+            height: area.height.saturating_sub(3 + self.tab_bar_height),
         };
 
         // Delegate to current view for scroll and other interactions

@@ -9,7 +9,8 @@ use crate::models::{Category, Expense};
 use super::generic_chart::{
     GenericBarChartState, CategoryAction, ChartType,
     render_bar_chart, render_bar_chart_category_selector, find_category_at_position,
-    calculate_bar_color_from_categories
+    calculate_bar_color_from_categories, bar_chart_max_scroll, category_selector_needed_height,
+    format_bar_amount,
 };
 
 /// State for the expense bar chart view (wrapper around generic state)
@@ -48,11 +49,14 @@ impl<'a> StatefulWidget for BarChartView<'a> {
     type State = BarChartViewState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+        let selector_height = category_selector_needed_height(self.categories, area.width);
+        state.0.category_selector_height = selector_height;
+
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Min(5),       // Chart
-                Constraint::Length(5),    // Category selector
+                Constraint::Min(5),
+                Constraint::Length(selector_height),
             ])
             .split(area);
 
@@ -73,6 +77,16 @@ impl<'a> StatefulWidget for BarChartView<'a> {
         }
 
         let monthly_data = state.0.get_monthly_totals(self.expenses);
+
+        // On first render, jump to the last (most recent) month
+        if !state.0.initialized {
+            let max_lbl = monthly_data.iter()
+                .map(|(_, amt)| format_bar_amount(*amt).len())
+                .max()
+                .unwrap_or(0) as u16;
+            state.0.scroll_offset = bar_chart_max_scroll(monthly_data.len(), chunks[0].width, max_lbl);
+            state.0.initialized = true;
+        }
         let total: f64 = monthly_data.iter().map(|(_, amt)| *amt).sum();
 
         let title = format!("Monthly Expenses (Total: {:.2})", total);

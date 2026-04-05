@@ -48,6 +48,8 @@ pub struct LineChartViewState {
     pub pending_category_action: Option<CategoryAction>,
     pub pending_button_action: Option<ButtonAction>,
     pub focus: LineChartFocus,
+    /// Actual rendered height of the category selector (set each frame, used by mouse handler)
+    pub category_selector_height: u16,
 }
 
 impl Default for LineChartViewState {
@@ -62,6 +64,7 @@ impl Default for LineChartViewState {
             pending_category_action: None,
             pending_button_action: None,
             focus: LineChartFocus::default(),
+            category_selector_height: 5,
         }
     }
 }
@@ -255,8 +258,7 @@ impl super::expenses_widget::ViewState for LineChartViewState {
         use crossterm::event::{MouseEventKind, MouseButton};
         use super::expenses_widget::ViewInputResult;
 
-        // Calculate areas: chart (min 10), button bar (3), category selector (5)
-        let category_area_height = 5u16;
+        let category_area_height = self.category_selector_height;
         let button_bar_height = 3u16;
         let category_area_start = area.y + area.height.saturating_sub(category_area_height);
         let button_bar_start = category_area_start.saturating_sub(button_bar_height);
@@ -331,13 +333,15 @@ impl<'a> StatefulWidget for LineChartView<'a> {
     type State = LineChartViewState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        // Split into chart on top, button bar in middle, and category selector on bottom
+        let selector_height = line_category_selector_height(self.categories, area.width);
+        state.category_selector_height = selector_height;
+
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Min(10),      // Chart
-                Constraint::Length(3),    // Button bar
-                Constraint::Length(5),    // Category selector
+                Constraint::Min(10),
+                Constraint::Length(3),
+                Constraint::Length(selector_height),
             ])
             .split(area);
 
@@ -375,6 +379,29 @@ impl<'a> StatefulWidget for LineChartView<'a> {
         // Render category selector at bottom
         render_category_selector(chunks[2], buf, state, self.categories);
     }
+}
+
+fn line_category_selector_height(categories: &[Category], area_width: u16) -> u16 {
+    if categories.is_empty() {
+        return 3;
+    }
+    let content_width = area_width.saturating_sub(2) as usize;
+    if content_width == 0 {
+        return (categories.len() as u16) + 2;
+    }
+    let mut current_len = 0usize;
+    let mut lines = 1usize;
+    for cat in categories {
+        let cat_len = 4 + cat.name.chars().count();
+        let sep = if current_len > 0 { 2 } else { 0 };
+        if current_len > 0 && current_len + sep + cat_len > content_width {
+            lines += 1;
+            current_len = cat_len;
+        } else {
+            current_len += sep + cat_len;
+        }
+    }
+    (lines as u16 + 2).max(3)
 }
 
 fn render_button_bar(area: Rect, buf: &mut Buffer) {

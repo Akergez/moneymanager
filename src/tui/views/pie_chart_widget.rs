@@ -6,7 +6,7 @@ use ratatui::{
     widgets::StatefulWidget,
 };
 use crate::models::{Category, Expense};
-use super::generic_chart::{GenericPieChartState, ChartType, render_pie_chart_button_bar, render_pie_chart_content};
+use super::generic_chart::{GenericPieChartState, ChartType, render_pie_chart_button_bar, render_treemap_content};
 
 /// State for the expense pie chart view (wrapper around generic state)
 #[derive(Debug, Clone, Default)]
@@ -56,25 +56,36 @@ impl<'a> StatefulWidget for PieChartView<'a> {
         state.0.process_pending_actions();
 
         // Get data and render
-        let data = state.0.get_by_category(self.expenses, self.categories);
-        let total: f64 = data.iter().map(|(_, amt)| amt).sum();
-        
+        let all_data = state.0.get_by_category(self.expenses, self.categories);
+        let full_total: f64 = all_data.iter().map(|(_, amt)| amt).sum();
+
+        // Hide the top N largest categories from the treemap
+        let visible_start = state.0.hidden_count.min(all_data.len().saturating_sub(1));
+        let data = &all_data[visible_start..];
+
+        let hidden = state.0.hidden_count.min(all_data.len().saturating_sub(1));
         let title = if area.width < 60 {
-            format!("{} ({:.0})", state.0.get_month_title(), total)
+            if hidden > 0 {
+                format!("{} ({:.0}, -{hidden})", state.0.get_month_title(), full_total)
+            } else {
+                format!("{} ({:.0})", state.0.get_month_title(), full_total)
+            }
+        } else if hidden > 0 {
+            format!("Expense by Category - {} (Total: {:.2}, -{hidden} hidden)", state.0.get_month_title(), full_total)
         } else {
-            format!("Expense by Category - {} (Total: {:.2})", state.0.get_month_title(), total)
+            format!("Expense by Category - {} (Total: {:.2})", state.0.get_month_title(), full_total)
         };
 
-        render_pie_chart_content(
+        render_treemap_content(
             chunks[0],
             buf,
-            &data,
-            state.0.scroll_offset,
+            data,
+            full_total,
             &title,
             "No expense data available",
             ChartType::Expense,
         );
 
-        render_pie_chart_button_bar(chunks[1], buf, state.0.mode);
+        render_pie_chart_button_bar(chunks[1], buf, state.0.mode, hidden);
     }
 }
