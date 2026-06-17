@@ -18,13 +18,15 @@ categories = ["command-line-utilities", "finance"]
 # RDX CRDT storage + sync. These crates are workspace members of the tresse repo;
 # cargo locates each by package name within the git checkout. Cargo.lock pins the
 # exact resolved commit. For local development against the surrounding tresse
-# checkout, swap these three lines for the path variant below.
+# checkout, swap these for the path variant below.
 rdx-rs = { git = "https://gitlab.com/ragusseven/tresse.git", branch = "master" }
 rdx-sync = { git = "https://gitlab.com/ragusseven/tresse.git", branch = "master" }
 rdx-sync-s3 = { git = "https://gitlab.com/ragusseven/tresse.git", branch = "master" }
+rdx-sync-fs = { git = "https://gitlab.com/ragusseven/tresse.git", branch = "master" }
 # rdx-rs = { path = "../rdx-rs" }
 # rdx-sync = { path = "../rdx-sync" }
 # rdx-sync-s3 = { path = "../rdx-sync-s3" }
+# rdx-sync-fs = { path = "../rdx-sync-fs" }
 ratatui = "0.29"
 crossterm = "0.28"
 chrono = { version = "0.4", features = ["serde"] }

@@ -25,8 +25,8 @@ use tui::{AppState, Event, EventHandler};
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Path to the RDX data blob.
-    #[arg(short, long, default_value = "money_manager.rdx")]
+    /// Path to the RDX chunk directory (one file per content-addressed chunk).
+    #[arg(short, long, default_value = "money_manager.chunks")]
     data: PathBuf,
 
     /// Path to the configuration file.
@@ -98,6 +98,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let source = cfg.ensure_source(&args.config)?;
     let mut store = Store::open(&args.data, source)?;
+
+    // One-time migration from the old single-blob format.
+    let legacy = PathBuf::from("money_manager.rdx");
+    if store.is_empty()? && legacy.exists() {
+        let n = store.import_legacy_blob(&legacy)?;
+        eprintln!(
+            "migrated {n} records from legacy {} into {}",
+            legacy.display(),
+            args.data.display()
+        );
+    }
 
     if let Some(Command::Sync) = args.command {
         let remote = cfg

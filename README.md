@@ -10,7 +10,7 @@ A terminal-based money management application built with Rust, featuring expense
 - 🖥️ **Terminal UI**: Beautiful TUI built with Ratatui
 - 🖱️ **Mouse Support**: Click on tabs to switch between views
 - 📱 **Responsive Design**: Adapts to mobile-like narrow terminal resolutions
-- 💾 **CRDT Storage**: Persistent local storage as a single RDX blob, with optional end-to-end-encrypted S3 sync
+- 💾 **CRDT Storage**: Persistent local storage as content-addressed RDX chunks, with optional end-to-end-encrypted S3 sync
 
 ## Installation
 
@@ -47,7 +47,7 @@ money_manager
 
 | Option | Description |
 |--------|-------------|
-| `-d, --data <PATH>` | Path to the RDX data blob (default: `money_manager.rdx` in current directory) |
+| `-d, --data <PATH>` | Path to the RDX chunk directory (default: `money_manager.chunks` in current directory) |
 | `-c, --config <PATH>` | Path to the config file (default: `money_manager.toml`) |
 | `-h, --help` | Print help information |
 | `-V, --version` | Print version information |
@@ -70,7 +70,7 @@ money_manager
 money_manager
 
 # Use a specific data file
-money_manager --data ~/finances/my_budget.rdx
+money_manager --data ~/finances/my_budget.chunks
 
 # Sync with the configured S3 remote
 money_manager sync
@@ -161,9 +161,25 @@ This makes the app usable on narrow terminals, mobile terminal emulators, or spl
 
 ## Storage & Sync
 
-Data is persisted locally as a single binary RDX blob (`money_manager.rdx` by
-default), built on the [`rdx-sync`](https://gitlab.com/ragusseven/tresse) CRDT
-chunk store. The blob is created automatically on first run.
+Data lives in a directory (`money_manager.chunks` by default, created on first
+run), built on the [`rdx-sync`](https://gitlab.com/ragusseven/tresse) CRDT chunk
+store (`rdx-sync-fs` backend). A **chunk is the delta of one sync**, not the
+whole document and not one record:
+
+- Local edits accumulate in a small mutable `staging.rdx` (a delta holding only
+  the records changed since the last sync), rewritten on every write so a crash
+  loses nothing.
+- On sync the staged delta is *sealed* into a single immutable, content-addressed
+  chunk (a file named by the blake3 hash of its encoding), then exchanged with
+  the remote.
+- Merging the sealed chunks plus staging reconstructs the full document.
+
+So the chunk count grows with *syncs-that-had-changes*, not with the number of
+records or writes. Storage is content-addressed and idempotent; sync is
+**incremental** (only chunks a side is missing are transferred) and every
+fetched chunk is **hash-verified** before it is trusted. A legacy
+`money_manager.rdx` blob, if present, is migrated in as one baseline chunk on
+first run.
 
 Optionally, the data can be synchronized to any S3-compatible bucket via
 `rdx-sync-s3`. Configure a `[remote]` section in `money_manager.toml`:
