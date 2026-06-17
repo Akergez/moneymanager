@@ -156,6 +156,8 @@ impl Store {
     }
 
     /// Tombstone the record keyed by `key` in collection `idx`.
+    // Reached only via the services' `delete`, which the TUI doesn't call yet.
+    #[allow(dead_code)]
     pub fn delete(&mut self, idx: usize, key: &str) -> Result<(), String> {
         let mut stamp = self.next_stamp();
         stamp.time |= 1; // mark tombstone (odd time)

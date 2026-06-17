@@ -35,6 +35,8 @@ impl TopUpCategory {
             .collect())
     }
 
+    // CRUD completeness: edit/delete aren't wired into the TUI yet.
+    #[allow(dead_code)]
     pub fn update(store: &mut Store, category_id: &[u8], new_name: &str) -> Result<usize, String> {
         store.upsert(
             TOP_UP_CATEGORIES_IDX,
@@ -44,6 +46,7 @@ impl TopUpCategory {
         Ok(1)
     }
 
+    #[allow(dead_code)]
     pub fn delete(store: &mut Store, category_id: &[u8]) -> Result<usize, String> {
         store.delete(TOP_UP_CATEGORIES_IDX, &hex_encode(category_id))?;
         Ok(1)

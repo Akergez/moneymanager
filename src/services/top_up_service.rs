@@ -55,6 +55,8 @@ impl TopUp {
             .collect())
     }
 
+    // CRUD completeness: edit/delete aren't wired into the TUI yet.
+    #[allow(dead_code)]
     pub fn update(
         store: &mut Store,
         top_up_id: &[u8],
@@ -73,6 +75,7 @@ impl TopUp {
         Ok(1)
     }
 
+    #[allow(dead_code)]
     pub fn delete(store: &mut Store, top_up_id: &[u8]) -> Result<usize, String> {
         store.delete(TOP_UPS_IDX, &hex_encode(top_up_id))?;
         Ok(1)

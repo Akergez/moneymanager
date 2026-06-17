@@ -56,6 +56,8 @@ impl Expense {
             .collect())
     }
 
+    // CRUD completeness: edit/delete aren't wired into the TUI yet.
+    #[allow(dead_code)]
     pub fn update(
         store: &mut Store,
         expense_id: &[u8],
@@ -75,6 +77,7 @@ impl Expense {
         Ok(1)
     }
 
+    #[allow(dead_code)]
     pub fn delete(store: &mut Store, expense_id: &[u8]) -> Result<usize, String> {
         store.delete(EXPENSES_IDX, &hex_encode(expense_id))?;
         Ok(1)
