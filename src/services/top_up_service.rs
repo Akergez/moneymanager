@@ -1,41 +1,94 @@
-use diesel::prelude::*;
-use crate::models::TopUp;
-use crate::schema;
-use uuid::Uuid;
 use chrono::NaiveDate;
+use uuid::Uuid;
+
+use crate::models::TopUp;
+use crate::store::{
+    Store, TOP_UPS_IDX, child_f64, child_opt_str, child_str, hex_decode, hex_encode, opt_str_value,
+};
+use rdx_rs::RdxValue;
+
+const DATE_FMT: &str = "%Y-%m-%d";
 
 impl TopUp {
-    pub fn create(conn: &mut SqliteConnection, category_id: &[u8], amount: f64, comment: Option<&str>, date: NaiveDate) -> QueryResult<TopUp> {
-        use schema::top_ups;
+    pub fn create(
+        store: &mut Store,
+        category_id: &[u8],
+        amount: f64,
+        comment: Option<&str>,
+        date: NaiveDate,
+    ) -> Result<TopUp, String> {
         let id = Uuid::new_v4().as_bytes().to_vec();
-        let new_top_up = (
-            top_ups::id.eq(&id),
-            top_ups::category_id.eq(category_id),
-            top_ups::amount.eq(amount),
-            top_ups::comment.eq(comment),
-            top_ups::date.eq(date),
-        );
-        diesel::insert_into(top_ups::table)
-            .values(new_top_up)
-            .execute(conn)?;
-        top_ups::table.filter(top_ups::id.eq(&id)).first(conn)
+        Self::create_with_id(store, &id, category_id, amount, comment, date)?;
+        Ok(TopUp {
+            id,
+            category_id: category_id.to_vec(),
+            amount,
+            comment: comment.map(str::to_string),
+            date,
+        })
     }
 
-    pub fn read_all(conn: &mut SqliteConnection) -> QueryResult<Vec<TopUp>> {
-        use schema::top_ups::dsl::*;
-        top_ups.load::<TopUp>(conn)
+    /// Insert (or overwrite) a top-up with a caller-supplied id. Used by CSV
+    /// import to preserve the original identifiers.
+    pub fn create_with_id(
+        store: &mut Store,
+        id: &[u8],
+        category_id: &[u8],
+        amount: f64,
+        comment: Option<&str>,
+        date: NaiveDate,
+    ) -> Result<(), String> {
+        store.upsert(TOP_UPS_IDX, &hex_encode(id), fields(category_id, amount, comment, date))
     }
 
-    pub fn update(conn: &mut SqliteConnection, top_up_id: &[u8], new_amount: f64, new_comment: Option<&str>, new_date: NaiveDate) -> QueryResult<usize> {
-        use schema::top_ups::dsl::*;
-        diesel::update(top_ups.filter(id.eq(top_up_id)))
-            .set((amount.eq(new_amount), comment.eq(new_comment), date.eq(new_date)))
-            .execute(conn)
+    pub fn read_all(store: &Store) -> Result<Vec<TopUp>, String> {
+        Ok(store
+            .records(TOP_UPS_IDX)
+            .into_iter()
+            .map(|rec| TopUp {
+                id: hex_decode(&child_str(rec, 0)),
+                category_id: hex_decode(&child_str(rec, 1)),
+                amount: child_f64(rec, 2),
+                comment: child_opt_str(rec, 3),
+                date: parse_date(&child_str(rec, 4)),
+            })
+            .collect())
     }
 
-    pub fn delete(conn: &mut SqliteConnection, top_up_id: &[u8]) -> QueryResult<usize> {
-        use schema::top_ups::dsl::*;
-        diesel::delete(top_ups.filter(id.eq(top_up_id))).execute(conn)
+    pub fn update(
+        store: &mut Store,
+        top_up_id: &[u8],
+        new_amount: f64,
+        new_comment: Option<&str>,
+        new_date: NaiveDate,
+    ) -> Result<usize, String> {
+        let key = hex_encode(top_up_id);
+        let category_id = store
+            .records(TOP_UPS_IDX)
+            .into_iter()
+            .find(|rec| child_str(rec, 0) == key)
+            .map(|rec| hex_decode(&child_str(rec, 1)))
+            .unwrap_or_default();
+        store.upsert(TOP_UPS_IDX, &key, fields(&category_id, new_amount, new_comment, new_date))?;
+        Ok(1)
+    }
+
+    pub fn delete(store: &mut Store, top_up_id: &[u8]) -> Result<usize, String> {
+        store.delete(TOP_UPS_IDX, &hex_encode(top_up_id))?;
+        Ok(1)
     }
 }
 
+fn fields(category_id: &[u8], amount: f64, comment: Option<&str>, date: NaiveDate) -> Vec<RdxValue> {
+    vec![
+        RdxValue::Str(hex_encode(category_id)),
+        RdxValue::Float(amount),
+        opt_str_value(comment),
+        RdxValue::Str(date.format(DATE_FMT).to_string()),
+    ]
+}
+
+fn parse_date(s: &str) -> NaiveDate {
+    NaiveDate::parse_from_str(s, DATE_FMT)
+        .unwrap_or_else(|_| NaiveDate::from_ymd_opt(1970, 1, 1).unwrap())
+}

@@ -1,37 +1,51 @@
-use diesel::prelude::*;
-use crate::models::TopUpCategory;
-use crate::schema;
 use uuid::Uuid;
 
+use crate::models::TopUpCategory;
+use crate::store::{Store, TOP_UP_CATEGORIES_IDX, child_str, hex_decode, hex_encode};
+use rdx_rs::RdxValue;
+
 impl TopUpCategory {
-    pub fn create(conn: &mut SqliteConnection, name: &str) -> QueryResult<TopUpCategory> {
-        use schema::top_up_categories;
+    pub fn create(store: &mut Store, name: &str) -> Result<TopUpCategory, String> {
         let id = Uuid::new_v4().as_bytes().to_vec();
-        let new_category = (
-            top_up_categories::id.eq(&id),
-            top_up_categories::name.eq(name),
-        );
-        diesel::insert_into(top_up_categories::table)
-            .values(new_category)
-            .execute(conn)?;
-        top_up_categories::table.filter(top_up_categories::id.eq(&id)).first(conn)
+        Self::create_with_id(store, &id, name)?;
+        Ok(TopUpCategory {
+            id,
+            name: name.to_string(),
+        })
     }
 
-    pub fn read_all(conn: &mut SqliteConnection) -> QueryResult<Vec<TopUpCategory>> {
-        use schema::top_up_categories::dsl::*;
-        top_up_categories.load::<TopUpCategory>(conn)
+    /// Insert (or overwrite) a top-up category with a caller-supplied id. Used by
+    /// CSV import to preserve the original identifiers.
+    pub fn create_with_id(store: &mut Store, id: &[u8], name: &str) -> Result<(), String> {
+        store.upsert(
+            TOP_UP_CATEGORIES_IDX,
+            &hex_encode(id),
+            vec![RdxValue::Str(name.to_string())],
+        )
     }
 
-    pub fn update(conn: &mut SqliteConnection, category_id: &[u8], new_name: &str) -> QueryResult<usize> {
-        use schema::top_up_categories::dsl::*;
-        diesel::update(top_up_categories.filter(id.eq(category_id)))
-            .set(name.eq(new_name))
-            .execute(conn)
+    pub fn read_all(store: &Store) -> Result<Vec<TopUpCategory>, String> {
+        Ok(store
+            .records(TOP_UP_CATEGORIES_IDX)
+            .into_iter()
+            .map(|rec| TopUpCategory {
+                id: hex_decode(&child_str(rec, 0)),
+                name: child_str(rec, 1),
+            })
+            .collect())
     }
 
-    pub fn delete(conn: &mut SqliteConnection, category_id: &[u8]) -> QueryResult<usize> {
-        use schema::top_up_categories::dsl::*;
-        diesel::delete(top_up_categories.filter(id.eq(category_id))).execute(conn)
+    pub fn update(store: &mut Store, category_id: &[u8], new_name: &str) -> Result<usize, String> {
+        store.upsert(
+            TOP_UP_CATEGORIES_IDX,
+            &hex_encode(category_id),
+            vec![RdxValue::Str(new_name.to_string())],
+        )?;
+        Ok(1)
+    }
+
+    pub fn delete(store: &mut Store, category_id: &[u8]) -> Result<usize, String> {
+        store.delete(TOP_UP_CATEGORIES_IDX, &hex_encode(category_id))?;
+        Ok(1)
     }
 }
-

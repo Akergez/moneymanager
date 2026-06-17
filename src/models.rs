@@ -1,17 +1,19 @@
-use diesel::prelude::*;
-use crate::schema::*;
+//! Domain records. These are plain data structs; persistence lives in
+//! [`crate::store`], backed by an RDX CRDT document instead of a SQL table.
+//!
+//! `id` / `category_id` remain raw bytes (originally UUID v4) so the rest of the
+//! app and the on-disk identity are unchanged; the store renders them as hex
+//! strings for the RDX record key.
+
 use chrono::NaiveDate;
 
-#[derive(Queryable, Insertable, Identifiable, Clone, Debug)]
-#[diesel(table_name = categories)]
+#[derive(Clone, Debug)]
 pub struct Category {
     pub id: Vec<u8>,
     pub name: String,
 }
 
-#[derive(Queryable, Insertable, Identifiable, Associations, Clone, Debug)]
-#[diesel(belongs_to(Category))]
-#[diesel(table_name = expenses)]
+#[derive(Clone, Debug)]
 pub struct Expense {
     pub id: Vec<u8>,
     pub category_id: Vec<u8>,
@@ -20,16 +22,13 @@ pub struct Expense {
     pub date: NaiveDate,
 }
 
-#[derive(Queryable, Insertable, Identifiable, Clone, Debug)]
-#[diesel(table_name = top_up_categories)]
+#[derive(Clone, Debug)]
 pub struct TopUpCategory {
     pub id: Vec<u8>,
     pub name: String,
 }
 
-#[derive(Queryable, Insertable, Identifiable, Associations, Clone, Debug)]
-#[diesel(belongs_to(TopUpCategory, foreign_key = category_id))]
-#[diesel(table_name = top_ups)]
+#[derive(Clone, Debug)]
 pub struct TopUp {
     pub id: Vec<u8>,
     pub category_id: Vec<u8>,
@@ -37,5 +36,3 @@ pub struct TopUp {
     pub comment: Option<String>,
     pub date: NaiveDate,
 }
-
-

@@ -2,8 +2,9 @@
 
 use crossterm::event::{KeyCode, KeyModifiers, MouseEvent, MouseEventKind, MouseButton};
 use ratatui::layout::Rect;
-use diesel::prelude::*;
+use crate::config::RemoteConfig;
 use crate::models::{Category, Expense, TopUpCategory, TopUp};
+use crate::store::Store;
 
 use super::types::Tab;
 use super::ui::{tab_titles_for_width, compute_tab_rows};
@@ -46,10 +47,18 @@ pub struct AppState {
     pub expense_form: ExpenseFormState,
     pub top_up_category_form: TopUpCategoryFormState,
     pub top_up_form: TopUpFormState,
+
+    /// Configured S3 remote (if any); enables the sync action.
+    pub remote: Option<RemoteConfig>,
+    /// Transient status line shown in the footer: `(message, is_error)`.
+    pub status: Option<(String, bool)>,
 }
 
 impl AppState {
-    pub fn new(conn: &mut SqliteConnection) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(
+        conn: &mut Store,
+        remote: Option<RemoteConfig>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let categories = Category::read_all(conn)?;
         let expenses = Expense::read_all(conn)?;
         let top_up_categories = TopUpCategory::read_all(conn)?;
@@ -76,10 +85,34 @@ impl AppState {
             expense_form: ExpenseFormState::new(),
             top_up_category_form: TopUpCategoryFormState::new(),
             top_up_form: TopUpFormState::new(),
+            remote,
+            status: None,
         })
     }
 
-    pub fn reload_data(&mut self, conn: &mut SqliteConnection) -> Result<(), Box<dyn std::error::Error>> {
+    /// Bidirectional sync with the configured S3 remote, then reload the views.
+    ///
+    /// Delegates the chunk dance (stage local chunk → fetch remote → push local
+    /// → merge → persist) to [`Store::sync`]; on success we reload the in-memory
+    /// data so the merged state shows up in the app immediately.
+    pub fn sync(&mut self, conn: &mut Store) {
+        let Some(remote) = self.remote.clone() else {
+            self.status = Some(("No [remote] configured in money_manager.toml".to_string(), true));
+            return;
+        };
+        match conn.sync(&remote) {
+            Ok(report) => {
+                let _ = self.reload_data(conn);
+                self.status = Some((
+                    format!("Synced — pulled {}, pushed {}", report.pulled.len(), report.pushed.len()),
+                    false,
+                ));
+            }
+            Err(e) => self.status = Some((format!("Sync failed: {e}"), true)),
+        }
+    }
+
+    pub fn reload_data(&mut self, conn: &mut Store) -> Result<(), Box<dyn std::error::Error>> {
         self.categories = Category::read_all(conn)?;
         self.expenses = Expense::read_all(conn)?;
         self.top_up_categories = TopUpCategory::read_all(conn)?;
@@ -115,7 +148,7 @@ impl AppState {
     }
 
     /// Handle all input - delegates to forms or views as appropriate
-    pub fn handle_input(&mut self, key: KeyCode, modifiers: KeyModifiers, conn: &mut SqliteConnection) {
+    pub fn handle_input(&mut self, key: KeyCode, modifiers: KeyModifiers, conn: &mut Store) {
         // Handle form input first if a form is active
         if self.category_form.is_active {
             let result = self.category_form.handle_input(key, conn);
@@ -198,12 +231,15 @@ impl AppState {
             // Reload
             KeyCode::Char('r') | KeyCode::Char('R') => { let _ = self.reload_data(conn); }
 
+            // Sync with the S3 remote
+            KeyCode::Char('s') | KeyCode::Char('S') => self.sync(conn),
+
             _ => {}
         }
     }
 
     /// Handle mouse input for tab switching and view interactions
-    pub fn handle_mouse(&mut self, mouse: MouseEvent, area: Rect, conn: &mut SqliteConnection) {
+    pub fn handle_mouse(&mut self, mouse: MouseEvent, area: Rect, conn: &mut Store) {
         // Handle mouse in active forms first
         if self.category_form.is_active {
             if self.category_form.handle_mouse(mouse) {

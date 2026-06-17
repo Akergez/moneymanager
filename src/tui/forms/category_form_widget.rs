@@ -8,7 +8,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, StatefulWidget, Widget, Wrap},
 };
-use diesel::SqliteConnection;
+use crate::store::Store;
 use crate::models::Category;
 
 /// Result of handling input in a form
@@ -76,7 +76,7 @@ impl CategoryFormState {
     }
 
     /// Submit the form - returns true if successful
-    pub fn submit(&mut self, conn: &mut SqliteConnection) -> Result<(), String> {
+    pub fn submit(&mut self, conn: &mut Store) -> Result<(), String> {
         let name = self.name.trim();
         if name.is_empty() {
             return Err("Category name cannot be empty".to_string());
@@ -90,7 +90,7 @@ impl CategoryFormState {
     }
 
     /// Handle keyboard input, returns the result of the input handling
-    pub fn handle_input(&mut self, key: KeyCode, conn: &mut SqliteConnection) -> FormInputResult {
+    pub fn handle_input(&mut self, key: KeyCode, conn: &mut Store) -> FormInputResult {
         // Process any pending button actions first
         if let Some(action) = self.pending_button_action.take() {
             match action {

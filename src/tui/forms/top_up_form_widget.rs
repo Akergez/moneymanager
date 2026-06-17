@@ -9,7 +9,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph, StatefulWidget, Widget, Wrap},
 };
 use chrono::NaiveDate;
-use diesel::SqliteConnection;
+use crate::store::Store;
 use crate::models::{TopUpCategory, TopUp};
 use super::category_form_widget::FormInputResult;
 
@@ -171,7 +171,7 @@ impl TopUpFormState {
     }
 
     /// Submit the form - returns true if should move to next field, false if submitted
-    pub fn submit(&mut self, conn: &mut SqliteConnection) -> Result<bool, String> {
+    pub fn submit(&mut self, conn: &mut Store) -> Result<bool, String> {
         // If on category field, just move to next
         if self.current_field == TopUpFormField::Category {
             self.next_field();
@@ -211,7 +211,7 @@ impl TopUpFormState {
     }
 
     /// Handle keyboard input, returns the result of the input handling
-    pub fn handle_input(&mut self, key: KeyCode, conn: &mut SqliteConnection) -> FormInputResult {
+    pub fn handle_input(&mut self, key: KeyCode, conn: &mut Store) -> FormInputResult {
         // Process any pending button actions first
         if let Some(action) = self.pending_button_action.take() {
             match action {

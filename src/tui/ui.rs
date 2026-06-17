@@ -213,6 +213,24 @@ fn draw_footer(frame: &mut Frame, state: &AppState, area: Rect) {
     let is_narrow = area.width < 60;
     let is_medium = area.width < 80;
 
+    let any_form_active = state.category_form.is_active
+        || state.expense_form.is_active
+        || state.top_up_category_form.is_active
+        || state.top_up_form.is_active;
+
+    // A pending sync/status message takes over the footer on the main views.
+    if !any_form_active {
+        if let Some((msg, is_error)) = &state.status {
+            let color = if *is_error { Color::Red } else { Color::Green };
+            let status = Paragraph::new(msg.as_str())
+                .style(Style::default().fg(color).add_modifier(Modifier::BOLD))
+                .alignment(Alignment::Center)
+                .block(Block::default().borders(Borders::ALL));
+            frame.render_widget(status, area);
+            return;
+        }
+    }
+
     let footer_text = if state.category_form.is_active {
         if is_narrow {
             "Enter:OK | Esc:Back"
@@ -245,7 +263,7 @@ fn draw_footer(frame: &mut Frame, state: &AppState, area: Rect) {
                 } else if is_medium {
                     "n:New | Tab:Switch | ↑/↓:Scroll | r:Refresh | q:Quit"
                 } else {
-                    "n: New Category | Tab: Switch | ↑/↓: Scroll | r: Refresh | q: Quit"
+                    "n: New Category | Tab: Switch | ↑/↓: Scroll | r: Refresh | s: Sync | q: Quit"
                 }
             }
             Tab::Expenses => {
@@ -254,7 +272,7 @@ fn draw_footer(frame: &mut Frame, state: &AppState, area: Rect) {
                 } else if is_medium {
                     "n:New | ←/→:Sort | ↑/↓:Scroll | r:Refresh | q:Quit"
                 } else {
-                    "n: New Expense | Tab: Switch | ←/→: Sort | ↑/↓: Scroll | r: Refresh | q: Quit"
+                    "n: New Expense | Tab: Switch | ←/→: Sort | ↑/↓: Scroll | r: Refresh | s: Sync | q: Quit"
                 }
             }
             Tab::TopUpCategories => {
@@ -263,7 +281,7 @@ fn draw_footer(frame: &mut Frame, state: &AppState, area: Rect) {
                 } else if is_medium {
                     "n:New | Tab:Switch | ↑/↓:Scroll | r:Refresh | q:Quit"
                 } else {
-                    "n: New Category | Tab: Switch | ↑/↓: Scroll | r: Refresh | q: Quit"
+                    "n: New Category | Tab: Switch | ↑/↓: Scroll | r: Refresh | s: Sync | q: Quit"
                 }
             }
             Tab::TopUps => {
@@ -272,7 +290,7 @@ fn draw_footer(frame: &mut Frame, state: &AppState, area: Rect) {
                 } else if is_medium {
                     "n:New | ←/→:Sort | ↑/↓:Scroll | r:Refresh | q:Quit"
                 } else {
-                    "n: New Top Up | Tab: Switch | ←/→: Sort | ↑/↓: Scroll | r: Refresh | q: Quit"
+                    "n: New Top Up | Tab: Switch | ←/→: Sort | ↑/↓: Scroll | r: Refresh | s: Sync | q: Quit"
                 }
             }
             Tab::ExpensePieChart => {

@@ -1,69 +1,142 @@
+mod config;
+mod import;
 mod models;
-mod schema;
 mod services;
+mod store;
 mod tui;
 
-use diesel::prelude::*;
-use diesel::sqlite::SqliteConnection;
-use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
-use std::path::PathBuf;
 use std::io;
-use clap::Parser;
+use std::path::PathBuf;
+
+use clap::{Parser, Subcommand};
 use crossterm::{
-    execute,
-    event::EnableMouseCapture,
     event::DisableMouseCapture,
+    event::EnableMouseCapture,
+    execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
-use tui::{AppState, EventHandler, Event};
 
-pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
+use config::Config;
+use store::Store;
+use tui::{AppState, Event, EventHandler};
 
-/// A terminal-based money management application
+/// A terminal-based money management application.
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Path to the SQLite database file
-    #[arg(short, long, default_value = "money_manager.db")]
-    database: PathBuf,
+    /// Path to the RDX data blob.
+    #[arg(short, long, default_value = "money_manager.rdx")]
+    data: PathBuf,
+
+    /// Path to the configuration file.
+    #[arg(short, long, default_value = "money_manager.toml")]
+    config: PathBuf,
+
+    #[command(subcommand)]
+    command: Option<Command>,
 }
 
-// Establish database connection
-pub fn establish_connection(database_path: &PathBuf) -> SqliteConnection {
-    let database_url = database_path.to_string_lossy();
-    SqliteConnection::establish(&database_url)
-        .expect(&format!("Error connecting to {}", database_url))
-}
-
-fn run_migrations(conn: &mut SqliteConnection) {
-    conn.run_pending_migrations(MIGRATIONS)
-        .expect("Failed to run database migrations");
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// Synchronize the local data with the configured S3 remote.
+    Sync,
+    /// Print a fresh base64 encryption key for the config's `encryption_key`.
+    Keygen,
+    /// Import or export the S3 remote config as a single shareable string.
+    Config {
+        /// Print a commented config template (redirect into money_manager.toml).
+        #[arg(long)]
+        template: bool,
+        /// Print the current [remote] config as one shareable string.
+        #[arg(long)]
+        export: bool,
+        /// Parse a shareable config string and write it into the config file.
+        #[arg(long, value_name = "STRING")]
+        import: Option<String>,
+    },
+    /// Import records from a CSV file mirroring the original SQL table.
+    ImportCsv {
+        /// Which table the CSV maps to.
+        #[arg(long, value_enum)]
+        table: import::Table,
+        /// Path to the CSV file (must have a header row).
+        file: PathBuf,
+    },
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
-    // Setup terminal
+    if let Some(Command::Keygen) = args.command {
+        use base64::Engine;
+        let key = rdx_sync::crypto::generate_key()?;
+        println!("{}", base64::engine::general_purpose::STANDARD.encode(key));
+        return Ok(());
+    }
+
+    let mut cfg = Config::load(&args.config)?;
+
+    if let Some(Command::Config { template, export, import }) = &args.command {
+        if *template {
+            print!("{}", config::CONFIG_TEMPLATE);
+        } else if let Some(string) = import {
+            cfg.remote = Some(config::RemoteConfig::from_share_string(string)?);
+            cfg.save(&args.config)?;
+            println!("imported S3 config into {}", args.config.display());
+        } else if *export {
+            let remote = cfg
+                .remote
+                .as_ref()
+                .ok_or("[remote] section missing in config")?;
+            println!("{}", remote.to_share_string());
+        } else {
+            return Err("config: pass --template, --export, or --import <STRING>".into());
+        }
+        return Ok(());
+    }
+
+    let source = cfg.ensure_source(&args.config)?;
+    let mut store = Store::open(&args.data, source)?;
+
+    if let Some(Command::Sync) = args.command {
+        let remote = cfg
+            .remote
+            .as_ref()
+            .ok_or("[remote] section missing in config")?;
+        let report = store.sync(remote)?;
+        println!(
+            "sync completed (pulled {}, pushed {})",
+            report.pulled.len(),
+            report.pushed.len()
+        );
+        return Ok(());
+    }
+
+    if let Some(Command::ImportCsv { table, file }) = &args.command {
+        let n = import::import_csv(&mut store, *table, file)?;
+        println!("imported {n} rows from {}", file.display());
+        return Ok(());
+    }
+
+    run_tui(&mut store, cfg.remote.clone())
+}
+
+fn run_tui(
+    store: &mut Store,
+    remote: Option<config::RemoteConfig>,
+) -> Result<(), Box<dyn std::error::Error>> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // Create app state
-    let mut conn = establish_connection(&args.database);
-
-    // Run migrations (creates tables if db is new)
-    run_migrations(&mut conn);
-
-    let mut state = AppState::new(&mut conn)?;
+    let mut state = AppState::new(store, remote)?;
     let event_handler = EventHandler::new();
 
-    // Main loop
-    let res = run_app(&mut terminal, &mut state, &mut conn, &event_handler);
+    let res = run_app(&mut terminal, &mut state, store, &event_handler);
 
-    // Restore terminal
     disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),
@@ -82,7 +155,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn run_app<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
     state: &mut AppState,
-    conn: &mut SqliteConnection,
+    store: &mut Store,
     event_handler: &EventHandler,
 ) -> io::Result<()> {
     while state.running {
@@ -91,10 +164,10 @@ fn run_app<B: ratatui::backend::Backend>(
 
         match event_handler.next()? {
             Event::Key(key) => {
-                state.handle_input(key.code, key.modifiers, conn);
+                state.handle_input(key.code, key.modifiers, store);
             }
             Event::Mouse(mouse) => {
-                state.handle_mouse(mouse, frame_area, conn);
+                state.handle_mouse(mouse, frame_area, store);
             }
             Event::Tick => {}
         }
@@ -102,5 +175,3 @@ fn run_app<B: ratatui::backend::Backend>(
 
     Ok(())
 }
-
-

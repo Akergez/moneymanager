@@ -1,5 +1,8 @@
+# Standalone repo nested inside the tresse checkout — opt out of tresse's workspace.
+[workspace]
+
 [package]
-name = "money_manager"
+name = "money_manager_ng"
 version = "0.2.0"
 edition = "2024"
 authors = ["Your Name <your.email@example.com>"]
@@ -12,16 +15,26 @@ keywords = ["finance", "tui", "terminal", "budget", "expenses"]
 categories = ["command-line-utilities", "finance"]
 
 [dependencies]
-diesel = { version = "2.3.5", features = ["sqlite", "chrono"] }
-diesel_migrations = "2.3"
-# Required for bundled SQLite on platforms without system libsqlite3 (e.g., Termux/Android)
-libsqlite3-sys = { version = "0.30", features = ["bundled"], optional = false }
+# RDX CRDT storage + sync. These crates are workspace members of the tresse repo;
+# cargo locates each by package name within the git checkout. Cargo.lock pins the
+# exact resolved commit. For local development against the surrounding tresse
+# checkout, swap these three lines for the path variant below.
+rdx-rs = { git = "https://gitlab.com/ragusseven/tresse.git", branch = "master" }
+rdx-sync = { git = "https://gitlab.com/ragusseven/tresse.git", branch = "master" }
+rdx-sync-s3 = { git = "https://gitlab.com/ragusseven/tresse.git", branch = "master" }
+# rdx-rs = { path = "../rdx-rs" }
+# rdx-sync = { path = "../rdx-sync" }
+# rdx-sync-s3 = { path = "../rdx-sync-s3" }
 ratatui = "0.29"
 crossterm = "0.28"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.11", features = ["v4", "serde"] }
 clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+csv = "1"
+toml = "0.8"
+base64 = "0.22"
 
 [lints.rust]
 unused_crate_dependencies = "allow"
-
