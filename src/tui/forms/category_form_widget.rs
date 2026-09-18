@@ -23,7 +23,7 @@ pub enum FormInputResult {
 }
 
 /// Button action for this form
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FormButtonAction {
     Confirm,
     Cancel,

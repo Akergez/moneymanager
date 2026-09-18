@@ -61,6 +61,7 @@ pub struct ExpenseFormState {
     pub comment: String,
     pub error_message: Option<String>,
     categories: Vec<(Vec<u8>, String)>,
+    pub account_id: Vec<u8>,
     pub pending_button_action: Option<FormButtonAction>,
     pub button_area: Option<Rect>,
 }
@@ -82,14 +83,19 @@ impl ExpenseFormState {
             comment: String::new(),
             error_message: None,
             categories: Vec::new(),
+            account_id: Vec::new(),
             pending_button_action: None,
             button_area: None,
         }
     }
 
-    pub fn open(&mut self, categories: &[Category]) {
+    pub fn open(&mut self, categories: &[Category], default_date: Option<NaiveDate>, account_id: &[u8]) {
         self.clear();
         self.set_categories(categories);
+        self.account_id = account_id.to_vec();
+        if let Some(date) = default_date {
+            self.date = date.format("%Y-%m-%d").to_string();
+        }
         self.is_active = true;
         self.button_area = None;
     }
@@ -203,7 +209,7 @@ impl ExpenseFormState {
 
         let category_id = &self.categories[self.category_index].0;
 
-        Expense::create(conn, category_id, amount, comment, date)
+        Expense::create(conn, category_id, amount, comment, date, &self.account_id)
             .map_err(|e| format!("Database error: {}", e))?;
 
         self.close();

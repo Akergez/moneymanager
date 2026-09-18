@@ -9,14 +9,15 @@ use ratatui::{
     widgets::{Block, Borders, Cell, Paragraph, Row, StatefulWidget, Table, TableState, Widget},
 };
 use crate::models::{TopUp, TopUpCategory};
-use super::state::{SortableState, SortColumn, SortOrder};
+use super::state::{RowSelection, SortableState, SortColumn, SortOrder};
+use crate::tui::utils::{format_amount, format_amount_short, format_money};
 use super::expenses_widget::{ViewInputResult, ViewState};
 
 /// State for the top-ups table view
 #[derive(Debug, Clone)]
 pub struct TopUpsViewState {
     pub sort: SortableState,
-    pub scroll_offset: usize,
+    pub rows: RowSelection,
     table_state: TableState,
 }
 
@@ -30,27 +31,15 @@ impl TopUpsViewState {
     pub fn new() -> Self {
         Self {
             sort: SortableState::new(),
-            scroll_offset: 0,
+            rows: RowSelection::default(),
             table_state: TableState::default(),
         }
     }
 
-    pub fn scroll_up(&mut self) {
-        self.scroll_offset = self.scroll_offset.saturating_sub(1);
+    /// Forget the current selection (e.g. after a sort change or reload).
+    pub fn reset_selection(&mut self) {
+        self.rows.reset();
     }
-
-    pub fn scroll_down(&mut self) {
-        self.scroll_offset += 1;
-    }
-
-    pub fn page_up(&mut self) {
-        self.scroll_offset = self.scroll_offset.saturating_sub(10);
-    }
-
-    pub fn page_down(&mut self) {
-        self.scroll_offset += 10;
-    }
-
 
     pub fn sort_top_ups(&self, top_ups: &[TopUp]) -> Vec<TopUp> {
         let mut sorted = top_ups.to_vec();
@@ -74,29 +63,38 @@ impl TopUpsViewState {
 impl ViewState for TopUpsViewState {
     fn handle_input(&mut self, key: KeyCode) -> ViewInputResult {
         match key {
+            KeyCode::Char('d') | KeyCode::Char('D') | KeyCode::Delete => {
+                if self.rows.selected.is_some() {
+                    ViewInputResult::OpenConfirmDelete
+                } else {
+                    ViewInputResult::NotConsumed
+                }
+            }
             KeyCode::Char('n') | KeyCode::Char('N') => ViewInputResult::OpenTopUpForm,
             KeyCode::Left => {
                 self.sort.prev_column();
+                self.reset_selection();
                 ViewInputResult::Consumed
             }
             KeyCode::Right => {
                 self.sort.next_column();
+                self.reset_selection();
                 ViewInputResult::Consumed
             }
             KeyCode::Up => {
-                self.scroll_up();
+                self.rows.move_by(-1);
                 ViewInputResult::Consumed
             }
             KeyCode::Down => {
-                self.scroll_down();
+                self.rows.move_by(1);
                 ViewInputResult::Consumed
             }
             KeyCode::PageUp => {
-                self.page_up();
+                self.rows.move_by(-10);
                 ViewInputResult::Consumed
             }
             KeyCode::PageDown => {
-                self.page_down();
+                self.rows.move_by(10);
                 ViewInputResult::Consumed
             }
             _ => ViewInputResult::NotConsumed,
@@ -111,11 +109,11 @@ impl ViewState for TopUpsViewState {
 
         match mouse.kind {
             MouseEventKind::ScrollUp => {
-                self.scroll_up();
+                self.rows.scroll_by(-1);
                 ViewInputResult::Consumed
             }
             MouseEventKind::ScrollDown => {
-                self.scroll_down();
+                self.rows.scroll_by(1);
                 ViewInputResult::Consumed
             }
             MouseEventKind::Down(MouseButton::Left) => {
@@ -156,8 +154,19 @@ impl ViewState for TopUpsViewState {
                             self.sort.set_column(SortColumn::Comment);
                         }
                     }
+                    self.reset_selection();
                     return ViewInputResult::Consumed;
                 }
+
+                // Click on a data row (below the border, header and its margin)
+                // selects it; the table's bottom border sits right above the bar.
+                if x >= area.x
+                    && x < area.x + area.width
+                    && self.rows.click_at(y, area.y, button_bar_start.saturating_sub(1))
+                {
+                    return ViewInputResult::Consumed;
+                }
+
                 ViewInputResult::NotConsumed
             }
             _ => ViewInputResult::NotConsumed,
@@ -169,11 +178,19 @@ impl ViewState for TopUpsViewState {
 pub struct TopUpsView<'a> {
     top_ups: &'a [TopUp],
     categories: &'a [TopUpCategory],
+    /// Name of the account shown, for the title.
+    account_name: &'a str,
+    currency: &'a str,
 }
 
 impl<'a> TopUpsView<'a> {
-    pub fn new(top_ups: &'a [TopUp], categories: &'a [TopUpCategory]) -> Self {
-        Self { top_ups, categories }
+    pub fn new(
+        top_ups: &'a [TopUp],
+        categories: &'a [TopUpCategory],
+        account_name: &'a str,
+        currency: &'a str,
+    ) -> Self {
+        Self { top_ups, categories, account_name, currency }
     }
 }
 
@@ -192,7 +209,7 @@ impl<'a> StatefulWidget for TopUpsView<'a> {
 
 
         // Render table
-        render_top_ups_table(chunks[0], buf, state, self.top_ups, self.categories);
+        render_top_ups_table(chunks[0], buf, state, &self);
 
         // Render button bar
         render_button_bar(chunks[1], buf);
@@ -219,9 +236,11 @@ fn render_button_bar(area: Rect, buf: &mut Buffer) {
     Widget::render(paragraph, area, buf);
 }
 
-fn render_top_ups_table(area: Rect, buf: &mut Buffer, state: &mut TopUpsViewState, top_ups: &[TopUp], categories: &[TopUpCategory]) {
-        let sorted = state.sort_top_ups(top_ups);
-        let total: f64 = sorted.iter().map(|t| t.amount).sum();
+fn render_top_ups_table(area: Rect, buf: &mut Buffer, state: &mut TopUpsViewState, view: &TopUpsView) {
+        let categories = view.categories;
+        let sorted = state.sort_top_ups(view.top_ups);
+        let sum: f64 = sorted.iter().map(|t| t.amount).sum();
+        state.rows.update_layout(sorted.len(), area.height);
         let sort = &state.sort;
 
         // Responsive: determine if narrow screen
@@ -249,11 +268,17 @@ fn render_top_ups_table(area: Rect, buf: &mut Buffer, state: &mut TopUpsViewStat
         let header_cells: Vec<Cell> = headers.iter().map(|h| Cell::from(h.clone()).style(header_style)).collect();
         let header = Row::new(header_cells).height(1).bottom_margin(1);
 
-        // Build rows - responsive columns
+        // Build rows - responsive columns, highlighting the selected row
+        let selected_index = state.rows.selected;
+        let scroll_offset = state.rows.scroll_offset;
+        let highlight_style = Style::default().fg(Color::Yellow).bg(Color::Magenta).add_modifier(Modifier::BOLD);
+
         let rows: Vec<Row> = sorted
             .iter()
-            .skip(state.scroll_offset)
-            .map(|t| {
+            .skip(scroll_offset)
+            .enumerate()
+            .map(|(p, t)| {
+                let is_selected = selected_index == Some(scroll_offset + p);
                 let cells = if is_narrow {
                     // Narrow: show only essential columns
                     let cat_name = get_category_name(categories, &t.category_id);
@@ -262,21 +287,27 @@ fn render_top_ups_table(area: Rect, buf: &mut Buffer, state: &mut TopUpsViewStat
                     } else {
                         cat_name
                     };
-                    vec![
+                    let cells: Vec<Cell> = vec![
                         Cell::from(short_cat),
-                        Cell::from(format!("{:.0}", t.amount)),
+                        Cell::from(format_amount_short(t.amount)),
                         Cell::from(t.date.format("%m-%d").to_string()),
-                    ]
+                    ];
+                    cells
                 } else {
-                    vec![
+                    let cells: Vec<Cell> = vec![
                         Cell::from(format_uuid_short(&t.id)),
                         Cell::from(get_category_name(categories, &t.category_id)),
-                        Cell::from(format!("{:.2}", t.amount)),
+                        Cell::from(format_amount(t.amount)),
                         Cell::from(t.date.format("%Y-%m-%d").to_string()),
                         Cell::from(t.comment.clone().unwrap_or_default()),
-                    ]
+                    ];
+                    cells
                 };
-                Row::new(cells).height(1)
+                let styled: Vec<Cell> = cells
+                    .into_iter()
+                    .map(|c| if is_selected { c.style(highlight_style) } else { c })
+                    .collect();
+                Row::new(styled).height(1)
             })
             .collect();
 
@@ -307,9 +338,15 @@ fn render_top_ups_table(area: Rect, buf: &mut Buffer, state: &mut TopUpsViewStat
 
         // Responsive title
         let title = if is_narrow {
-            format!("{} | {:.0}", sorted.len(), total)
+            format!("{} | {} {}", sorted.len(), format_amount_short(sum), view.currency)
         } else {
-            format!("Top-Ups (Total: {} | Sum: {:.2})", sorted.len(), total)
+            format!(
+                "Top-Ups · {} ({}) · Total: {} | Sum: {}",
+                view.account_name,
+                view.currency,
+                sorted.len(),
+                format_money(sum, view.currency)
+            )
         };
 
         let table = Table::new(rows, widths)

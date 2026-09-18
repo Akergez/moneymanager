@@ -9,7 +9,8 @@ use ratatui::{
     widgets::{Block, Borders, Cell, Paragraph, Row, StatefulWidget, Table, TableState, Widget},
 };
 use crate::models::{Category, Expense};
-use super::state::{SortableState, SortColumn, SortOrder};
+use super::state::{RowSelection, SortableState, SortColumn, SortOrder};
+use crate::tui::utils::{format_amount, format_amount_short, format_money};
 
 /// Result of view input handling
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -26,6 +27,16 @@ pub enum ViewInputResult {
     OpenTopUpCategoryForm,
     /// Request to open top up form
     OpenTopUpForm,
+    /// Request to open the account form (create a new account)
+    OpenAccountForm,
+    /// Request to open the account form editing the currently selected account
+    OpenAccountEdit,
+    /// Mark the currently selected account (in the accounts view) as current
+    MakeCurrent,
+    /// Request to open the transfer form
+    OpenTransferForm,
+    /// Request to confirm deleting the currently selected record
+    OpenConfirmDelete,
 }
 
 /// Trait for view states that can handle input
@@ -42,7 +53,7 @@ pub trait ViewState {
 #[derive(Debug, Clone)]
 pub struct ExpensesViewState {
     pub sort: SortableState,
-    pub scroll_offset: usize,
+    pub rows: RowSelection,
     table_state: TableState,
 }
 
@@ -56,27 +67,15 @@ impl ExpensesViewState {
     pub fn new() -> Self {
         Self {
             sort: SortableState::new(),
-            scroll_offset: 0,
+            rows: RowSelection::default(),
             table_state: TableState::default(),
         }
     }
 
-    pub fn scroll_up(&mut self) {
-        self.scroll_offset = self.scroll_offset.saturating_sub(1);
+    /// Forget the current selection (e.g. after a sort change or reload).
+    pub fn reset_selection(&mut self) {
+        self.rows.reset();
     }
-
-    pub fn scroll_down(&mut self) {
-        self.scroll_offset += 1;
-    }
-
-    pub fn page_up(&mut self) {
-        self.scroll_offset = self.scroll_offset.saturating_sub(10);
-    }
-
-    pub fn page_down(&mut self) {
-        self.scroll_offset += 10;
-    }
-
 
     /// Sort expenses according to current sort state
     pub fn sort_expenses(&self, expenses: &[Expense]) -> Vec<Expense> {
@@ -104,26 +103,35 @@ impl ViewState for ExpensesViewState {
             KeyCode::Char('n') | KeyCode::Char('N') => ViewInputResult::OpenExpenseForm,
             KeyCode::Left => {
                 self.sort.prev_column();
+                self.reset_selection();
                 ViewInputResult::Consumed
             }
             KeyCode::Right => {
                 self.sort.next_column();
+                self.reset_selection();
                 ViewInputResult::Consumed
             }
+            KeyCode::Char('d') | KeyCode::Char('D') | KeyCode::Delete => {
+                if self.rows.selected.is_some() {
+                    ViewInputResult::OpenConfirmDelete
+                } else {
+                    ViewInputResult::NotConsumed
+                }
+            }
             KeyCode::Up => {
-                self.scroll_up();
+                self.rows.move_by(-1);
                 ViewInputResult::Consumed
             }
             KeyCode::Down => {
-                self.scroll_down();
+                self.rows.move_by(1);
                 ViewInputResult::Consumed
             }
             KeyCode::PageUp => {
-                self.page_up();
+                self.rows.move_by(-10);
                 ViewInputResult::Consumed
             }
             KeyCode::PageDown => {
-                self.page_down();
+                self.rows.move_by(10);
                 ViewInputResult::Consumed
             }
             _ => ViewInputResult::NotConsumed,
@@ -139,11 +147,11 @@ impl ViewState for ExpensesViewState {
         match mouse.kind {
             // Scroll wheel support
             MouseEventKind::ScrollUp => {
-                self.scroll_up();
+                self.rows.scroll_by(-1);
                 ViewInputResult::Consumed
             }
             MouseEventKind::ScrollDown => {
-                self.scroll_down();
+                self.rows.scroll_by(1);
                 ViewInputResult::Consumed
             }
             // Click on header row to change sort column or button
@@ -189,8 +197,19 @@ impl ViewState for ExpensesViewState {
                             self.sort.set_column(SortColumn::Comment);
                         }
                     }
+                    self.reset_selection();
                     return ViewInputResult::Consumed;
                 }
+
+                // Click on a data row (below the border, header and its margin)
+                // selects it; the table's bottom border sits right above the bar.
+                if x >= area.x
+                    && x < area.x + area.width
+                    && self.rows.click_at(y, area.y, button_bar_start.saturating_sub(1))
+                {
+                    return ViewInputResult::Consumed;
+                }
+
                 ViewInputResult::NotConsumed
             }
             _ => ViewInputResult::NotConsumed,
@@ -202,11 +221,19 @@ impl ViewState for ExpensesViewState {
 pub struct ExpensesView<'a> {
     expenses: &'a [Expense],
     categories: &'a [Category],
+    /// Name of the account shown, for the title.
+    account_name: &'a str,
+    currency: &'a str,
 }
 
 impl<'a> ExpensesView<'a> {
-    pub fn new(expenses: &'a [Expense], categories: &'a [Category]) -> Self {
-        Self { expenses, categories }
+    pub fn new(
+        expenses: &'a [Expense],
+        categories: &'a [Category],
+        account_name: &'a str,
+        currency: &'a str,
+    ) -> Self {
+        Self { expenses, categories, account_name, currency }
     }
 }
 
@@ -225,7 +252,7 @@ impl<'a> StatefulWidget for ExpensesView<'a> {
 
 
         // Render table
-        render_expenses_table(chunks[0], buf, state, self.expenses, self.categories);
+        render_expenses_table(chunks[0], buf, state, &self);
 
         // Render button bar
         render_button_bar(chunks[1], buf);
@@ -252,9 +279,11 @@ fn render_button_bar(area: Rect, buf: &mut Buffer) {
     Widget::render(paragraph, area, buf);
 }
 
-fn render_expenses_table(area: Rect, buf: &mut Buffer, state: &mut ExpensesViewState, expenses: &[Expense], categories: &[Category]) {
-        let sorted_expenses = state.sort_expenses(expenses);
-        let total: f64 = sorted_expenses.iter().map(|e| e.amount).sum();
+fn render_expenses_table(area: Rect, buf: &mut Buffer, state: &mut ExpensesViewState, view: &ExpensesView) {
+        let categories = view.categories;
+        let sorted_expenses = state.sort_expenses(view.expenses);
+        let sum: f64 = sorted_expenses.iter().map(|e| e.amount).sum();
+        state.rows.update_layout(sorted_expenses.len(), area.height);
         let sort = &state.sort;
 
         // Responsive: determine if narrow screen
@@ -285,11 +314,17 @@ fn render_expenses_table(area: Rect, buf: &mut Buffer, state: &mut ExpensesViewS
             .collect();
         let header = Row::new(header_cells).height(1).bottom_margin(1);
 
-        // Build rows - responsive columns
+        // Build rows - responsive columns, highlighting the selected row
+        let selected_index = state.rows.selected;
+        let scroll_offset = state.rows.scroll_offset;
+        let highlight_style = Style::default().fg(Color::Yellow).bg(Color::Magenta).add_modifier(Modifier::BOLD);
+
         let rows: Vec<Row> = sorted_expenses
             .iter()
-            .skip(state.scroll_offset)
-            .map(|exp| {
+            .skip(scroll_offset)
+            .enumerate()
+            .map(|(p, exp)| {
+                let is_selected = selected_index == Some(scroll_offset + p);
                 let cells = if is_narrow {
                     // Narrow: show only essential columns
                     let cat_name = get_category_name(categories, &exp.category_id);
@@ -298,21 +333,27 @@ fn render_expenses_table(area: Rect, buf: &mut Buffer, state: &mut ExpensesViewS
                     } else {
                         cat_name
                     };
-                    vec![
+                    let cells: Vec<Cell> = vec![
                         Cell::from(short_cat),
-                        Cell::from(format!("{:.0}", exp.amount)),
+                        Cell::from(format_amount_short(exp.amount)),
                         Cell::from(exp.date.format("%m-%d").to_string()),
-                    ]
+                    ];
+                    cells
                 } else {
-                    vec![
+                    let cells: Vec<Cell> = vec![
                         Cell::from(format_uuid_short(&exp.id)),
                         Cell::from(get_category_name(categories, &exp.category_id)),
-                        Cell::from(format!("{:.2}", exp.amount)),
+                        Cell::from(format_amount(exp.amount)),
                         Cell::from(exp.date.format("%Y-%m-%d").to_string()),
                         Cell::from(exp.comment.clone().unwrap_or_default()),
-                    ]
+                    ];
+                    cells
                 };
-                Row::new(cells).height(1)
+                let styled: Vec<Cell> = cells
+                    .into_iter()
+                    .map(|c| if is_selected { c.style(highlight_style) } else { c })
+                    .collect();
+                Row::new(styled).height(1)
             })
             .collect();
 
@@ -343,9 +384,15 @@ fn render_expenses_table(area: Rect, buf: &mut Buffer, state: &mut ExpensesViewS
 
         // Responsive title
         let title = if is_narrow {
-            format!("{} | {:.0}", sorted_expenses.len(), total)
+            format!("{} | {} {}", sorted_expenses.len(), format_amount_short(sum), view.currency)
         } else {
-            format!("Expenses (Total: {} | Sum: {:.2})", sorted_expenses.len(), total)
+            format!(
+                "Expenses · {} ({}) · Total: {} | Sum: {}",
+                view.account_name,
+                view.currency,
+                sorted_expenses.len(),
+                format_money(sum, view.currency)
+            )
         };
 
         let table = Table::new(rows, widths)

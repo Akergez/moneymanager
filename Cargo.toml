@@ -3,7 +3,7 @@
 
 [package]
 name = "money_manager_ng"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 authors = ["Your Name <your.email@example.com>"]
 description = "A terminal-based money management application with expense and income tracking"

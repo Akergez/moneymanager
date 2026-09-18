@@ -3,8 +3,8 @@ use uuid::Uuid;
 
 use crate::models::Expense;
 use crate::store::{
-    EXPENSES_IDX, Store, child_f64, child_opt_str, child_str, hex_decode, hex_encode,
-    opt_str_value,
+    DEFAULT_ACCOUNT_ID, EXPENSES_IDX, Store, child_account_id, child_f64, child_opt_str, child_str,
+    hex_decode, hex_encode, opt_str_value,
 };
 use rdx_rs::RdxValue;
 
@@ -17,15 +17,23 @@ impl Expense {
         amount: f64,
         comment: Option<&str>,
         date: NaiveDate,
+        account_id: &[u8],
     ) -> Result<Expense, String> {
         let id = Uuid::new_v4().as_bytes().to_vec();
-        Self::create_with_id(store, &id, category_id, amount, comment, date)?;
+        let account_id = if account_id.is_empty() {
+            DEFAULT_ACCOUNT_ID.to_vec()
+        } else {
+            account_id.to_vec()
+        };
+        Self::create_with_id(store, &id, category_id, amount, comment, date, &account_id)?;
         Ok(Expense {
             id,
             category_id: category_id.to_vec(),
             amount,
             comment: comment.map(str::to_string),
             date,
+            account_id,
+            transfer: None,
         })
     }
 
@@ -38,8 +46,13 @@ impl Expense {
         amount: f64,
         comment: Option<&str>,
         date: NaiveDate,
+        account_id: &[u8],
     ) -> Result<(), String> {
-        store.upsert(EXPENSES_IDX, &hex_encode(id), fields(category_id, amount, comment, date))
+        store.upsert(
+            EXPENSES_IDX,
+            &hex_encode(id),
+            fields(category_id, amount, comment, date, account_id),
+        )
     }
 
     pub fn read_all(store: &Store) -> Result<Vec<Expense>, String> {
@@ -52,11 +65,13 @@ impl Expense {
                 amount: child_f64(rec, 2),
                 comment: child_opt_str(rec, 3),
                 date: parse_date(&child_str(rec, 4)),
+                account_id: child_account_id(rec, 5),
+                transfer: None,
             })
             .collect())
     }
 
-    // CRUD completeness: edit/delete aren't wired into the TUI yet.
+    // CRUD completeness: editing isn't wired into the TUI yet.
     #[allow(dead_code)]
     pub fn update(
         store: &mut Store,
@@ -65,31 +80,42 @@ impl Expense {
         new_comment: Option<&str>,
         new_date: NaiveDate,
     ) -> Result<usize, String> {
-        // Preserve the existing category — diesel's UPDATE left it untouched.
+        // Preserve the existing category and account — the UPDATE left both
+        // untouched.
         let key = hex_encode(expense_id);
-        let category_id = store
+        let (category_id, account_id) = store
             .records(EXPENSES_IDX)
             .into_iter()
             .find(|rec| child_str(rec, 0) == key)
-            .map(|rec| hex_decode(&child_str(rec, 1)))
-            .unwrap_or_default();
-        store.upsert(EXPENSES_IDX, &key, fields(&category_id, new_amount, new_comment, new_date))?;
+            .map(|rec| (hex_decode(&child_str(rec, 1)), child_account_id(rec, 5)))
+            .unwrap_or((Vec::new(), DEFAULT_ACCOUNT_ID.to_vec()));
+        store.upsert(
+            EXPENSES_IDX,
+            &key,
+            fields(&category_id, new_amount, new_comment, new_date, &account_id),
+        )?;
         Ok(1)
     }
 
-    #[allow(dead_code)]
     pub fn delete(store: &mut Store, expense_id: &[u8]) -> Result<usize, String> {
         store.delete(EXPENSES_IDX, &hex_encode(expense_id))?;
         Ok(1)
     }
 }
 
-fn fields(category_id: &[u8], amount: f64, comment: Option<&str>, date: NaiveDate) -> Vec<RdxValue> {
+fn fields(
+    category_id: &[u8],
+    amount: f64,
+    comment: Option<&str>,
+    date: NaiveDate,
+    account_id: &[u8],
+) -> Vec<RdxValue> {
     vec![
         RdxValue::Str(hex_encode(category_id)),
         RdxValue::Float(amount),
         opt_str_value(comment),
         RdxValue::Str(date.format(DATE_FMT).to_string()),
+        RdxValue::Str(hex_encode(account_id)),
     ]
 }
 

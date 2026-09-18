@@ -6,6 +6,9 @@ A terminal-based money management application built with Rust, featuring expense
 
 - 📊 **Expense Tracking**: Track your expenses with customizable categories
 - 💰 **Income Management**: Record income/top-ups with categories
+- 🏦 **Multiple Accounts**: Each account has its own currency, balance, lists and charts
+- ⇄ **Transfers**: Move money between accounts, including currency exchange with an automatic rate
+- 🗑️ **Deletion**: Delete expenses, top-ups and transfers (synced as CRDT tombstones)
 - 📈 **Visual Analytics**: View your spending with pie charts, bar charts, and line charts
 - 🖥️ **Terminal UI**: Beautiful TUI built with Ratatui
 - 🖱️ **Mouse Support**: Click on tabs to switch between views
@@ -100,13 +103,22 @@ is free; the file must have a header row.
 |-----------------|---------|
 | `categories` | `id,name` |
 | `top-up-categories` | `id,name` |
-| `expenses` | `id,category_id,amount,comment,date` |
-| `top-ups` | `id,category_id,amount,comment,date` |
+| `expenses` | `id,category_id,amount,comment,date[,account_id]` |
+| `top-ups` | `id,category_id,amount,comment,date[,account_id]` |
+| `accounts` | `id,name,currency,opening_balance` |
+| `transfers` | `id,from_account_id,to_account_id,amount_from,amount_to,comment,date` |
 
-- `id` / `category_id` are UUIDs (canonical `xxxxxxxx-…` or 32-char hex).
+- `id` and the `*_id` references are UUIDs (canonical `xxxxxxxx-…` or 32-char hex).
 - A blank `id` cell is filled with a fresh UUID; a blank `comment` becomes empty.
 - `date` is `YYYY-MM-DD`.
-- Import categories before the expenses/top-ups that reference them.
+- `account_id` is optional: without the column (or with a blank cell) a record
+  goes to the default account, whose id is the nil UUID
+  `00000000-0000-0000-0000-000000000000`.
+- `currency` is a 3-letter ISO code (`RUB`, `USD`, …); a blank
+  `opening_balance` means 0.
+- Transfers need two different accounts and positive amounts, each in its own
+  account's currency (`amount_from` is debited, `amount_to` credited).
+- Import categories and accounts before the records that reference them.
 
 ```csv
 id,category_id,amount,comment,date
@@ -117,11 +129,16 @@ id,category_id,amount,comment,date
 
 | Key | Action |
 |-----|--------|
-| `1-9` | Switch between tabs |
+| `0-9` | Switch between tabs |
 | `Tab` | Switch to next tab |
 | `n` | Create new entry |
-| `↑/↓` | Navigate list |
+| `↑/↓` | Select a row / navigate list |
 | `←/→` | Sort columns / Navigate months / Scroll charts |
+| `[` / `]` | Previous / next account |
+| `t` | New transfer (from any tab) |
+| `d` / `Delete` | Delete the selected expense, top-up or transfer (asks for confirmation) |
+| `e` / `Enter` | Accounts tab: edit / make the selected account current |
+| `x` | Pie charts: hide/show transfers |
 | `r` | Refresh data |
 | `s` | Sync with the S3 remote |
 | `q` | Quit |
@@ -131,12 +148,14 @@ id,category_id,amount,comment,date
 | Action | Effect |
 |--------|--------|
 | Click on tab | Switch to that tab |
+| Click on a table row | Select it |
 | Scroll wheel | Scroll through lists |
 | Click on table header | Sort by that column |
 | Click category (Line Chart) | Toggle category selection |
 
 ### Tabs
 
+0. **Accounts**: All accounts with their currency, income, spending and balance
 1. **Expense Categories**: Manage expense categories
 2. **Expenses**: View and add expenses
 3. **Top-Up Categories**: Manage income categories
@@ -146,6 +165,31 @@ id,category_id,amount,comment,date
 7. **Expense Bar Chart**: Monthly expense overview
 8. **Top-Up Bar Chart**: Monthly income overview
 9. **Line Chart**: Expense trends over time
+- **⇄ Transfers**: All transfers between accounts, with the exchange rate
+
+Tabs 2 and 4–9 show the **current account** only; its name and balance are in
+the tab bar, and `[` / `]` switch accounts.
+
+### Accounts and transfers
+
+- Every account has a name, a currency and an opening balance. Categories are
+  shared by all accounts. Existing data lives in the default account
+  ("Основной", currency from `default_currency` in the config, `RUB` if unset).
+- Balance = opening balance + top-ups + incoming transfers − expenses −
+  outgoing transfers. Different currencies are never added together.
+- A transfer records how much left account A (in A's currency) and how much
+  arrived on account B (in B's currency); the rate is derived from the two
+  amounts. It shows up as an expense in the "⇄ Перевод" category on A and as a
+  top-up in the same category on B. Deleting either side deletes the whole
+  transfer.
+- The last selected account is remembered in `last_account` in
+  `money_manager.toml` (local only, not synced).
+
+**Compatibility with 0.3.x.** Older versions still open and sync the data: they
+see every expense and top-up as if it belonged to a single account and do not
+see transfers or accounts (so their totals ignore transfers). An older version
+that *overwrites* an existing record — only possible through `import-csv` with
+the same ids — moves that record back to the default account.
 
 ## Responsive Design
 

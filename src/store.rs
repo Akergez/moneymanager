@@ -1,15 +1,20 @@
 //! RDX-backed persistence: replaces the former SQLite/diesel layer.
 //!
-//! The dataset is a CRDT document — a positional [`Tuple`] of four [`Eulerian`]
-//! collections (categories, expenses, top-up categories, top-ups, in the order
-//! of the `*_IDX` constants below). Each record is a `Tuple` whose first child is
-//! its hex id (the Eulerian map key); the rest are fields. Per-record stamps give
-//! last-write-wins semantics and tombstones mark deletions.
+//! The dataset is a CRDT document — a positional [`Tuple`] of six [`Eulerian`]
+//! collections (categories, expenses, top-up categories, top-ups, accounts,
+//! transfers, in the order of the `*_IDX` constants below). Each record is a
+//! `Tuple` whose first child is its hex id (the Eulerian map key); the rest are
+//! fields. Per-record stamps give last-write-wins semantics and tombstones mark
+//! deletions.
+//!
+//! Collections are merged positionally with zero-padding, so documents written
+//! with fewer collections (legacy, pre-accounts) merge losslessly into this
+//! six-collection shape; and a record missing a trailing field reads as empty.
 //!
 //! **Chunking.** A *chunk is the delta of one sync* — not the whole document
 //! (no dedup, re-sends everything) and not one record (object explosion). Local
 //! writes accumulate in a small mutable **staging** delta (`staging.rdx`, a
-//! 4-collection doc holding only the records changed since the last seal),
+//! 6-collection doc holding only the records changed since the last seal),
 //! persisted on every write so a crash loses nothing. On sync the staged delta
 //! is *sealed* into a single immutable, content-addressed chunk in a
 //! [`FileChunkStore`] (one file per chunk, named by its hash), then exchanged
@@ -35,7 +40,14 @@ pub const CATEGORIES_IDX: usize = 0;
 pub const EXPENSES_IDX: usize = 1;
 pub const TOP_UP_CATEGORIES_IDX: usize = 2;
 pub const TOP_UPS_IDX: usize = 3;
-const COLLECTION_COUNT: usize = 4;
+pub const ACCOUNTS_IDX: usize = 4;
+pub const TRANSFERS_IDX: usize = 5;
+const COLLECTION_COUNT: usize = 6;
+
+/// Fixed id of the implicit default account. Existing records with no
+/// `account_id` belong to it; the id is deterministic so two devices creating
+/// it at the same time merge to a single record (LWW).
+pub const DEFAULT_ACCOUNT_ID: [u8; 16] = [0; 16];
 
 /// One unit of Lamport time. The low 6 bits of a stamp's `time` are the
 /// revision (bit 0 = tombstone), so a full "tick" is `1 << 6`.
@@ -47,7 +59,7 @@ pub struct Store {
     chunks: FileChunkStore,
     /// Where the uncommitted staging delta is persisted.
     staging_path: PathBuf,
-    /// Uncommitted writes since the last seal: a 4-collection delta document.
+    /// Uncommitted writes since the last seal: a 6-collection delta document.
     staged: RdxElement,
     /// In-memory full view = `merge(get_completed(chunks), staged)`.
     doc: RdxElement,
@@ -156,8 +168,6 @@ impl Store {
     }
 
     /// Tombstone the record keyed by `key` in collection `idx`.
-    // Reached only via the services' `delete`, which the TUI doesn't call yet.
-    #[allow(dead_code)]
     pub fn delete(&mut self, idx: usize, key: &str) -> Result<(), String> {
         let mut stamp = self.next_stamp();
         stamp.time |= 1; // mark tombstone (odd time)
@@ -213,7 +223,7 @@ impl Store {
     }
 }
 
-/// An empty document: a 4-tuple of empty Eulerian collections.
+/// An empty document: a 6-tuple of empty Eulerian collections.
 fn empty_doc() -> RdxElement {
     let cols = (0..COLLECTION_COUNT)
         .map(|_| RdxElement::new(RdxValue::Eulerian(Vec::new())))
@@ -324,6 +334,17 @@ pub fn child_str(rec: &RdxElement, pos: usize) -> String {
         .to_string()
 }
 
+/// The account id stored at `pos`, or [`DEFAULT_ACCOUNT_ID`] for legacy records
+/// written before accounts existed (field absent → "").
+pub fn child_account_id(rec: &RdxElement, pos: usize) -> Vec<u8> {
+    let raw = child_str(rec, pos);
+    if raw.is_empty() {
+        DEFAULT_ACCOUNT_ID.to_vec()
+    } else {
+        hex_decode(&raw)
+    }
+}
+
 /// The float value of a record child, or 0.0 if absent/wrong type.
 pub fn child_f64(rec: &RdxElement, pos: usize) -> f64 {
     rec.value
@@ -350,7 +371,8 @@ pub fn child_opt_str(rec: &RdxElement, pos: usize) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{Category, Expense};
+    use crate::ledger;
+    use crate::models::{Account, Category, Expense, TopUp, Transfer};
     use chrono::NaiveDate;
 
     fn temp_dir(tag: &str) -> std::path::PathBuf {
@@ -368,8 +390,9 @@ mod tests {
 
         let cat = Category::create(&mut store, "Food").unwrap();
         let date = NaiveDate::from_ymd_opt(2026, 6, 15).unwrap();
-        Expense::create(&mut store, &cat.id, 12.5, Some("lunch"), date).unwrap();
-        Expense::create(&mut store, &cat.id, 3.0, None, date).unwrap();
+        Expense::create(&mut store, &cat.id, 12.5, Some("lunch"), date, &DEFAULT_ACCOUNT_ID)
+            .unwrap();
+        Expense::create(&mut store, &cat.id, 3.0, None, date, &DEFAULT_ACCOUNT_ID).unwrap();
 
         let cats = Category::read_all(&store).unwrap();
         assert_eq!(cats.len(), 1);
@@ -472,5 +495,171 @@ mod tests {
 
         std::fs::remove_dir_all(&da).ok();
         std::fs::remove_dir_all(&db).ok();
+    }
+
+    /// A record tuple `[key, fields...]` with every element stamped `stamp`.
+    fn legacy_record(key: &str, fields: Vec<RdxValue>, stamp: Stamp) -> RdxElement {
+        let mut children = vec![RdxElement::with_stamp(RdxValue::Str(key.to_string()), stamp)];
+        children.extend(fields.into_iter().map(|v| RdxElement::with_stamp(v, stamp)));
+        RdxElement::with_stamp(RdxValue::Tuple(children), stamp)
+    }
+
+    #[test]
+    fn legacy_four_collection_document_opens_with_default_account() {
+        // A pre-accounts document: 4 collections, 4-field expense records.
+        let stamp = Stamp::new(0x99, 5 * TIME_STEP);
+        let cat = "11".repeat(16);
+        let expense = legacy_record(
+            &"22".repeat(16),
+            vec![
+                RdxValue::Str(cat.clone()),
+                RdxValue::Float(42.0),
+                RdxValue::Term("null".to_string()),
+                RdxValue::Str("2024-01-02".to_string()),
+            ],
+            stamp,
+        );
+        let cols = (0..4)
+            .map(|i| RdxElement::new(RdxValue::Eulerian(if i == EXPENSES_IDX { vec![expense.clone()] } else { Vec::new() })))
+            .collect();
+        let legacy = RdxElement::new(RdxValue::Tuple(cols));
+
+        let dir = temp_dir("legacy");
+        std::fs::create_dir_all(&dir).unwrap();
+        let blob = dir.join("legacy.rdx");
+        std::fs::write(&blob, rdx_rs::encode(&legacy)).unwrap();
+        let mut store = Store::open(&dir.join("data"), 7).unwrap();
+        assert_eq!(store.import_legacy_blob(&blob).unwrap(), 1);
+
+        // New-shape writes merge with the old chunk, and old records read as
+        // belonging to the default account.
+        Account::ensure_default(&mut store, "RUB").unwrap();
+        let exps = Expense::read_all(&store).unwrap();
+        assert_eq!(exps.len(), 1);
+        assert_eq!(exps[0].amount, 42.0);
+        assert_eq!(exps[0].account_id, DEFAULT_ACCOUNT_ID.to_vec());
+        assert_eq!(Account::read_all(&store).unwrap().len(), 1);
+
+        // Survives a reopen as well.
+        store.seal().unwrap();
+        let reopened = Store::open(&dir.join("data"), 7).unwrap();
+        assert_eq!(Expense::read_all(&reopened).unwrap()[0].account_id, DEFAULT_ACCOUNT_ID.to_vec());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn update_keeps_account_id() {
+        // Note: rdx merges two versions of a record field-by-field only when
+        // they carry the same stamp; a newer write replaces the whole record.
+        // So a pre-accounts client that *overwrites* a record (it can only do
+        // so via CSV re-import) resets it to the default account. Current
+        // writers therefore always rewrite every field, account_id included.
+        let dir = temp_dir("update_account");
+        let mut store = Store::open(&dir, 7).unwrap();
+        let account = [7u8; 16];
+        let date = NaiveDate::from_ymd_opt(2026, 6, 15).unwrap();
+        let e = Expense::create(&mut store, &[1u8; 16], 10.0, None, date, &account).unwrap();
+        let t = TopUp::create(&mut store, &[1u8; 16], 10.0, None, date, &account).unwrap();
+
+        Expense::update(&mut store, &e.id, 99.0, Some("edited"), date).unwrap();
+        TopUp::update(&mut store, &t.id, 98.0, None, date).unwrap();
+
+        let exps = Expense::read_all(&store).unwrap();
+        assert_eq!((exps[0].amount, exps[0].account_id.clone()), (99.0, account.to_vec()));
+        assert_eq!(exps[0].category_id, vec![1u8; 16]);
+        let tops = TopUp::read_all(&store).unwrap();
+        assert_eq!((tops[0].amount, tops[0].account_id.clone()), (98.0, account.to_vec()));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn ensure_default_is_idempotent_and_merges_to_one_account() {
+        let da = temp_dir("default_a");
+        let db = temp_dir("default_b");
+        let mut a = Store::open(&da, 0xA).unwrap();
+        let mut b = Store::open(&db, 0xB).unwrap();
+
+        Account::ensure_default(&mut a, "RUB").unwrap();
+        Account::ensure_default(&mut a, "RUB").unwrap();
+        assert_eq!(Account::read_all(&a).unwrap().len(), 1);
+
+        // Two devices create the default account independently.
+        Account::ensure_default(&mut b, "USD").unwrap();
+        let merged = rdx_rs::merge(&a.doc, &b.doc);
+        let live: Vec<_> = merged.value.children().unwrap()[ACCOUNTS_IDX]
+            .value
+            .children()
+            .unwrap()
+            .iter()
+            .filter(|r| !r.is_tombstone())
+            .collect();
+        assert_eq!(live.len(), 1);
+        assert_eq!(child_str(live[0], 0), hex_encode(&DEFAULT_ACCOUNT_ID));
+
+        std::fs::remove_dir_all(&da).ok();
+        std::fs::remove_dir_all(&db).ok();
+    }
+
+    #[test]
+    fn deleting_records_and_transfers() {
+        let dir = temp_dir("delete_ledger");
+        let mut store = Store::open(&dir, 1).unwrap();
+        Account::ensure_default(&mut store, "RUB").unwrap();
+        let usd = Account::create(&mut store, "Card USD", "USD", 0.0).unwrap();
+        let date = NaiveDate::from_ymd_opt(2026, 9, 12).unwrap();
+        let keep = Expense::create(&mut store, &[1u8; 16], 5.0, None, date, &DEFAULT_ACCOUNT_ID).unwrap();
+        let gone = Expense::create(&mut store, &[1u8; 16], 7.0, None, date, &DEFAULT_ACCOUNT_ID).unwrap();
+        let tr = Transfer::create(&mut store, &usd.id, &DEFAULT_ACCOUNT_ID, 100.0, 9235.0, None, date).unwrap();
+
+        let balances = |s: &Store| {
+            let accounts = Account::read_all(s).unwrap();
+            let transfers = Transfer::read_all(s).unwrap();
+            let sums = ledger::summaries(
+                &accounts,
+                &Expense::read_all(s).unwrap(),
+                &TopUp::read_all(s).unwrap(),
+                &transfers,
+            );
+            let rub = ledger::ledger_for(&accounts[0], &accounts, &Expense::read_all(s).unwrap(), &[], &transfers);
+            (sums[&DEFAULT_ACCOUNT_ID.to_vec()].balance, sums[&usd.id].balance, rub.top_ups.len())
+        };
+        assert_eq!(balances(&store), (9235.0 - 12.0, -100.0, 1));
+
+        // Deleting an expense removes only that expense.
+        Expense::delete(&mut store, &gone.id).unwrap();
+        let left = Expense::read_all(&store).unwrap();
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].id, keep.id);
+
+        // Deleting the transfer removes both legs; balances return to where
+        // they were without it.
+        Transfer::delete(&mut store, &tr.id).unwrap();
+        assert_eq!(balances(&store), (-5.0, 0.0, 0));
+
+        // Tombstones survive sealing + reopen.
+        store.seal().unwrap();
+        let reopened = Store::open(&dir, 1).unwrap();
+        assert_eq!(Expense::read_all(&reopened).unwrap().len(), 1);
+        assert!(Transfer::read_all(&reopened).unwrap().is_empty());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn transfer_create_validates_accounts_and_amounts() {
+        let dir = temp_dir("transfer_validation");
+        let mut store = Store::open(&dir, 1).unwrap();
+        let (a, b) = ([1u8; 16], [2u8; 16]);
+        let date = NaiveDate::from_ymd_opt(2026, 9, 12).unwrap();
+        assert!(Transfer::create(&mut store, &a, &a, 1.0, 1.0, None, date).is_err());
+        assert!(Transfer::create(&mut store, &a, &b, 0.0, 1.0, None, date).is_err());
+        assert!(Transfer::create(&mut store, &a, &b, 1.0, -1.0, None, date).is_err());
+        assert!(Transfer::create(&mut store, &a, &b, f64::NAN, 1.0, None, date).is_err());
+        assert!(Transfer::read_all(&store).unwrap().is_empty());
+        assert!(Transfer::create(&mut store, &a, &b, 1.0, 2.0, Some("ok"), date).is_ok());
+        assert_eq!(Transfer::read_all(&store).unwrap().len(), 1);
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

@@ -1,5 +1,6 @@
 mod config;
 mod import;
+mod ledger;
 mod models;
 mod services;
 mod store;
@@ -18,6 +19,7 @@ use crossterm::{
 use ratatui::{backend::CrosstermBackend, Terminal};
 
 use config::Config;
+use models::Account;
 use store::Store;
 use tui::{AppState, Event, EventHandler};
 
@@ -110,6 +112,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
+    // Ensure there is always at least one account so the ledger has a home for
+    // records without an explicit account_id. Idempotent across runs and
+    // devices.
+    let default_currency = cfg
+        .default_currency
+        .clone()
+        .unwrap_or_else(|| config::DEFAULT_CURRENCY.to_string());
+    Account::ensure_default(&mut store, &default_currency)?;
+
     if let Some(Command::Sync) = args.command {
         let remote = cfg
             .remote
@@ -130,21 +141,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    run_tui(&mut store, cfg.remote.clone())
+    run_tui(&mut store, cfg, args.config)
 }
 
 fn run_tui(
     store: &mut Store,
-    remote: Option<config::RemoteConfig>,
+    config: Config,
+    config_path: PathBuf,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // Build the state before touching the terminal so load errors are
+    // printed to a normal screen instead of a blank alternate one.
+    let mut state = AppState::new(store, config, config_path)?;
+    let event_handler = EventHandler::new();
+
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
-
-    let mut state = AppState::new(store, remote)?;
-    let event_handler = EventHandler::new();
 
     let res = run_app(&mut terminal, &mut state, store, &event_handler);
 

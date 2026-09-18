@@ -30,7 +30,18 @@ pub struct Config {
     #[serde(default)]
     pub source: Option<u64>,
     pub remote: Option<RemoteConfig>,
+    /// Currency (ISO-4217) for a brand-new default account. Falls back to
+    /// [`DEFAULT_CURRENCY`] when absent. Local to this installation, not synced.
+    #[serde(default)]
+    pub default_currency: Option<String>,
+    /// Hex id of the account last selected in the TUI; restored on the next
+    /// launch. Local UI state, not synced.
+    #[serde(default)]
+    pub last_account: Option<String>,
 }
+
+/// Currency of the default account when `default_currency` is not configured.
+pub const DEFAULT_CURRENCY: &str = "RUB";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RemoteConfig {
@@ -130,6 +141,14 @@ pub const CONFIG_TEMPLATE: &str = "\
 # `source` is a per-installation CRDT stamp id, generated automatically on first
 # run, so you normally do not set it here.
 
+# Currency (ISO-4217) used for a brand-new default account (falls back to
+# \"RUB\"). Local to this installation; not synced.
+# default_currency = \"RUB\"
+
+# Hex id of the account last selected in the TUI; restored on the next launch.
+# Local UI state; not synced.
+# last_account = \"0f...\"
+
 # Optional S3 sync remote. Point it at any S3-compatible bucket (AWS S3, MinIO,
 # Backblaze B2, Yandex Object Storage, …). Delete this whole section to keep the
 # data local-only. Tip: you can also import these values from a single string
@@ -164,6 +183,20 @@ impl Config {
         std::fs::write(path, text).map_err(|e| format!("write {}: {e}", path.display()))
     }
 
+    /// Remember `hex` as the last selected account, both in memory and in the
+    /// file at `path`. Unlike [`Config::save`] this edits the file in place, so
+    /// the user's comments and layout survive frequent account switches.
+    pub fn save_last_account(&mut self, path: &Path, hex: &str) -> Result<(), String> {
+        self.last_account = Some(hex.to_string());
+        let text = if path.exists() {
+            std::fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?
+        } else {
+            String::new()
+        };
+        std::fs::write(path, set_top_level_key(&text, "last_account", hex))
+            .map_err(|e| format!("write {}: {e}", path.display()))
+    }
+
     /// Return the configured source, generating and persisting one if absent.
     pub fn ensure_source(&mut self, path: &Path) -> Result<u64, String> {
         if let Some(s) = self.source {
@@ -180,9 +213,52 @@ impl Config {
     }
 }
 
+/// Set the top-level string key `key` to `value` in TOML `text`, keeping every
+/// other line intact. Replaces an existing assignment, otherwise inserts one
+/// before the first `[table]` header (top-level keys must precede tables).
+fn set_top_level_key(text: &str, key: &str, value: &str) -> String {
+    let assignment = format!("{key} = \"{value}\"");
+    let is_key_line = |line: &str| {
+        line.trim_start()
+            .strip_prefix(key)
+            .is_some_and(|rest| rest.trim_start().starts_with('='))
+    };
+    let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
+    let first_table = lines
+        .iter()
+        .position(|l| l.trim_start().starts_with('['))
+        .unwrap_or(lines.len());
+    match lines[..first_table].iter().position(|l| is_key_line(l)) {
+        Some(i) => lines[i] = assignment,
+        None => lines.insert(first_table, assignment),
+    }
+    let mut out = lines.join("\n");
+    out.push('\n');
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn set_top_level_key_preserves_comments_and_tables() {
+        let updated = set_top_level_key(CONFIG_TEMPLATE, "last_account", "00ff");
+        assert!(updated.contains("# Optional S3 sync remote."));
+        let cfg: Config = toml::from_str(&updated).unwrap();
+        assert_eq!(cfg.last_account.as_deref(), Some("00ff"));
+        assert!(cfg.remote.is_some());
+
+        // A second write replaces the value instead of adding a duplicate key.
+        let again = set_top_level_key(&updated, "last_account", "abcd");
+        assert_eq!(again.lines().filter(|l| l.starts_with("last_account")).count(), 1);
+        let cfg: Config = toml::from_str(&again).unwrap();
+        assert_eq!(cfg.last_account.as_deref(), Some("abcd"));
+
+        // Works on an empty / missing file too.
+        let fresh: Config = toml::from_str(&set_top_level_key("", "last_account", "01")).unwrap();
+        assert_eq!(fresh.last_account.as_deref(), Some("01"));
+    }
 
     fn sample() -> RemoteConfig {
         RemoteConfig {
