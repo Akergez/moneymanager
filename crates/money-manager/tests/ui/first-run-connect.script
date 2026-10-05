@@ -1,0 +1,20 @@
+# mode: fresh
+# size: 1240x800
+#
+# Connecting asks for the storage before anything else, and a string that is
+# not a config string goes nowhere: still the first run, nothing recorded.
+wait:2000
+expect:onboarding=choose
+click:620,536
+wait:600
+expect:onboarding=connect
+click:620,500
+wait:300
+type:not-a-config-string
+wait:300
+key:enter
+wait:800
+expect:stage=welcome
+expect:onboarding=connect
+expect:remote=no
+quit

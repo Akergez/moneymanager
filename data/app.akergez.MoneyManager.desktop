@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Money Manager
+GenericName=Personal Finance
+Comment=Expenses, income and transfers across accounts
+Exec=money-manager
+Icon=app.akergez.MoneyManager
+Terminal=false
+Categories=Office;Finance;
+Keywords=money;budget;expenses;income;finance;ledger;
+StartupNotify=true

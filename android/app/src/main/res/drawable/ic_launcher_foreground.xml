@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The application icon, from data/icons/hicolor/scalable/apps: the same
+     paths, scaled by half and centred so that all of it stays inside the
+     circle a launcher may cut out of the middle. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="0.5"
+        android:scaleY="0.5"
+        android:translateX="22"
+        android:translateY="22">
+        <!-- The card's front profile -->
+        <path
+            android:fillColor="#1a7f5a"
+            android:pathData="M 30 26 H 98 A 14 14 0 0 1 112 40 V 96 A 14 14 0 0 1 98 110 H 30 A 14 14 0 0 1 16 96 V 40 A 14 14 0 0 1 30 26 Z" />
+        <!-- The card's top face -->
+        <path
+            android:fillColor="#2fb380"
+            android:pathData="M 30 20 H 98 A 14 14 0 0 1 112 34 V 90 A 14 14 0 0 1 98 104 H 30 A 14 14 0 0 1 16 90 V 34 A 14 14 0 0 1 30 20 Z" />
+        <!-- Three records -->
+        <path
+            android:fillColor="#e6f7ef"
+            android:pathData="M 32 40 H 76 A 4 4 0 0 1 76 48 H 32 A 4 4 0 0 1 32 40 Z M 32 58 H 62 A 4 4 0 0 1 62 66 H 32 A 4 4 0 0 1 32 58 Z M 32 76 H 52 A 4 4 0 0 1 52 84 H 32 A 4 4 0 0 1 32 76 Z" />
+        <!-- The coin and its own front profile -->
+        <path
+            android:fillColor="#c88800"
+            android:pathData="M 88 58 A 24 24 0 1 1 88 106 A 24 24 0 1 1 88 58 Z" />
+        <path
+            android:fillColor="#f6d32d"
+            android:pathData="M 88 54 A 24 24 0 1 1 88 102 A 24 24 0 1 1 88 54 Z" />
+        <path
+            android:fillColor="#c88800"
+            android:pathData="M 85 62 H 91 V 66 A 9 8 0 0 1 97 73 H 91 A 3 2.5 0 0 0 85 73 C 85 77 97 75 97 83 A 9 8 0 0 1 91 90 V 94 H 85 V 90 A 9 8 0 0 1 79 83 H 85 A 3 2.5 0 0 0 91 83 C 91 79 79 81 79 73 A 9 8 0 0 1 85 66 Z" />
+    </group>
+</vector>

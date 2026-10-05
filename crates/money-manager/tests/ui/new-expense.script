@@ -1,0 +1,19 @@
+# mode: demo
+# size: 1240x800
+#
+# Ctrl+N opens the record dialog with the amount ready to type; Enter saves
+# it, and the list and the balance both show it.
+wait:2500
+expect:records=44
+expect:balance=1 054 237.45 ₽
+key:ctrl-n
+wait:900
+expect:dialog=open
+type:125.50
+wait:300
+key:enter
+wait:900
+expect:dialog=closed
+expect:records=45
+expect:balance=1 054 111.95 ₽
+quit

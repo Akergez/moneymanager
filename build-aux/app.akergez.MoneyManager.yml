@@ -1,0 +1,70 @@
+id: app.akergez.MoneyManager
+# The plain freedesktop runtime: the interface draws itself through GPUI on
+# Vulkan and needs nothing from GTK.
+runtime: org.freedesktop.Platform
+runtime-version: '25.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: money-manager
+
+# No filesystem access at all: the ledger and the settings live in the
+# sandbox's own data and config directories, and nothing is ever read from or
+# written to the person's files.
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  # Syncing the ledger with S3 storage.
+  - --share=network
+
+modules:
+  - name: money-manager
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin
+      env:
+        CARGO_HOME: /run/build/money-manager/cargo
+      # This repository builds from crates.io rather than from a generated
+      # offline source list: it is published from our own CI, not Flathub,
+      # so a network-isolated build buys nothing but a megabyte of churn in
+      # cargo-sources.json on every dependency bump.
+      build-args:
+        - --share=network
+    build-commands:
+      - cargo build --profile dist --locked -p money-manager
+      - install -Dm755 target/dist/money-manager /app/bin/money-manager
+      - install -Dm644 data/app.akergez.MoneyManager.desktop /app/share/applications/app.akergez.MoneyManager.desktop
+      - install -Dm644 data/app.akergez.MoneyManager.metainfo.xml /app/share/metainfo/app.akergez.MoneyManager.metainfo.xml
+      # The font is compiled into the binary, and its licence asks to travel
+      # with it.
+      - install -Dm644 LICENSE
+        crates/money-manager/assets/fonts/Inter-LICENSE.txt
+        -t /app/share/licenses/app.akergez.MoneyManager
+      # The icon ships rasterized. Both `flatpak build-export` and
+      # appstreamcli load icons through glycin, which has no SVG loader in the
+      # images this is built on, so an exported SVG fails the build outright. The
+      # source of truth is still the SVG in data/.
+      - rsvg-convert -w 128 -h 128 -o icon-128.png
+        data/icons/hicolor/scalable/apps/app.akergez.MoneyManager.svg
+      - rsvg-convert -w 256 -h 256 -o icon-256.png
+        data/icons/hicolor/scalable/apps/app.akergez.MoneyManager.svg
+      - install -Dm644 icon-128.png
+        /app/share/icons/hicolor/128x128/apps/app.akergez.MoneyManager.png
+      - install -Dm644 icon-256.png
+        /app/share/icons/hicolor/256x256/apps/app.akergez.MoneyManager.png
+    sources:
+      - type: dir
+        path: ..
+        # Everything the publish script itself writes into the checkout. The
+        # ostree repository and the builder's state directory are large; the
+        # state directory also holds live mounts, which cannot be copied.
+        skip:
+          - .git
+          - .flatpak-build
+          - .flatpak-repo
+          - .flatpak-state
+          - .cargo-home
+          - dist
+          - target

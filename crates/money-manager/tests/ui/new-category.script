@@ -1,0 +1,21 @@
+# mode: demo
+# size: 1240x800
+#
+# On the categories screen "new" means a category, of the kind being shown.
+wait:2500
+key:ctrl-2
+wait:500
+expect:categories=6
+key:ctrl-n
+wait:900
+expect:dialog=open
+type:Groceries
+wait:300
+key:enter
+wait:900
+expect:dialog=closed
+expect:categories=7
+key:ctrl-e
+wait:500
+expect:categories=3
+quit

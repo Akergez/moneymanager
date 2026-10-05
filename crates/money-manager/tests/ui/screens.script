@@ -1,0 +1,29 @@
+# mode: demo
+# size: 1240x800
+#
+# The three screens are a key apart, and one switch turns all of them from
+# expenses to income.
+wait:2500
+expect:screen=transactions
+key:ctrl-2
+wait:500
+expect:screen=categories
+expect:categories=6
+key:ctrl-3
+wait:800
+expect:screen=charts
+key:ctrl-e
+wait:500
+expect:mode=income
+expect:screen=charts
+key:ctrl-2
+wait:500
+expect:categories=3
+key:ctrl-1
+wait:500
+expect:records=8
+key:ctrl-e
+wait:500
+expect:mode=expense
+expect:records=44
+quit

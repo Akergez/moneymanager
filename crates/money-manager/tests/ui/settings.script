@@ -1,0 +1,22 @@
+# mode: demo
+# size: 1240x800
+#
+# Ctrl+, opens the settings dialog and Escape closes it again. With no sync
+# storage set up, Sync leads to the same place instead of doing nothing.
+wait:2500
+expect:dialog=closed
+expect:remote=no
+key:ctrl-,
+wait:900
+expect:dialog=open
+key:escape
+wait:700
+expect:dialog=closed
+key:ctrl-r
+wait:900
+expect:dialog=open
+expect:sync=idle
+key:escape
+wait:600
+expect:dialog=closed
+quit

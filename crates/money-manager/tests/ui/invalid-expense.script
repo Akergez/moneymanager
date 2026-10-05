@@ -1,0 +1,20 @@
+# mode: demo
+# size: 1240x800
+#
+# A record with no amount is not saved: the dialog stays up to say so, and
+# Escape leaves the ledger as it was, with the shortcuts still working.
+wait:2500
+key:ctrl-n
+wait:900
+key:enter
+wait:700
+expect:dialog=open
+expect:records=44
+key:escape
+wait:600
+expect:dialog=closed
+expect:records=44
+key:ctrl-2
+wait:500
+expect:screen=categories
+quit

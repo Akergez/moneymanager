@@ -1,0 +1,21 @@
+# mode: demo
+# size: 400x800
+#
+# The phone-sized layout draws every screen, and its commands still work.
+wait:2500
+expect:stage=workspace
+expect:layout=phone
+expect:records=44
+key:ctrl-2
+wait:600
+expect:screen=categories
+key:ctrl-3
+wait:900
+expect:screen=charts
+key:ctrl-n
+wait:900
+expect:dialog=open
+key:escape
+wait:600
+expect:dialog=closed
+quit

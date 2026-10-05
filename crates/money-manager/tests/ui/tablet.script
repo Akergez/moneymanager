@@ -1,0 +1,13 @@
+# mode: demo
+# size: 834x1000
+#
+# Between the two breakpoints the sidebar is a rail of icons.
+wait:2500
+expect:layout=tablet
+key:ctrl-3
+wait:900
+expect:screen=charts
+key:ctrl-1
+wait:500
+expect:records=44
+quit

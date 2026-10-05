@@ -1,3 +1,39 @@
+# Cargo's output, and the packages the build-aux scripts make of it.
 /target
+/dist
+
+# The flatpak build (build-aux/publish-flatpak.sh).
+/.flatpak-build
+/.flatpak-repo
+/.flatpak-state
+
+# What a containerised UI-test run leaves when the checkout is its home
+# (fontconfig and Mesa's shader cache).
+/.cache
+
+# What CI keeps inside the checkout so that it can be cached
+# (.github/workflows/ci.yml).
+/.cargo-home
 /.cargo
+/.xwin-cache
+/.android-sdk
+/.gradle-home
+
+# Signing keys never belong here; CI is handed them as variables.
+*.p12
+*.jks
+*.keystore
 .env
+
+# A ledger the terminal version left beside the sources.
+/money_manager.chunks
+/money_manager.toml
+
+# Editors and assistants.
+/.claude
+.idea
+.vscode
+*.swp
+
+# macOS.
+.DS_Store

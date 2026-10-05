@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>app.akergez.MoneyManager</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only AND OFL-1.1</project_license>
+  <name>Money Manager</name>
+  <summary>Expenses, income and transfers across accounts</summary>
+  <developer id="app.akergez">
+    <name>Akergez</name>
+  </developer>
+
+  <description>
+    <p>
+      Keeps track of what you spend and earn, by category, across accounts in
+      different currencies, with transfers between them. One adaptive window:
+      a table on a desktop, a list on a phone, and the same three charts on
+      both.
+    </p>
+    <p>
+      The ledger is a CRDT document kept inside the application. It can sync
+      with any S3-compatible storage, end-to-end encrypted, and merges changes
+      made on several devices without conflicts.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">app.akergez.MoneyManager.desktop</launchable>
+  <url type="homepage">https://gitlab.com/ragusseven/money-manager-ng</url>
+  <url type="bugtracker">https://gitlab.com/ragusseven/money-manager-ng/-/issues</url>
+
+  <content_rating type="oars-1.1"/>
+
+  <releases>
+    <release version="1.0.0" date="2026-10-05"/>
+  </releases>
+</component>

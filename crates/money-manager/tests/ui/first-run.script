@@ -1,0 +1,18 @@
+# mode: fresh
+# size: 1240x800
+#
+# With no ledger the application asks which there should be. Creating one
+# ends in an empty workspace with the default account in it.
+wait:2000
+expect:stage=welcome
+expect:onboarding=choose
+click:620,426
+wait:600
+expect:onboarding=create
+click:774,551
+wait:1200
+expect:stage=workspace
+expect:accounts=1
+expect:records=0
+expect:remote=no
+quit

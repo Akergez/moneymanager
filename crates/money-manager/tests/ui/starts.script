@@ -1,0 +1,16 @@
+# mode: demo
+# size: 1240x800
+#
+# The sample ledger comes up on the list of expenses, with nothing in the way.
+wait:2500
+expect:stage=workspace
+expect:screen=transactions
+expect:mode=expense
+expect:layout=desktop
+expect:account=Основной
+expect:accounts=2
+expect:records=44
+expect:dialog=closed
+expect:remote=no
+expect:sync=idle
+quit

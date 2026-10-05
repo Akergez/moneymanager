@@ -1,274 +1,203 @@
 # Money Manager
 
-A terminal-based money management application built with Rust, featuring expense tracking, income (top-ups) tracking, and visual analytics.
+Expenses, income and transfers across accounts in different currencies, in one
+adaptive window: a table and a sidebar on a desktop, a list and a bottom bar
+on a phone. Written in Rust and drawn with [GPUI](https://www.gpui.rs/) through
+[GPUI Kit](https://gpui-kit.com).
 
-## Features
+The ledger is a CRDT document (RDX, from [tresse](https://gitlab.com/ragusseven/tresse)).
+It is kept inside the application and can sync with any S3-compatible storage,
+end-to-end encrypted, merging what several devices changed without conflicts.
 
-- 📊 **Expense Tracking**: Track your expenses with customizable categories
-- 💰 **Income Management**: Record income/top-ups with categories
-- 🏦 **Multiple Accounts**: Each account has its own currency, balance, lists and charts
-- ⇄ **Transfers**: Move money between accounts, including currency exchange with an automatic rate
-- 🗑️ **Deletion**: Delete expenses, top-ups and transfers (synced as CRDT tombstones)
-- 📈 **Visual Analytics**: View your spending with pie charts, bar charts, and line charts
-- 🖥️ **Terminal UI**: Beautiful TUI built with Ratatui
-- 🖱️ **Mouse Support**: Click on tabs to switch between views
-- 📱 **Responsive Design**: Adapts to mobile-like narrow terminal resolutions
-- 💾 **CRDT Storage**: Persistent local storage as content-addressed RDX chunks, with optional end-to-end-encrypted S3 sync
+This is the graphical successor of the terminal version (0.4 and earlier). It
+reads and writes **exactly the same ledger format**, so the two — and every
+device already syncing a ledger — keep working against the same storage.
 
-## Installation
+## What it does
 
-### From crates.io
+- **Transactions** — the records of the current account: id, amount, category
+  and date (and the comment where there is room). One switch turns the screen
+  from expenses to income. Sortable by column; a row opens the record.
+- **Categories** — expense and income categories, each with a colour and an
+  icon.
+- **Charts** — one screen with all three: a pie by category (for the month or
+  for all time), bars by month, and the running total through the chosen month.
+- **Accounts** — chosen at the top of the window, with the balance beside the
+  name. Each has a currency and an opening balance.
+- **Transfers** — between two accounts, with the two amounts entered
+  separately and the exchange rate derived from them. A transfer shows as an
+  expense on one account and an income on the other; deleting either side
+  deletes both.
+- **Sync** — on demand, with S3-compatible storage.
 
-```bash
-cargo install money_manager
-```
+## First run
 
-### From Source
+With no ledger on the device the application asks which there should be:
 
-```bash
-git clone https://gitlab.com/your-username/money_manager.git
-cd money_manager
-cargo build --release
-```
+- **Create a new ledger** — asks for the currency of the first account and
+  starts empty. Sync storage can be added later in Settings.
+- **Connect to sync storage** — brings in a ledger that already syncs. The
+  storage is given either as one **config string** (`tresse1:…`, what another
+  device copies out of its Settings, or what the terminal version prints with
+  `money_manager config --export`) or field by field: endpoint, region, bucket,
+  access key ID, secret access key, prefix and the optional encryption key.
 
-### Pre-built Binaries
+Nothing is recorded until it has worked: a mistyped key leaves the
+installation as it was found, and the question is asked again.
 
-Download pre-built binaries from the [Releases](https://gitlab.com/your-username/money_manager/-/releases) page.
+## Where things are kept
 
-Available platforms:
-- Linux (AMD64/x86_64)
-- Linux (ARM64/aarch64)
-- Windows (AMD64/x86_64)
+Everything is private to the application. Nothing is read from or written to
+your documents or to shared storage, so no storage permission is ever asked
+for — on a phone the Android manifest declares the network permission only,
+and the flatpak has no filesystem access at all.
 
-## Usage
+| What | Where |
+|------|-------|
+| The ledger: sealed chunks and `staging.rdx` | `$XDG_DATA_HOME/app.akergez.MoneyManager/ledger/` |
+| Settings: `settings.json` | `$XDG_CONFIG_HOME/app.akergez.MoneyManager/` |
 
-```bash
-money_manager
-```
+On Android both are under the application's internal data directory.
 
-### Command Line Options
+`settings.json` takes the place of the terminal version's
+`money_manager.toml`, under the same names: `source` (this installation's CRDT
+stamp source), `remote` (the sync storage), `default_currency` and
+`last_account`. It also holds what only an interface has, such as the theme.
+**None of it is synced.** The sync storage's keys are in this file in the
+clear, as they were in the `.toml`.
 
-| Option | Description |
-|--------|-------------|
-| `-d, --data <PATH>` | Path to the RDX chunk directory (default: `money_manager.chunks` in current directory) |
-| `-c, --config <PATH>` | Path to the config file (default: `money_manager.toml`) |
-| `-h, --help` | Print help information |
-| `-V, --version` | Print version information |
+### Category colours and icons
 
-**Subcommands:**
+A category's name, colour and icon are all part of its record in the ledger
+and sync with it. The colour and the icon are two optional fields after the
+name: a record without them — every one the terminal version wrote — is an
+unstyled category, drawn in a colour derived from its name, the same on every
+device; and a client that knows nothing of them still finds the name where it
+always was. A record is rewritten whole, so a client that rewrites a category
+without these fields removes its colour and icon.
 
-| Command | Description |
-|---------|-------------|
-| `sync` | Synchronize the local data with the configured S3 remote |
-| `keygen` | Print a fresh base64 encryption key for `money_manager.toml` |
-| `config --template` | Print a commented config template (redirect into `money_manager.toml`) |
-| `config --export` | Print the `[remote]` config as a single shareable string |
-| `config --import <STRING>` | Parse a shareable string and write it into the config file |
-| `import-csv --table <T> <FILE>` | Import records from a CSV file mirroring the original SQL table |
+Styles that an earlier build kept in `settings.json` (`category_styles`) are
+moved into the ledger the first time it is opened.
 
-**Examples:**
+## The ledger format
 
-```bash
-# Use default data file in current directory
-money_manager
+Unchanged from the terminal version; `crates/money-core/src/store.rs` describes
+it in full. In short:
 
-# Use a specific data file
-money_manager --data ~/finances/my_budget.chunks
+- The document is a tuple of six collections: categories, expenses, income
+  categories, income, accounts, transfers. A record is a tuple whose first
+  child is its hex id.
+- Every write is stamped (source + Lamport time); a newer write replaces the
+  record, and a deletion is a tombstone. This is what makes two devices'
+  changes merge.
+- Local writes accumulate in `staging.rdx`. A sync seals them into one
+  immutable, content-addressed chunk and exchanges the missing chunks with the
+  storage both ways.
 
-# Sync with the configured S3 remote
-money_manager sync
+A device joining a ledger syncs **first** and only then makes sure the default
+account exists: made before the first sync, its fresh stamp would win over the
+synced account's name, currency and opening balance. `store.rs` has a test
+that shows both orders.
 
-# Generate a starter config to fill in
-money_manager config --template > money_manager.toml
-
-# Share the S3 config (incl. secrets) as one string — paste into another
-# machine or the Obsidian plugin (format is interchangeable)
-money_manager config --export
-money_manager config --import "tresse1:..."
-
-# Import data from CSV files that mirror the original SQL tables
-money_manager import-csv --table categories categories.csv
-money_manager import-csv --table expenses  expenses.csv
-```
-
-### CSV import
-
-`import-csv` loads records from a CSV file whose columns mirror the original
-SQLite schema, **identifiers included**, so identity is preserved across the
-import (re-importing the same file is idempotent, and foreign keys keep
-pointing at the same rows). Columns are matched by header name, so their order
-is free; the file must have a header row.
-
-| `--table` value | Columns |
-|-----------------|---------|
-| `categories` | `id,name` |
-| `top-up-categories` | `id,name` |
-| `expenses` | `id,category_id,amount,comment,date[,account_id]` |
-| `top-ups` | `id,category_id,amount,comment,date[,account_id]` |
-| `accounts` | `id,name,currency,opening_balance` |
-| `transfers` | `id,from_account_id,to_account_id,amount_from,amount_to,comment,date` |
-
-- `id` and the `*_id` references are UUIDs (canonical `xxxxxxxx-…` or 32-char hex).
-- A blank `id` cell is filled with a fresh UUID; a blank `comment` becomes empty.
-- `date` is `YYYY-MM-DD`.
-- `account_id` is optional: without the column (or with a blank cell) a record
-  goes to the default account, whose id is the nil UUID
-  `00000000-0000-0000-0000-000000000000`.
-- `currency` is a 3-letter ISO code (`RUB`, `USD`, …); a blank
-  `opening_balance` means 0.
-- Transfers need two different accounts and positive amounts, each in its own
-  account's currency (`amount_from` is debited, `amount_to` credited).
-- Import categories and accounts before the records that reference them.
-
-```csv
-id,category_id,amount,comment,date
-11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222,45.50,"Lunch, with tax",2024-12-01
-```
-
-### Keyboard Shortcuts
+## Keyboard
 
 | Key | Action |
 |-----|--------|
-| `0-9` | Switch between tabs |
-| `Tab` | Switch to next tab |
-| `n` | Create new entry |
-| `↑/↓` | Select a row / navigate list |
-| `←/→` | Sort columns / Navigate months / Scroll charts |
-| `[` / `]` | Previous / next account |
-| `t` | New transfer (from any tab) |
-| `d` / `Delete` | Delete the selected expense, top-up or transfer (asks for confirmation) |
-| `e` / `Enter` | Accounts tab: edit / make the selected account current |
-| `x` | Pie charts: hide/show transfers |
-| `r` | Refresh data |
-| `s` | Sync with the S3 remote |
-| `q` | Quit |
+| `Ctrl+1` / `Ctrl+2` / `Ctrl+3` | Transactions / Categories / Charts |
+| `Ctrl+E` | Switch between expenses and income |
+| `Ctrl+N` | New record (a new category on the Categories screen) |
+| `Ctrl+T` | New transfer |
+| `Ctrl+R` | Sync |
+| `Ctrl+,` | Settings |
+| `Ctrl+Q` | Quit |
 
-### Mouse Support
+## Building
 
-| Action | Effect |
-|--------|--------|
-| Click on tab | Switch to that tab |
-| Click on a table row | Select it |
-| Scroll wheel | Scroll through lists |
-| Click on table header | Sort by that column |
-| Click category (Line Chart) | Toggle category selection |
+A recent stable Rust (the version is pinned in `rust-toolchain.toml`) and,
+on Linux, the development packages for Wayland/X11, Vulkan and fonts:
 
-### Tabs
+```sh
+# Debian / Ubuntu
+sudo apt install pkg-config libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev \
+  libxcb1-dev libvulkan-dev libfontconfig-dev libfreetype-dev
 
-0. **Accounts**: All accounts with their currency, income, spending and balance
-1. **Expense Categories**: Manage expense categories
-2. **Expenses**: View and add expenses
-3. **Top-Up Categories**: Manage income categories
-4. **Top-Ups**: View and add income
-5. **Expense Pie Chart**: Expense breakdown by category
-6. **Top-Up Pie Chart**: Income breakdown by category
-7. **Expense Bar Chart**: Monthly expense overview
-8. **Top-Up Bar Chart**: Monthly income overview
-9. **Line Chart**: Expense trends over time
-- **⇄ Transfers**: All transfers between accounts, with the exchange rate
-
-Tabs 2 and 4–9 show the **current account** only; its name and balance are in
-the tab bar, and `[` / `]` switch accounts.
-
-### Accounts and transfers
-
-- Every account has a name, a currency and an opening balance. Categories are
-  shared by all accounts. Existing data lives in the default account
-  ("Основной", currency from `default_currency` in the config, `RUB` if unset).
-- Balance = opening balance + top-ups + incoming transfers − expenses −
-  outgoing transfers. Different currencies are never added together.
-- A transfer records how much left account A (in A's currency) and how much
-  arrived on account B (in B's currency); the rate is derived from the two
-  amounts. It shows up as an expense in the "⇄ Перевод" category on A and as a
-  top-up in the same category on B. Deleting either side deletes the whole
-  transfer.
-- The last selected account is remembered in `last_account` in
-  `money_manager.toml` (local only, not synced).
-
-**Compatibility with 0.3.x.** Older versions still open and sync the data: they
-see every expense and top-up as if it belonged to a single account and do not
-see transfers or accounts (so their totals ignore transfers). An older version
-that *overwrites* an existing record — only possible through `import-csv` with
-the same ids — moves that record back to the default account.
-
-## Responsive Design
-
-The application automatically adapts to different terminal sizes:
-
-| Width | Mode | Description |
-|-------|------|-------------|
-| < 60 cols | **Mobile** | Compact tabs, abbreviated labels, essential columns only |
-| 60-80 cols | **Medium** | Moderate abbreviations, balanced layout |
-| > 80 cols | **Wide** | Full labels and all columns displayed |
-
-This makes the app usable on narrow terminals, mobile terminal emulators, or split-screen setups.
-
-## Storage & Sync
-
-Data lives in a directory (`money_manager.chunks` by default, created on first
-run), built on the [`rdx-sync`](https://gitlab.com/ragusseven/tresse) CRDT chunk
-store (`rdx-sync-fs` backend). A **chunk is the delta of one sync**, not the
-whole document and not one record:
-
-- Local edits accumulate in a small mutable `staging.rdx` (a delta holding only
-  the records changed since the last sync), rewritten on every write so a crash
-  loses nothing.
-- On sync the staged delta is *sealed* into a single immutable, content-addressed
-  chunk (a file named by the blake3 hash of its encoding), then exchanged with
-  the remote.
-- Merging the sealed chunks plus staging reconstructs the full document.
-
-So the chunk count grows with *syncs-that-had-changes*, not with the number of
-records or writes. Storage is content-addressed and idempotent; sync is
-**incremental** (only chunks a side is missing are transferred) and every
-fetched chunk is **hash-verified** before it is trusted. A legacy
-`money_manager.rdx` blob, if present, is migrated in as one baseline chunk on
-first run.
-
-Optionally, the data can be synchronized to any S3-compatible bucket via
-`rdx-sync-s3`. Configure a `[remote]` section in `money_manager.toml`:
-
-```toml
-[remote]
-endpoint = "https://s3.us-east-1.amazonaws.com"
-region = "us-east-1"
-bucket = "my-bucket"
-access_key_id = "AKID..."
-secret_access_key = "..."
-prefix = "money-manager"
-encryption_key = "base64-32-bytes"  # optional E2E key; run `money_manager keygen`
+# Fedora
+sudo dnf install wayland-devel libxkbcommon-devel libxkbcommon-x11-devel \
+  libxcb-devel vulkan-loader-devel fontconfig-devel freetype-devel
 ```
 
-Then run `money_manager sync` (or press `s` in the TUI). A sync stages the local
-state as a chunk, fetches the remote chunks, pushes the local one, merges
-everything, and reloads the views — because the underlying format is a CRDT,
-syncing multiple machines reconciles concurrent edits automatically.
-
-Instead of editing the `[remote]` table by hand, you can move the whole config
-(including the secret and encryption keys) as a single `tresse1:` string with
-`config --export` / `config --import`. The format is identical to the Obsidian
-plugin's "copy settings" string, so the same bucket can be shared between the
-plugin and this app.
-
-## Development
-
-### Prerequisites
-
-- Rust 1.85 or later (edition 2024)
-
-### Building
-
-```bash
-cargo build
+```sh
+cargo run -p money-manager             # debug
+cargo build --release -p money-manager # optimised, quick to rebuild
+cargo build --profile dist -p money-manager  # what ships: thin LTO, slow
+cargo test --workspace
 ```
 
-### Running Tests
+`MONEY_MANAGER_DEMO=1 cargo run -p money-manager` skips the first-run question
+and fills an *empty* installation with sample records. Point `XDG_DATA_HOME`
+and `XDG_CONFIG_HOME` somewhere disposable to try it without touching your own
+ledger.
 
-```bash
-cargo test
+## Packages
+
+| Target | How | Result |
+|--------|-----|--------|
+| Linux tarball | `build-aux/package-tarball.sh` | `dist/money-manager-<v>-linux-<arch>.tar.gz` |
+| Flatpak | `build-aux/publish-flatpak.sh` | `.flatpak-repo`; with `--site`, a signed repository and `.flatpakref` |
+| Windows (cross-built on Linux) | `build-aux/build-windows.sh x86_64` | `dist/money-manager-<v>-windows-x86_64.zip` |
+| Android | `build-aux/build-android.sh` | `dist/money-manager-<v>-android-aarch64.apk` |
+| macOS | `build-aux/package-macos.sh` | `dist/money-manager-<v>-macos-<arch>.dmg` |
+
+Each script's header says what it needs. `android/README.md` covers the
+Android build in detail.
+
+## Tests
+
+- `cargo test --workspace` — the ledger (format, merge, sync against an
+  in-memory remote) and everything in the application that needs no window.
+- `build-aux/ui-tests.sh --headless` — the scenarios in
+  `crates/money-manager/tests/ui/`, played into the real application under a
+  headless sway. Each is a short script of keys, clicks and `expect:` checks
+  against the application's state; see `crates/money-manager/src/script.rs`.
+
+## Continuous integration
+
+`.github/workflows/ci.yml` tests every push, builds every package as a
+workflow artifact, and publishes only from a version tag (`v1.2.3`) whose
+number every crate carries — `build-aux/check-version.sh` enforces it. The
+version lives once, in `[workspace.package]` of `Cargo.toml`.
+
+A release needs these repository secrets:
+
+| Secret | For |
+|--------|-----|
+| `ANDROID_KEYSTORE_B64`, `ANDROID_KEYSTORE_PASSWORD` | Signing the Android package |
+| `FLATPAK_GPG_ID`, `FLATPAK_GPG_KEY_B64`, `FLATPAK_GPG_PASSPHRASE` | Signing the flatpak repository |
+
+### Signing the Android package
+
+Android installs an update only over a package signed with the same key, so
+every release is signed with one key, made once:
+
+```sh
+keytool -genkeypair -storetype PKCS12 -keystore release.p12 -alias money-manager \
+  -keyalg RSA -keysize 4096 -validity 10000
+base64 -w0 release.p12   # → ANDROID_KEYSTORE_B64
 ```
+
+Keep the keystore somewhere safe and out of the repository: losing it means
+nobody can update an installed copy.
+
+## What the terminal version had that this does not
+
+The command-line subcommands are gone with the terminal interface: `sync` is
+the Sync command, `keygen` and `config --export/--import` are in Settings, and
+`import-csv` and the one-time migration from the single-blob format have no
+counterpart. To bring an existing ledger over, connect to its sync storage; a
+ledger that was never synced has to be synced from the terminal version first.
 
 ## License
 
-See [LICENSE](LICENSE) for details.
-
+GPL-3.0; see [LICENSE](LICENSE). The bundled Inter font is under the SIL Open
+Font License 1.1 (`crates/money-manager/assets/fonts/Inter-LICENSE.txt`). The
+icons are [Lucide](https://lucide.dev), ISC.
