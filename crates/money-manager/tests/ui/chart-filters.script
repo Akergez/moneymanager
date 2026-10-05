@@ -1,31 +1,46 @@
 # mode: demo
 # size: 1240x800
 #
-# The monthly bars and the running total each leave out the categories their
-# own toggles say, and neither's choice touches the other's. Switching to
-# income forgets both: the categories hidden were of the other kind.
+# The monthly bars and the running total are each of the categories their own
+# toggles say, and neither's choice touches the other's. From "All", one press
+# on a category leaves that category alone; a second press on it is "All"
+# again. Switching to income forgets both: the categories chosen were of the
+# other kind.
 wait:2500
 key:ctrl-3
-wait:900
+wait:1200
 expect:screen=charts
-expect:bars-hidden=0
-expect:line-hidden=0
+expect:bars-chosen=0
+expect:line-chosen=0
 # "Transfer", in the bars' row of toggles.
-click:1000,165
+click:655,190
 wait:500
-expect:bars-hidden=1
-expect:line-hidden=0
-# "Utilities", in the running total's.
-click:420,553
+expect:bars-chosen=1
+expect:line-chosen=0
+# "Utilities" beside it: now two.
+click:400,190
 wait:500
-expect:bars-hidden=1
-expect:line-hidden=1
-# The same toggle again puts the category back.
-click:1000,165
+expect:bars-chosen=2
+# "All" puts everything back.
+click:314,190
 wait:500
-expect:bars-hidden=0
-key:ctrl-e
+expect:bars-chosen=0
+click:655,190
+wait:500
+expect:bars-chosen=1
+# Down to the running total, and "Utilities" in its row.
+scroll:700,500,-520
+wait:700
+click:400,633
+wait:500
+expect:bars-chosen=1
+expect:line-chosen=1
+# The same toggle again is "All" again.
+click:400,633
+wait:500
+expect:line-chosen=0
+key:ctrl-m
 wait:500
 expect:mode=income
-expect:line-hidden=0
+expect:bars-chosen=0
 quit

@@ -29,8 +29,8 @@
 //! - `accounts=<n>`, `records=<n>`, `categories=<n>` — how many there are, the
 //!   last two of the current kind
 //! - `balance=<amount>` — the current account's, as the top bar writes it
-//! - `bars-hidden=<n>`, `line-hidden=<n>` — how many categories the monthly
-//!   bars and the running total each leave out
+//! - `bars-chosen=<n>`, `line-chosen=<n>` — how many categories the monthly
+//!   bars and the running total are each narrowed to; 0 is all of them
 //! - `dialog=open|closed`
 //! - `theme=light|dark`
 //! - `sync=idle|running|done|failed`
@@ -46,7 +46,7 @@ use gpui_kit::component::{ActiveTheme as _, WindowExt as _};
 use gpui_kit::{
     AnyWindowHandle, App, Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent,
     MouseUpEvent, Pixels, PlatformInput, Point, ScrollDelta, ScrollWheelEvent, TouchPhase, Window,
-    point, px,
+    point,
 };
 use money_core::format::format_money;
 
@@ -125,7 +125,7 @@ fn at(x: f32, y: f32) -> Point<Pixels> {
         .and_then(|scale| scale.parse::<f32>().ok())
         .filter(|scale| *scale > 0.0)
         .unwrap_or(1.0);
-    point(px(x / scale), px(y / scale))
+    point(Pixels::from(x / scale), Pixels::from(y / scale))
 }
 
 fn pointer(window: &mut Window, position: Point<Pixels>, cx: &mut App) {
@@ -196,8 +196,8 @@ fn observe(what: &str, window: &mut Window, cx: &mut App) -> Option<String> {
         "accounts" => book.accounts().len().to_string(),
         "records" => book.entries(mode).len().to_string(),
         "categories" => book.categories(mode).len().to_string(),
-        "bars-hidden" => workspace.charts().read(cx).hidden_counts().0.to_string(),
-        "line-hidden" => workspace.charts().read(cx).hidden_counts().1.to_string(),
+        "bars-chosen" => workspace.charts().read(cx).chosen_counts().0.to_string(),
+        "line-chosen" => workspace.charts().read(cx).chosen_counts().1.to_string(),
         "balance" => book
             .current_account()
             .map(|account| format_money(book.summary(&account.id).balance, &account.currency))
@@ -257,7 +257,7 @@ fn next(handle: AnyWindowHandle, mut steps: VecDeque<Step>, cx: &mut App) {
             window.dispatch_event(
                 PlatformInput::ScrollWheel(ScrollWheelEvent {
                     position: at(*x, *y),
-                    delta: ScrollDelta::Pixels(point(px(0.), px(*dy))),
+                    delta: ScrollDelta::Pixels(point(Pixels::ZERO, Pixels::from(*dy))),
                     modifiers: Modifiers::default(),
                     touch_phase: TouchPhase::Moved,
                 }),

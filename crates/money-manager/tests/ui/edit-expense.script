@@ -1,0 +1,24 @@
+# mode: demo
+# size: 1240x800
+#
+# Edit is about the selected row: with none selected Ctrl+E does nothing, and
+# with one it opens that record. Saving it unchanged leaves the ledger as it
+# was.
+wait:2500
+key:ctrl-e
+wait:600
+expect:dialog=closed
+# The first row of the table.
+click:700,153
+wait:500
+key:ctrl-e
+wait:900
+expect:dialog=open
+key:tab
+wait:300
+key:enter
+wait:900
+expect:dialog=closed
+expect:records=44
+expect:balance=1 054 237.45 ₽
+quit

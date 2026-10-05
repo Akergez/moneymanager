@@ -7,13 +7,14 @@
 use std::rc::Rc;
 use std::sync::{Arc, OnceLock};
 
+use gpui_kit::base::actions::Confirm;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::dialog::{DialogAction, DialogClose, DialogFooter};
-use gpui_kit::component::input::InputState;
 use gpui_kit::component::{ActiveTheme, Icon, Sizable, StyledExt, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, Context, Div, Entity, Image, ImageFormat, SharedString, Window, div,
+    AnyElement, App, Context, Div, Entity, FocusHandle, Image, ImageFormat, SharedString, Window,
+    div,
 };
 
 use crate::book::CategoryLook;
@@ -148,7 +149,7 @@ pub fn open_form<F: Render>(
     title: impl Into<SharedString>,
     commit: impl Into<SharedString>,
     form: Entity<F>,
-    first: Option<Entity<InputState>>,
+    first: Option<FocusHandle>,
     submit: impl Fn(&mut F, &mut Context<F>) -> bool + 'static,
     window: &mut Window,
     cx: &mut App,
@@ -171,8 +172,20 @@ pub fn open_form<F: Render>(
             .on_ok(move |_, _, cx| form.update(cx, |form, cx| submit(form, cx)))
     });
     if let Some(first) = first {
-        first.update(cx, |input, cx| input.focus(window, cx));
+        first.focus(window, cx);
     }
+}
+
+/// Wraps a control that Enter opens or chooses in — a select, a date picker —
+/// so that the Enter stops there. The library's select opens its list on
+/// Enter and then lets the key go on, and a dialog takes an Enter that
+/// reaches it as its commitment: without this, opening the list of
+/// categories would also try to save the form.
+pub fn choosing(control: impl IntoElement) -> Div {
+    div()
+        .w_full()
+        .on_action(|_: &Confirm, _, _| {})
+        .child(control)
 }
 
 /// A labelled control, as every form here lays one out.

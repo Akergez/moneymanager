@@ -9,10 +9,10 @@ pub fn open_window(cx: &mut App) {
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
             None,
-            initial_size(),
+            initial_size(cx),
             cx,
         ))),
-        window_min_size: Some(minimum_size()),
+        window_min_size: Some(minimum_size(cx)),
         app_id: Some(crate::APP_ID.to_string()),
         ..TitleBar::window_options()
     };

@@ -6,6 +6,8 @@
 wait:2500
 key:ctrl-n
 wait:900
+key:tab
+wait:300
 key:enter
 wait:700
 expect:dialog=open

@@ -9,18 +9,17 @@
 //! transfer deleted, both legs at once; there is nothing of it to edit here.
 
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants};
-use gpui_kit::component::calendar::Date;
-use gpui_kit::component::date_picker::{DatePicker, DatePickerState};
 use gpui_kit::component::dialog::{DialogClose, DialogFooter};
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::select::{Select, SelectState};
 use gpui_kit::component::{ActiveTheme, IndexPath, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{App, AppContext, Context, Entity, SharedString, Window, div};
+use gpui_kit::{App, AppContext, Context, Entity, Focusable, SharedString, Window, div};
 use money_core::format::{format_amount, format_money, parse_amount};
 
 use crate::book::{self, Book, Entry, EntryDraft, Mode};
+use crate::date_field::DateField;
 use crate::ui::{self, Choice};
 
 struct EntryForm {
@@ -30,7 +29,7 @@ struct EntryForm {
     editing: Option<Entry>,
     category: Entity<SelectState<Vec<Choice>>>,
     amount: Entity<InputState>,
-    date: Entity<DatePickerState>,
+    date: Entity<DateField>,
     comment: Entity<InputState>,
     error: Option<SharedString>,
 }
@@ -77,11 +76,7 @@ impl EntryForm {
             Some(entry) => entry.date,
             None => book::latest_date(&book.read(cx).entries(mode)).unwrap_or_else(crate::today),
         };
-        let date = cx.new(|cx| {
-            let mut picker = DatePickerState::new(window, cx).date_format("%Y-%m-%d");
-            picker.set_date(day, window, cx);
-            picker
-        });
+        let date = cx.new(|cx| DateField::new(day, window, cx));
         let comment = cx.new(|cx| {
             let state = InputState::new(window, cx).placeholder("Optional");
             match editing.as_ref().and_then(|entry| entry.comment.clone()) {
@@ -105,6 +100,18 @@ impl EntryForm {
     /// keeps the dialog up with what is wrong said under the fields.
     fn submit(&mut self, cx: &mut Context<Self>) -> bool {
         let result = self.read(cx).and_then(|draft| {
+            // A record saved as it was is not rewritten: a write is a new
+            // stamp, and a stamp that changes nothing would still outrank a
+            // change to the same record made on another device.
+            let unchanged = self.editing.as_ref().is_some_and(|entry| {
+                entry.category_id == draft.category_id
+                    && entry.amount == draft.amount
+                    && entry.comment == draft.comment
+                    && entry.date == draft.date
+            });
+            if unchanged {
+                return Ok(());
+            }
             let (mode, id) = (
                 self.mode,
                 self.editing.as_ref().map(|entry| entry.id.clone()),
@@ -133,9 +140,11 @@ impl EntryForm {
         let amount = parse_amount(&self.amount.read(cx).value())
             .filter(|amount| *amount > 0.0)
             .ok_or("Amount must be a number greater than 0.")?;
-        let Date::Single(Some(date)) = self.date.read(cx).date() else {
-            return Err("Choose a date.".to_string());
-        };
+        let date = self
+            .date
+            .read(cx)
+            .date(cx)
+            .ok_or("Date is not a date. Write it like 2026-10-04.")?;
         let comment = self.comment.read(cx).value().trim().to_string();
         Ok(EntryDraft {
             category_id,
@@ -151,12 +160,15 @@ impl Render for EntryForm {
         let currency = self.book.read(cx).currency().to_string();
         v_flex()
             .gap_3()
-            .child(ui::field("Category", Select::new(&self.category)))
+            .child(ui::field(
+                "Category",
+                ui::choosing(Select::new(&self.category)),
+            ))
             .child(ui::field(
                 format!("Amount, {currency}"),
                 Input::new(&self.amount),
             ))
-            .child(ui::field("Date", DatePicker::new(&self.date)))
+            .child(ui::field("Date", self.date.clone()))
             .child(ui::field("Comment", Input::new(&self.comment)))
             .children(self.error.clone().map(|error| ui::form_error(error, cx)))
             // Deleting is on the object it deletes, apart from the footer's
@@ -206,13 +218,14 @@ pub fn open_entry_dialog(
         None => (format!("New {}", mode.noun()), "Add"),
     };
     let form = cx.new(|cx| EntryForm::new(book.clone(), mode, entry, window, cx));
-    // The amount is what is typed first, nearly every time.
-    let amount = form.read(cx).amount.clone();
+    // The fields are filled in the order they stand in: the category first,
+    // then Tab to the amount.
+    let first = form.read(cx).category.focus_handle(cx);
     ui::open_form(
         title,
         commit,
         form,
-        Some(amount),
+        Some(first),
         EntryForm::submit,
         window,
         cx,

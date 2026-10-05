@@ -127,7 +127,7 @@ pub fn open_account_dialog(
         None => ("New account", "Add"),
     };
     let form = cx.new(|cx| AccountForm::new(book.clone(), account, window, cx));
-    let name = form.read(cx).name.clone();
+    let name = gpui_kit::Focusable::focus_handle(&form.read(cx).name, cx);
     ui::open_form(
         title,
         commit,

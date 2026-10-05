@@ -1,0 +1,45 @@
+# mode: demo
+# size: 1240x800
+#
+# A date is picked from the calendar or typed, and the two are one value. The
+# calendar opens from the button at the end of the field and closes on the
+# day picked; a short form typed over it — day and month — is read against
+# the year the field opened on, and the record is saved with it.
+wait:2500
+key:ctrl-n
+wait:900
+# The calendar button, then the 13th.
+click:808,330
+wait:900
+click:624,530
+wait:700
+expect:dialog=open
+key:ctrl-a
+type:6.10
+wait:300
+# Back to the amount.
+key:shift-tab
+wait:300
+type:77
+wait:200
+key:enter
+wait:900
+expect:dialog=closed
+expect:records=45
+expect:balance=1 054 160.45 ₽
+# Something that is not a date keeps the dialog up and saves nothing.
+key:ctrl-n
+wait:900
+key:tab
+wait:200
+type:5
+key:tab
+wait:200
+key:ctrl-a
+type:someday
+wait:200
+key:enter
+wait:700
+expect:dialog=open
+expect:records=45
+quit

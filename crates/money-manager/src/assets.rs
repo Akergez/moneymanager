@@ -29,6 +29,7 @@ icon_assets!(
         ChevronLeft,
         ChevronRight,
         TriangleAlert,
+        Calendar,
         // What a category can wear.
         Tag,
         Utensils,

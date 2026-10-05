@@ -3,13 +3,19 @@
 //! The layout is read off the window's width on every frame, which is the
 //! only thing that is true when a window is tiled, maximized or is a phone's
 //! whole screen. Nothing about it is stored.
+//!
+//! The width is counted in rems, not pixels: what decides whether a sidebar
+//! and a table fit is how many characters fit, and that changes with the
+//! interface's size as much as with the window's.
 
-/// Below this the navigation is a bar along the bottom and the list of
-/// records is a list rather than a table.
-pub const PHONE_BELOW: f32 = 700.0;
+use gpui_kit::Window;
 
-/// From this the sidebar has room for its labels.
-pub const DESKTOP_FROM: f32 = 1100.0;
+/// Below this many rems the navigation is a bar along the bottom and the
+/// list of records is a list rather than a table.
+pub const PHONE_BELOW: f32 = 44.0;
+
+/// From this many rems the sidebar has room for its labels.
+pub const DESKTOP_FROM: f32 = 66.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Layout {
@@ -22,7 +28,12 @@ pub enum Layout {
 }
 
 impl Layout {
-    pub fn for_width(width: f32) -> Self {
+    /// The layout `window` has room for at its current rem.
+    pub fn of(window: &Window) -> Self {
+        Self::for_rems(window.viewport_size().width / window.rem_size())
+    }
+
+    pub fn for_rems(width: f32) -> Self {
         if width < PHONE_BELOW {
             Layout::Phone
         } else if width < DESKTOP_FROM {
@@ -52,12 +63,12 @@ mod tests {
 
     #[test]
     fn a_layout_follows_the_width_and_changes_exactly_at_its_bounds() {
-        assert_eq!(Layout::for_width(390.0), Layout::Phone);
-        assert_eq!(Layout::for_width(699.9), Layout::Phone);
-        assert_eq!(Layout::for_width(700.0), Layout::Tablet);
-        assert_eq!(Layout::for_width(834.0), Layout::Tablet);
-        assert_eq!(Layout::for_width(1099.9), Layout::Tablet);
-        assert_eq!(Layout::for_width(1100.0), Layout::Desktop);
-        assert_eq!(Layout::for_width(2560.0), Layout::Desktop);
+        assert_eq!(Layout::for_rems(24.0), Layout::Phone);
+        assert_eq!(Layout::for_rems(43.9), Layout::Phone);
+        assert_eq!(Layout::for_rems(44.0), Layout::Tablet);
+        assert_eq!(Layout::for_rems(52.0), Layout::Tablet);
+        assert_eq!(Layout::for_rems(65.9), Layout::Tablet);
+        assert_eq!(Layout::for_rems(66.0), Layout::Desktop);
+        assert_eq!(Layout::for_rems(160.0), Layout::Desktop);
     }
 }

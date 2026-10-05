@@ -12,7 +12,7 @@ expect:categories=6
 key:ctrl-3
 wait:800
 expect:screen=charts
-key:ctrl-e
+key:ctrl-m
 wait:500
 expect:mode=income
 expect:screen=charts
@@ -22,7 +22,7 @@ expect:categories=3
 key:ctrl-1
 wait:500
 expect:records=8
-key:ctrl-e
+key:ctrl-m
 wait:500
 expect:mode=expense
 expect:records=44

@@ -1,6 +1,6 @@
 use gpui_kit::component::{ActiveTheme, StyledExt, h_flex, v_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{Context, Entity, SharedString, Subscription, Window, div, img, px};
+use gpui_kit::{Context, Entity, Pixels, SharedString, Subscription, Window, div, img};
 
 use super::chrome::{system_bars, title_frame};
 use crate::book::Book;
@@ -175,11 +175,11 @@ impl Render for Shell {
             .child(
                 div()
                     .flex_none()
-                    .h(px(bars_top))
+                    .h(Pixels::from(bars_top))
                     .w_full()
                     .bg(theme.title_bar),
             )
             .child(div().flex_1().min_h_0().w_full().child(body))
-            .pb(px(bars_bottom))
+            .pb(Pixels::from(bars_bottom))
     }
 }

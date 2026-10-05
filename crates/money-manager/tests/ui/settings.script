@@ -12,7 +12,7 @@ expect:dialog=open
 key:escape
 wait:700
 expect:dialog=closed
-key:ctrl-r
+key:ctrl-s
 wait:900
 expect:dialog=open
 expect:sync=idle

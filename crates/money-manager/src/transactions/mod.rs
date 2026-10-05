@@ -17,11 +17,11 @@ use std::rc::Rc;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::list::ListItem;
 use gpui_kit::component::table::{DataTable, TableEvent, TableState};
-use gpui_kit::component::{ActiveTheme, Disableable, Sizable, Size, StyledExt, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Sizable, Size, StyledExt, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, AppContext, Context, Entity, SharedString, Subscription, Window, div,
-    uniform_list,
+    AnyElement, App, AppContext, Bounds, Context, Entity, Pixels, SharedString, Subscription,
+    Window, div, uniform_list,
 };
 use money_core::format::{format_amount, format_money};
 
@@ -39,18 +39,19 @@ pub(crate) struct EntryRow {
     pub category: SharedString,
     /// The colour and icon of its category, as the ledger has them.
     style: CategoryStyle,
-    /// The amount with its sign: `−1 240.00`.
+    /// The amount, without a sign: the screen is of one kind of record, and
+    /// its heading already says which.
     pub amount: SharedString,
     pub date: SharedString,
     pub short_id: SharedString,
 }
 
 impl EntryRow {
-    fn new(entry: Entry, category: SharedString, style: CategoryStyle, mode: Mode) -> Self {
+    fn new(entry: Entry, category: SharedString, style: CategoryStyle) -> Self {
         EntryRow {
             category,
             style,
-            amount: format!("{}{}", mode.sign(), format_amount(entry.amount)).into(),
+            amount: format_amount(entry.amount).into(),
             date: entry.date.format("%Y-%m-%d").to_string().into(),
             short_id: entry.short_id().into(),
             entry,
@@ -76,6 +77,8 @@ pub struct TransactionsView {
     /// Whether the table currently carries the comment column, which only
     /// the widest layout has room for.
     with_comments: bool,
+    /// The width the table was last drawn in, which its columns share out.
+    table_width: Pixels,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -86,9 +89,10 @@ impl TransactionsView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let rem = window.rem_size();
+        // A first guess, until the table has been drawn once and measured.
+        let table_width = window.viewport_size().width;
         let table = cx.new(|cx| {
-            TableState::new(EntryTable::new(true, rem), window, cx)
+            TableState::new(EntryTable::new(true, table_width), window, cx)
                 .col_movable(false)
                 .col_selectable(false)
         });
@@ -110,10 +114,26 @@ impl TransactionsView {
             rows: Rc::new(Vec::new()),
             table,
             with_comments: true,
+            table_width,
             _subscriptions: subscriptions,
         };
         view.refresh(cx);
         view
+    }
+
+    /// Shares the table's width out among its columns again, when the width
+    /// or the set of columns is no longer what they were laid out for.
+    fn fit_columns(&mut self, with_comments: bool, width: Pixels, cx: &mut Context<Self>) {
+        if with_comments == self.with_comments && width == self.table_width {
+            return;
+        }
+        self.with_comments = with_comments;
+        self.table_width = width;
+        self.table.update(cx, |table, cx| {
+            table.delegate_mut().set_columns(with_comments, width);
+            table.refresh(cx);
+        });
+        cx.notify();
     }
 
     pub fn set_mode(&mut self, mode: Mode, cx: &mut Context<Self>) {
@@ -134,7 +154,7 @@ impl TransactionsView {
                 .map(|entry| {
                     let category = book.category_name(mode, &entry.category_id);
                     let style = book.category_style(mode, &entry.category_id);
-                    EntryRow::new(entry, category, style, mode)
+                    EntryRow::new(entry, category, style)
                 })
                 .collect()
         };
@@ -155,13 +175,21 @@ impl TransactionsView {
         open_entry_dialog(&self.book, self.mode, Some(entry), window, cx);
     }
 
-    fn open_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Whether a row of the table is selected, which is what the Edit
+    /// command is about.
+    pub fn has_selection(&self, cx: &App) -> bool {
+        !self.rows.is_empty() && self.table.read(cx).selected_row().is_some()
+    }
+
+    /// Opens the selected row's record. The command itself lives with the
+    /// workspace's other commands, beside "new".
+    pub fn open_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(ix) = self.table.read(cx).selected_row() {
             self.open_row(ix, window, cx);
         }
     }
 
-    fn render_heading(&self, layout: Layout, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_heading(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let book = self.book.read(cx);
         let total: f64 = self.rows.iter().map(|row| row.entry.amount).sum();
         let detail = match self.rows.len() {
@@ -169,17 +197,7 @@ impl TransactionsView {
             1 => format!("1 record · {}", format_money(total, book.currency())),
             n => format!("{n} records · {}", format_money(total, book.currency())),
         };
-        // The table has a selection, so its row has a visible command; on a
-        // phone a tap on the row is that command.
-        let open = (!layout.is_phone() && !self.rows.is_empty()).then(|| {
-            Button::new("open-record")
-                .label("Open…")
-                .small()
-                .disabled(self.table.read(cx).selected_row().is_none())
-                .on_click(cx.listener(|this, _, window, cx| this.open_selected(window, cx)))
-                .into_any_element()
-        });
-        ui::heading(self.mode.title(), detail, open, cx)
+        ui::heading(self.mode.title(), detail, None, cx)
     }
 
     /// The phone layout: one tall row per record, each a whole tap target.
@@ -255,20 +273,26 @@ impl TransactionsView {
 
 impl Render for TransactionsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let layout = Layout::for_width(f32::from(window.viewport_size().width));
+        let layout = Layout::of(window);
 
         // The comment column comes and goes with the room for it. Changing
-        // the columns is a change to the table's state, made once per
-        // crossing of the breakpoint rather than on every frame.
+        // the columns is a change to the table's state, made when the room
+        // changes rather than on every frame.
         let with_comments = layout == Layout::Desktop;
-        if with_comments != self.with_comments {
-            self.with_comments = with_comments;
-            let rem = window.rem_size();
-            self.table.update(cx, |table, cx| {
-                table.delegate_mut().set_columns(with_comments, rem);
-                table.refresh(cx);
+        self.fit_columns(with_comments, self.table_width, cx);
+        // The room itself is only known once it has been laid out, so it is
+        // read off the frame and used for the next one.
+        let view = cx.entity().downgrade();
+        let measure = move |bounds: Vec<Bounds<Pixels>>, _: &mut Window, cx: &mut App| {
+            let Some(width) = bounds.first().map(|bounds| bounds.size.width) else {
+                return;
+            };
+            let view = view.clone();
+            cx.defer(move |cx| {
+                view.update(cx, |this, cx| this.fit_columns(with_comments, width, cx))
+                    .ok();
             });
-        }
+        };
 
         let body = if self.rows.is_empty() {
             self.render_empty(cx)
@@ -276,11 +300,19 @@ impl Render for TransactionsView {
             self.render_list()
         } else {
             DataTable::new(&self.table)
-                .with_size(if layout == Layout::Tablet {
-                    Size::Large
-                } else {
-                    Size::Medium
-                })
+                // The library's rows have two heights of its own, not counted
+                // in rems: the taller one wherever a finger may be what
+                // presses a row, or the text has been made larger.
+                .with_size(
+                    if layout == Layout::Tablet
+                        || crate::appearance::interface_size(cx)
+                            == crate::appearance::InterfaceSize::Large
+                    {
+                        Size::Large
+                    } else {
+                        Size::Medium
+                    },
+                )
                 .bordered(true)
                 .into_any_element()
         };
@@ -290,7 +322,14 @@ impl Render for TransactionsView {
             .gap_3()
             .when(layout.is_phone(), |screen| screen.px_3().pt_1())
             .when(!layout.is_phone(), |screen| screen.p_4())
-            .child(self.render_heading(layout, cx))
-            .child(div().flex_1().min_h_0().w_full().child(body))
+            .child(self.render_heading(cx))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .on_children_prepainted(measure)
+                    .child(div().size_full().child(body)),
+            )
     }
 }

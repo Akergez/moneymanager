@@ -104,10 +104,11 @@ that shows both orders.
 | Key | Action |
 |-----|--------|
 | `Ctrl+1` / `Ctrl+2` / `Ctrl+3` | Transactions / Categories / Charts |
-| `Ctrl+E` | Switch between expenses and income |
+| `Ctrl+M` | Switch between expenses and income |
 | `Ctrl+N` | New record (a new category on the Categories screen) |
+| `Ctrl+E` | Edit the selected record |
 | `Ctrl+T` | New transfer |
-| `Ctrl+R` | Sync |
+| `Ctrl+S` | Sync |
 | `Ctrl+,` | Settings |
 | `Ctrl+Q` | Quit |
 

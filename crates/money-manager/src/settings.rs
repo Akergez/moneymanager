@@ -130,6 +130,16 @@ impl Settings {
         self.set("theme", Some(theme));
     }
 
+    /// How large the interface is drawn, as the stored name of a
+    /// [`crate::appearance::InterfaceSize`].
+    pub fn interface_size(&self) -> Option<String> {
+        self.get("interface_size")
+    }
+
+    pub fn set_interface_size(&mut self, size: &str) {
+        self.set("interface_size", Some(size));
+    }
+
     /// Whether the charts leave transfer legs out.
     pub fn hides_transfers(&self) -> bool {
         self.get("hide_transfers").unwrap_or(false)

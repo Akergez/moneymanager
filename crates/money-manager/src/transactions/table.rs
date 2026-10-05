@@ -25,38 +25,49 @@ pub(super) struct EntryTable {
     sorted_by: Option<(usize, ColumnSort)>,
 }
 
+/// How the table's width is shared out, in parts: (id, amount, category,
+/// date, comment). The comment is rarely filled in, so it gets no more than
+/// the others; the category, which is what a row is read by, gets the most.
+const PARTS: [f32; 5] = [3.0, 4.0, 7.0, 4.0, 6.0];
+
+/// What of the width is shared out. The rest is left for the table's own
+/// border and scrollbar, so the columns never ask for a horizontal scroll.
+const SHARED: f32 = 0.98;
+
 /// The columns, in the order the brief names them: id, amount, category,
-/// date — and the comment where there is room. Widths are in rems, so they
-/// follow the interface's zoom like everything else.
-fn columns(with_comments: bool, rem: Pixels) -> Vec<Column> {
+/// date — and the comment where there is room. Together they take the whole
+/// `width` the table is given, whatever it is: nothing is left empty beside
+/// them and nothing is sized apart from the window.
+fn columns(with_comments: bool, width: Pixels) -> Vec<Column> {
+    let count = if with_comments { 5 } else { 4 };
+    let whole: f32 = PARTS[..count].iter().sum();
+    let part = |ix: usize| width * (SHARED * PARTS[ix] / whole);
     let mut columns = vec![
-        Column::new(ID, "ID").width(rem * 6.).resizable(false),
+        Column::new(ID, "ID").width(part(0)).resizable(false),
         Column::new(AMOUNT, "Amount")
-            .width(rem * 8.)
+            .width(part(1))
             .text_right()
             .sortable(),
-        Column::new(CATEGORY, "Category")
-            .width(rem * 14.)
-            .sortable(),
-        Column::new(DATE, "Date").width(rem * 7.5).descending(),
+        Column::new(CATEGORY, "Category").width(part(2)).sortable(),
+        Column::new(DATE, "Date").width(part(3)).descending(),
     ];
     if with_comments {
-        columns.push(Column::new(COMMENT, "Comment").width(rem * 20.));
+        columns.push(Column::new(COMMENT, "Comment").width(part(4)));
     }
     columns
 }
 
 impl EntryTable {
-    pub fn new(with_comments: bool, rem: Pixels) -> Self {
+    pub fn new(with_comments: bool, width: Pixels) -> Self {
         EntryTable {
             rows: Vec::new(),
-            columns: columns(with_comments, rem),
+            columns: columns(with_comments, width),
             sorted_by: None,
         }
     }
 
-    pub fn set_columns(&mut self, with_comments: bool, rem: Pixels) {
-        self.columns = columns(with_comments, rem);
+    pub fn set_columns(&mut self, with_comments: bool, width: Pixels) {
+        self.columns = columns(with_comments, width);
         // The comment column is the last one, so an index into the others
         // still names the same column.
         if self
@@ -191,9 +202,12 @@ impl TableDelegate for EntryTable {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::book::Mode;
     use chrono::NaiveDate;
-    use gpui_kit::px;
+
+    /// Some width for a table to be laid out in.
+    fn width() -> Pixels {
+        Pixels::from(960.0)
+    }
 
     fn row(id: u8, amount: f64, category: &str, day: u32) -> EntryRow {
         EntryRow::new(
@@ -207,7 +221,6 @@ mod tests {
             },
             category.to_string().into(),
             Default::default(),
-            Mode::Expense,
         )
     }
 
@@ -217,8 +230,8 @@ mod tests {
 
     #[test]
     fn the_comment_column_is_the_only_one_that_comes_and_goes() {
-        let wide = columns(true, px(16.));
-        let narrow = columns(false, px(16.));
+        let wide = columns(true, width());
+        let narrow = columns(false, width());
         assert_eq!(wide.len(), 5);
         assert_eq!(narrow.len(), 4);
         for (a, b) in wide.iter().zip(&narrow) {
@@ -228,8 +241,21 @@ mod tests {
     }
 
     #[test]
+    fn the_columns_take_the_width_they_are_given_and_no_more() {
+        for with_comments in [true, false] {
+            let total: f32 = columns(with_comments, width())
+                .iter()
+                .map(|column| f32::from(column.width))
+                .sum();
+            let given = f32::from(width());
+            assert!(total <= given, "{total} of {given}");
+            assert!(total > given * 0.95, "{total} of {given}");
+        }
+    }
+
+    #[test]
     fn rows_sort_by_a_column_and_fall_back_to_newest_first() {
-        let mut table = EntryTable::new(true, px(16.));
+        let mut table = EntryTable::new(true, width());
         table.set_rows(vec![
             row(1, 50.0, "Food", 3),
             row(2, 10.0, "Transport", 5),
@@ -247,7 +273,7 @@ mod tests {
 
     #[test]
     fn new_rows_keep_the_order_the_table_was_left_in() {
-        let mut table = EntryTable::new(false, px(16.));
+        let mut table = EntryTable::new(false, width());
         table.sorted_by = Some((1, ColumnSort::Ascending));
         table.set_rows(vec![row(1, 30.0, "A", 1), row(2, 20.0, "B", 2)]);
         assert_eq!(ids(&table), [2, 1]);

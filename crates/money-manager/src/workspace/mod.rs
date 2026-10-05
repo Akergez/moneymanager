@@ -49,10 +49,6 @@ impl Screen {
         }
     }
 
-    pub fn index(self) -> usize {
-        Screen::ALL.iter().position(|s| *s == self).unwrap_or(0)
-    }
-
     /// What a UI scenario calls it.
     pub fn name(self) -> &'static str {
         match self {
@@ -84,6 +80,9 @@ impl Workspace {
         let transactions = cx.new(|cx| TransactionsView::new(book.clone(), mode, window, cx));
         let categories = cx.new(|cx| CategoriesView::new(book.clone(), mode, cx));
         let charts = cx.new(|cx| ChartsView::new(book.clone(), mode, cx));
+        // Selecting a row is what makes Edit available, and Edit is drawn
+        // here.
+        cx.observe(&transactions, |_, _, cx| cx.notify()).detach();
         let announced = book.read(cx).sync_state().clone();
         let watch = cx.observe_in(&book, window, |this, _, window, cx| {
             this.announce_sync(window, cx);
@@ -167,6 +166,19 @@ impl Workspace {
             Screen::Transactions | Screen::Charts => {
                 crate::transactions::open_entry_dialog(&self.book, self.mode, None, window, cx)
             }
+        }
+    }
+
+    /// Whether there is something for Edit to open: a selected row of the
+    /// table. The other screens open what is pressed, and have no selection.
+    fn can_edit(&self, cx: &gpui_kit::App) -> bool {
+        self.screen == Screen::Transactions && self.transactions.read(cx).has_selection(cx)
+    }
+
+    fn edit_record(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.can_edit(cx) {
+            self.transactions
+                .update(cx, |view, cx| view.open_selected(window, cx));
         }
     }
 

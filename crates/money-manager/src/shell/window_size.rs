@@ -1,21 +1,31 @@
-use gpui_kit::{Pixels, px, size};
+use gpui_kit::{App, Pixels, Size, size};
+
+/// The window a desktop opens, in rems: wide enough for the sidebar with its
+/// labels and the table with its comments, at whatever size the interface is
+/// drawn.
+const INITIAL: (f32, f32) = (78.0, 50.0);
+
+/// The smallest the window can be made, in rems: a phone held upright.
+const MINIMUM: (f32, f32) = (21.0, 30.0);
 
 /// `MONEY_MANAGER_SIZE=400x800` opens at a phone-sized window, which is the
-/// only practical way to look at the collapsed layout without a phone.
-///
-/// These are window dimensions handed to the platform, not layout: the one
-/// place a pixel count is the thing itself.
-pub(super) fn initial_size() -> gpui_kit::Size<Pixels> {
-    let (width, height) = std::env::var("MONEY_MANAGER_SIZE")
+/// only practical way to look at the collapsed layout without a phone. It is
+/// in the platform's own units, as a screenshot of it will be.
+pub(super) fn initial_size(cx: &App) -> Size<Pixels> {
+    std::env::var("MONEY_MANAGER_SIZE")
         .ok()
         .and_then(|size| parse_size(&size))
-        .unwrap_or((1240.0, 800.0));
-    size(px(width), px(height))
+        .map(|(width, height)| size(Pixels::from(width), Pixels::from(height)))
+        .unwrap_or_else(|| in_rems(INITIAL, cx))
 }
 
-/// The smallest the window can be made: a phone held upright.
-pub(super) fn minimum_size() -> gpui_kit::Size<Pixels> {
-    size(px(340.), px(480.))
+pub(super) fn minimum_size(cx: &App) -> Size<Pixels> {
+    in_rems(MINIMUM, cx)
+}
+
+fn in_rems((width, height): (f32, f32), cx: &App) -> Size<Pixels> {
+    let rem = crate::appearance::rem(cx);
+    size(rem * width, rem * height)
 }
 
 fn parse_size(text: &str) -> Option<(f32, f32)> {
@@ -35,5 +45,11 @@ mod tests {
         assert_eq!(parse_size("400"), None);
         assert_eq!(parse_size("wide x tall"), None);
         assert_eq!(parse_size("0x800"), None);
+    }
+
+    #[test]
+    fn the_window_a_desktop_opens_has_room_for_the_widest_layout() {
+        assert!(INITIAL.0 >= crate::shell::layout::DESKTOP_FROM);
+        assert!(MINIMUM.0 < crate::shell::layout::PHONE_BELOW);
     }
 }

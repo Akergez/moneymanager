@@ -12,6 +12,7 @@ gpui_kit::actions!(
         ShowCharts,
         ToggleMode,
         NewRecord,
+        EditRecord,
         NewTransfer,
         SyncNow,
         OpenSettings

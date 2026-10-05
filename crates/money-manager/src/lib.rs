@@ -24,6 +24,7 @@ mod assets;
 mod book;
 mod categories;
 mod charts;
+mod date_field;
 mod fonts;
 mod onboarding;
 mod paths;

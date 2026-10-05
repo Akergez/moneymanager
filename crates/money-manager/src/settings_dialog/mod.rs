@@ -16,7 +16,7 @@ use gpui_kit::prelude::*;
 use gpui_kit::{App, AppContext, ClipboardItem, Context, Entity, SharedString, Window, div};
 use money_core::remote::{self, RemoteConfig};
 
-use crate::appearance::{self, ThemeChoice};
+use crate::appearance::{self, InterfaceSize, ThemeChoice};
 use crate::onboarding::RemoteFields;
 use crate::settings::Settings;
 use crate::ui;
@@ -120,6 +120,7 @@ impl Render for SettingsForm {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let muted = cx.theme().muted_foreground;
         let current = appearance::theme_choice(cx);
+        let current_size = appearance::interface_size(cx);
         let has_key = self.remote.read(cx).encryption_key.is_some();
 
         let section = |title: &'static str| div().font_semibold().child(title);
@@ -160,6 +161,36 @@ impl Render for SettingsForm {
                                             .and_then(|index| ThemeChoice::ALL.get(*index))
                                         {
                                             appearance::set_theme_choice(*choice, window, cx);
+                                        }
+                                    }),
+                            ),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_3()
+                            .child(
+                                v_flex().flex_1().min_w_0().child("Size").child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(muted)
+                                        .child("Text, controls and charts together"),
+                                ),
+                            )
+                            .child(
+                                ButtonGroup::new("interface-size")
+                                    .outline()
+                                    .small()
+                                    .children(InterfaceSize::ALL.map(|size| {
+                                        Button::new(size.label())
+                                            .label(size.label())
+                                            .selected(size == current_size)
+                                    }))
+                                    .on_click(|picked, _, cx| {
+                                        if let Some(size) = picked
+                                            .first()
+                                            .and_then(|index| InterfaceSize::ALL.get(*index))
+                                        {
+                                            appearance::set_interface_size(*size, cx);
                                         }
                                     }),
                             ),

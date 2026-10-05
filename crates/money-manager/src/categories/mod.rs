@@ -115,7 +115,7 @@ impl CategoriesView {
 
 impl Render for CategoriesView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let layout = Layout::for_width(f32::from(window.viewport_size().width));
+        let layout = Layout::of(window);
         let categories = self.book.read(cx).categories(self.mode);
         let kind = self.kind();
         let detail = match categories.len() {

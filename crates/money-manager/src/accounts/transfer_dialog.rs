@@ -4,8 +4,7 @@
 //! different currencies; the rate is whatever the two imply, and is shown
 //! back as they are typed so a slipped digit is seen before it is saved.
 
-use gpui_kit::component::calendar::Date;
-use gpui_kit::component::date_picker::{DatePicker, DatePickerState};
+use crate::date_field::DateField;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
@@ -24,7 +23,7 @@ struct TransferForm {
     to: Entity<SelectState<Vec<Choice>>>,
     amount_from: Entity<InputState>,
     amount_to: Entity<InputState>,
-    date: Entity<DatePickerState>,
+    date: Entity<DateField>,
     comment: Entity<InputState>,
     error: Option<SharedString>,
     _subscriptions: Vec<Subscription>,
@@ -64,11 +63,7 @@ impl TransferForm {
             .new(|cx| SelectState::new(choices, Some(IndexPath::default().row(other)), window, cx));
         let amount_from = cx.new(|cx| InputState::new(window, cx).placeholder("0.00"));
         let amount_to = cx.new(|cx| InputState::new(window, cx).placeholder("0.00"));
-        let date = cx.new(|cx| {
-            let mut picker = DatePickerState::new(window, cx).date_format("%Y-%m-%d");
-            picker.set_date(crate::today(), window, cx);
-            picker
-        });
+        let date = cx.new(|cx| DateField::new(crate::today(), window, cx));
         let comment = cx.new(|cx| InputState::new(window, cx).placeholder("Optional"));
 
         // The rate line and the two currency labels follow what is typed
@@ -131,9 +126,11 @@ impl TransferForm {
                 .ok_or_else(|| "Both amounts must be numbers greater than 0.".to_string())
         };
         let (amount_from, amount_to) = (amount(&self.amount_from)?, amount(&self.amount_to)?);
-        let Date::Single(Some(date)) = self.date.read(cx).date() else {
-            return Err("Choose a date.".to_string());
-        };
+        let date = self
+            .date
+            .read(cx)
+            .date(cx)
+            .ok_or("Date is not a date. Write it like 2026-10-04.")?;
         let comment = self.comment.read(cx).value().trim().to_string();
         Ok(TransferDraft {
             from,
@@ -167,12 +164,12 @@ impl Render for TransferForm {
         let rate = self.rate(cx);
         v_flex()
             .gap_3()
-            .child(ui::field("From", Select::new(&self.from)))
+            .child(ui::field("From", ui::choosing(Select::new(&self.from))))
             .child(ui::field(
                 format!("Amount sent, {from_currency}"),
                 Input::new(&self.amount_from),
             ))
-            .child(ui::field("To", Select::new(&self.to)))
+            .child(ui::field("To", ui::choosing(Select::new(&self.to))))
             .child(
                 ui::field(
                     format!("Amount received, {to_currency}"),
@@ -185,7 +182,7 @@ impl Render for TransferForm {
                         .child(rate)
                 })),
             )
-            .child(ui::field("Date", DatePicker::new(&self.date)))
+            .child(ui::field("Date", self.date.clone()))
             .child(ui::field("Comment", Input::new(&self.comment)))
             .children(self.error.clone().map(|error| ui::form_error(error, cx)))
     }
@@ -203,7 +200,7 @@ pub fn open_transfer_dialog(book: &Entity<Book>, window: &mut Window, cx: &mut A
         return super::open_account_dialog(book, None, window, cx);
     }
     let form = cx.new(|cx| TransferForm::new(book.clone(), window, cx));
-    let amount = form.read(cx).amount_from.clone();
+    let amount = gpui_kit::Focusable::focus_handle(&form.read(cx).amount_from, cx);
     ui::open_form(
         "New transfer",
         "Transfer",

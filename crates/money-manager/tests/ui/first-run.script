@@ -6,10 +6,10 @@
 wait:2000
 expect:stage=welcome
 expect:onboarding=choose
-click:620,426
+click:620,428
 wait:600
 expect:onboarding=create
-click:774,551
+click:794,567
 wait:1200
 expect:stage=workspace
 expect:accounts=1

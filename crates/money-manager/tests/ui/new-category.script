@@ -15,7 +15,7 @@ key:enter
 wait:900
 expect:dialog=closed
 expect:categories=7
-key:ctrl-e
+key:ctrl-m
 wait:500
 expect:categories=3
 quit

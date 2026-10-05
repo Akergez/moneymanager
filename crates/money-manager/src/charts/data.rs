@@ -91,9 +91,10 @@ impl Month {
         format!("{} {}", self.name(), self.year)
     }
 
-    /// `Sep`, as an axis label.
+    /// `Sep ’26`, as an axis label. With the year, because the axis runs
+    /// over more than one and each bar needs a name of its own.
     pub fn short(self) -> String {
-        self.name()[..3].to_string()
+        format!("{} ’{:02}", &self.name()[..3], self.year.rem_euclid(100))
     }
 }
 
@@ -141,18 +142,35 @@ pub struct MonthTotal {
     pub amount: f64,
 }
 
-/// The totals of the `count` months ending with `last`, oldest first, leaving
-/// out the categories in `hidden`. A month with no records is there with a
-/// total of zero: a gap in the bars would read as two neighbouring months.
-pub fn by_month(
-    entries: &[Entry],
-    last: Month,
-    count: usize,
-    hidden: &HashSet<Vec<u8>>,
-) -> Vec<MonthTotal> {
-    let mut months = Vec::with_capacity(count);
+/// Which categories a chart is of. Choosing none is choosing them all: a
+/// chart of nothing answers no question, and "everything" is where a chart
+/// starts.
+pub type Chosen = HashSet<Vec<u8>>;
+
+fn counts(chosen: &Chosen, category_id: &[u8]) -> bool {
+    chosen.is_empty() || chosen.contains(category_id)
+}
+
+/// What pressing a category does to the choice. From "everything" it leaves
+/// that category alone — one press to look at one category. After that a
+/// press adds a category or takes it away, and a choice that has come to
+/// hold every category on offer, or none, is "everything" again.
+pub fn toggle(chosen: &mut Chosen, category_id: &[u8], offered: usize) {
+    if !chosen.remove(category_id) {
+        chosen.insert(category_id.to_vec());
+    }
+    if chosen.len() >= offered {
+        chosen.clear();
+    }
+}
+
+/// The totals of every month from `first` to `last`, oldest first, of the
+/// categories in `chosen`. A month with no records is there with a total of
+/// zero: a gap in the bars would read as two neighbouring months.
+pub fn by_month(entries: &[Entry], first: Month, last: Month, chosen: &Chosen) -> Vec<MonthTotal> {
+    let mut months = Vec::new();
     let mut month = last;
-    for _ in 0..count {
+    while month >= first {
         months.push(month);
         month = month.previous();
     }
@@ -163,25 +181,26 @@ pub fn by_month(
             month,
             amount: entries
                 .iter()
-                .filter(|entry| month.contains(entry.date) && !hidden.contains(&entry.category_id))
+                .filter(|entry| month.contains(entry.date) && counts(chosen, &entry.category_id))
                 .map(|entry| entry.amount)
                 .sum(),
         })
         .collect()
 }
 
-/// The records dated within the `count` months ending with `last`: what the
-/// bars are drawn from, and so whose categories their filter offers.
-pub fn within_months(entries: &[Entry], last: Month, count: usize) -> Vec<Entry> {
+/// The month the bars begin with: that of the oldest record, but never
+/// fewer than `at_least` months before `last`, so a young ledger still has
+/// a full row of bars rather than two very wide ones.
+pub fn first_month(entries: &[Entry], last: Month, at_least: usize) -> Month {
     let mut first = last;
-    for _ in 1..count {
+    for _ in 1..at_least {
         first = first.previous();
     }
     entries
         .iter()
-        .filter(|entry| (first..=last).contains(&Month::of(entry.date)))
-        .cloned()
-        .collect()
+        .map(|entry| Month::of(entry.date))
+        .min()
+        .map_or(first, |oldest| oldest.min(first))
 }
 
 /// The running total at the end of one day of a month.
@@ -191,19 +210,19 @@ pub struct DayTotal {
     pub total: f64,
 }
 
-/// The running total through `month`, a point for every day of it, leaving
-/// out the categories in `hidden`. Days after `until` are left off, so the
-/// line of the month in progress stops at today instead of running flat to
-/// the end of it.
+/// The running total through `month`, a point for every day of it, of the
+/// categories in `chosen`. Days after `until` are left off, so the line of
+/// the month in progress stops at today instead of running flat to the end
+/// of it.
 pub fn cumulative(
     entries: &[Entry],
     month: Month,
-    hidden: &HashSet<Vec<u8>>,
+    chosen: &Chosen,
     until: NaiveDate,
 ) -> Vec<DayTotal> {
     let mut per_day = vec![0.0f64; month.days() as usize + 1];
     for entry in entries {
-        if month.contains(entry.date) && !hidden.contains(&entry.category_id) {
+        if month.contains(entry.date) && counts(chosen, &entry.category_id) {
             per_day[entry.date.day() as usize] += entry.amount;
         }
     }
@@ -267,7 +286,7 @@ mod tests {
             29
         );
         assert_eq!(SEP.title(), "September 2026");
-        assert_eq!(SEP.short(), "Sep");
+        assert_eq!(SEP.short(), "Sep ’26");
     }
 
     #[test]
@@ -297,7 +316,8 @@ mod tests {
     #[test]
     fn every_month_of_the_window_has_a_bar_even_an_empty_one() {
         let entries = [entry(1, 10.0, 2026, 9, 1), entry(1, 5.0, 2026, 7, 1)];
-        let totals = by_month(&entries, SEP, 4, &HashSet::new());
+        let june = SEP.previous().previous().previous();
+        let totals = by_month(&entries, june, SEP, &Chosen::new());
         let amounts: Vec<f64> = totals.iter().map(|t| t.amount).collect();
         assert_eq!(amounts, [0.0, 5.0, 0.0, 10.0]);
         assert_eq!(totals[0].month.month, 6);
@@ -305,34 +325,54 @@ mod tests {
     }
 
     #[test]
-    fn a_hidden_category_is_left_out_of_every_bar() {
+    fn the_bars_are_of_the_chosen_categories_only() {
         let entries = [
             entry(1, 10.0, 2026, 9, 1),
             entry(2, 4.0, 2026, 9, 2),
             entry(2, 6.0, 2026, 8, 2),
         ];
-        let hidden: HashSet<Vec<u8>> = [vec![2]].into();
-        let amounts: Vec<f64> = by_month(&entries, SEP, 2, &hidden)
+        let only_first: Chosen = [vec![1]].into();
+        let amounts: Vec<f64> = by_month(&entries, SEP.previous(), SEP, &only_first)
             .iter()
             .map(|t| t.amount)
             .collect();
-        // The months stay, emptied: hiding a category removes no bar.
+        // The months stay, emptied: a choice removes no bar.
         assert_eq!(amounts, [0.0, 10.0]);
     }
 
     #[test]
-    fn the_bars_filter_offers_only_what_the_window_holds() {
-        let entries = [
-            entry(1, 10.0, 2026, 9, 30),
-            entry(2, 5.0, 2026, 8, 1),
-            entry(3, 7.0, 2026, 7, 31),
-            entry(4, 1.0, 2026, 10, 1),
-        ];
-        let inside = within_months(&entries, SEP, 2);
-        let categories: Vec<u8> = inside.iter().map(|e| e.category_id[0]).collect();
-        // August and September are in; July and October are not.
-        assert_eq!(categories, [1, 2]);
-        assert_eq!(within_months(&entries, SEP, 1).len(), 1);
+    fn the_bars_reach_back_to_the_oldest_record_and_never_fewer_than_asked() {
+        let entries = [entry(1, 10.0, 2026, 9, 30), entry(2, 5.0, 2025, 3, 1)];
+        let march = Month {
+            year: 2025,
+            month: 3,
+        };
+        assert_eq!(first_month(&entries, SEP, 12), march);
+        // A young ledger still gets its full row.
+        let young = [entry(1, 10.0, 2026, 9, 30)];
+        assert_eq!(first_month(&young, SEP, 3).month, 7);
+        assert_eq!(first_month(&[], SEP, 1), SEP);
+    }
+
+    #[test]
+    fn one_press_looks_at_one_category_and_choosing_all_is_choosing_none() {
+        let mut chosen = Chosen::new();
+        // From everything, a press leaves that one category.
+        toggle(&mut chosen, &[1], 3);
+        assert_eq!(chosen, [vec![1]].into());
+        // Another adds to it; pressing it again takes it away.
+        toggle(&mut chosen, &[2], 3);
+        assert_eq!(chosen.len(), 2);
+        toggle(&mut chosen, &[2], 3);
+        assert_eq!(chosen, [vec![1]].into());
+        // The last one taken away is everything again, and so is the last
+        // one added.
+        toggle(&mut chosen, &[1], 3);
+        assert!(chosen.is_empty());
+        for id in [1, 2, 3] {
+            toggle(&mut chosen, &[id], 3);
+        }
+        assert!(chosen.is_empty());
     }
 
     #[test]
@@ -342,16 +382,16 @@ mod tests {
             entry(2, 5.0, 2026, 9, 2),
             entry(1, 7.0, 2026, 9, 4),
         ];
-        let nothing_hidden = HashSet::new();
+        let nothing_hidden = Chosen::new();
         let today = NaiveDate::from_ymd_opt(2026, 9, 5).unwrap();
         let line = cumulative(&entries, SEP, &nothing_hidden, today);
         assert_eq!(line.len(), 5);
         let totals: Vec<f64> = line.iter().map(|p| p.total).collect();
         assert_eq!(totals, [0.0, 15.0, 15.0, 22.0, 22.0]);
 
-        // A hidden category is left out of every point.
-        let hidden: HashSet<Vec<u8>> = [vec![2]].into();
-        let line = cumulative(&entries, SEP, &hidden, today);
+        // Only the chosen category is in every point.
+        let only_first: Chosen = [vec![1]].into();
+        let line = cumulative(&entries, SEP, &only_first, today);
         assert_eq!(line.last().unwrap().total, 17.0);
 
         // A month that is over has all its days; one not begun has none.

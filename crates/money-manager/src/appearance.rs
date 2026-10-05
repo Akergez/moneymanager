@@ -5,7 +5,7 @@
 //! which a desktop on a day/night schedule does twice a day.
 
 use gpui_kit::component::{Theme, ThemeMode};
-use gpui_kit::{App, Window};
+use gpui_kit::{App, Pixels, Window};
 
 use crate::settings::Settings;
 
@@ -46,6 +46,105 @@ impl ThemeChoice {
             _ => ThemeChoice::System,
         }
     }
+}
+
+/// How large everything is drawn. Every size in the interface is in rems, so
+/// this one factor on the rem scales text, controls, spacing and charts
+/// together; nothing is sized apart from it.
+///
+/// It stops at Large. The component library keeps a few sizes of its own in
+/// pixels — the title bar's height, a table row's, the collapsed sidebar's
+/// width — and past this factor text no longer fits inside them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum InterfaceSize {
+    Compact,
+    #[default]
+    Regular,
+    Large,
+}
+
+impl InterfaceSize {
+    pub const ALL: [InterfaceSize; 3] = [
+        InterfaceSize::Compact,
+        InterfaceSize::Regular,
+        InterfaceSize::Large,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            InterfaceSize::Compact => "Compact",
+            InterfaceSize::Regular => "Regular",
+            InterfaceSize::Large => "Large",
+        }
+    }
+
+    fn stored(self) -> &'static str {
+        match self {
+            InterfaceSize::Compact => "compact",
+            InterfaceSize::Regular => "regular",
+            InterfaceSize::Large => "large",
+        }
+    }
+
+    fn parse(stored: &str) -> Self {
+        Self::ALL
+            .into_iter()
+            .find(|size| size.stored() == stored)
+            .unwrap_or_default()
+    }
+
+    /// The factor on the component library's own rem. Compact is the
+    /// library's size, which is small for a list of amounts read at arm's
+    /// length; Regular is a step up from it.
+    pub fn factor(self) -> f32 {
+        match self {
+            InterfaceSize::Compact => 1.0,
+            InterfaceSize::Regular => 1.125,
+            InterfaceSize::Large => 1.25,
+        }
+    }
+}
+
+/// The component library's own rem and monospace size, noted before anything
+/// scales them: a factor is applied to these, never to its own result.
+static LIBRARY_SIZES: std::sync::OnceLock<(Pixels, Pixels)> = std::sync::OnceLock::new();
+
+pub fn interface_size(cx: &App) -> InterfaceSize {
+    // A scenario's click coordinates are for one size; `MONEY_MANAGER_UI_SIZE`
+    // pins it whatever the settings say.
+    std::env::var("MONEY_MANAGER_UI_SIZE")
+        .ok()
+        .or_else(|| Settings::global(cx).interface_size())
+        .map(|stored| InterfaceSize::parse(&stored))
+        .unwrap_or_default()
+}
+
+pub fn set_interface_size(size: InterfaceSize, cx: &mut App) {
+    Settings::update(cx, |settings| settings.set_interface_size(size.stored()));
+    apply_size(cx);
+    cx.refresh_windows();
+}
+
+/// The rem the interface is drawn at: the library's, times the chosen size.
+pub fn rem(cx: &App) -> Pixels {
+    library_sizes(cx).0 * interface_size(cx).factor()
+}
+
+fn library_sizes(cx: &App) -> (Pixels, Pixels) {
+    *LIBRARY_SIZES.get_or_init(|| {
+        let theme = Theme::global(cx);
+        (theme.font_size, theme.mono_font_size)
+    })
+}
+
+/// Makes the theme's sizes say what the settings say. The window takes its
+/// rem from the theme on every frame, so this is all it takes.
+fn apply_size(cx: &mut App) {
+    let (font, mono) = library_sizes(cx);
+    let factor = interface_size(cx).factor();
+    let theme = Theme::global_mut(cx);
+    theme.font_size = font * factor;
+    theme.mono_font_size = mono * factor;
 }
 
 pub fn theme_choice(cx: &App) -> ThemeChoice {
@@ -96,9 +195,13 @@ pub fn apply(window: Option<&mut Window>, cx: &mut App) {
         },
         ..Default::default()
     });
+    // Before the first change of theme, so the sizes noted are the library's.
+    library_sizes(cx);
     if Theme::global(cx).mode != mode {
         Theme::change(mode, None, cx);
     }
+    // A change of theme may put the library's sizes back.
+    apply_size(cx);
 }
 
 #[cfg(test)]
@@ -110,6 +213,15 @@ mod tests {
         for choice in ThemeChoice::ALL {
             assert_eq!(ThemeChoice::parse(choice.stored()), choice);
         }
+    }
+
+    #[test]
+    fn an_interface_size_survives_being_stored_and_only_ever_enlarges() {
+        for size in InterfaceSize::ALL {
+            assert_eq!(InterfaceSize::parse(size.stored()), size);
+            assert!(size.factor() >= 1.0);
+        }
+        assert_eq!(InterfaceSize::parse("enormous"), InterfaceSize::Regular);
     }
 
     #[test]

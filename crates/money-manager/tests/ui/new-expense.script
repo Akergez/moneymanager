@@ -1,14 +1,27 @@
 # mode: demo
 # size: 1240x800
 #
-# Ctrl+N opens the record dialog with the amount ready to type; Enter saves
-# it, and the list and the balance both show it.
+# Ctrl+N opens the record dialog on its first field, the category. Enter
+# there opens the list of categories and Enter in the list chooses one —
+# neither tries to save the form. Tab goes on to the amount, and Enter there
+# saves it. The list and the balance both show it.
 wait:2500
 expect:records=44
 expect:balance=1 054 237.45 ₽
 key:ctrl-n
 wait:900
 expect:dialog=open
+key:enter
+wait:600
+expect:dialog=open
+key:down
+wait:300
+key:enter
+wait:600
+expect:dialog=open
+expect:records=44
+key:tab
+wait:300
 type:125.50
 wait:300
 key:enter

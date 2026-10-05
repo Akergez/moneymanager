@@ -22,6 +22,12 @@ tracing = "0.1"
 # build links in seconds and takes a fraction of the disk.
 debug = "line-tables-only"
 
+# The toolkit lays out and paints every frame; unoptimised it does so at a
+# fraction of the display's rate, and every animation shows it. Dependencies
+# are built once, so optimising them costs one long build and nothing after.
+[profile.dev.package."*"]
+opt-level = 2
+
 [profile.release]
 # What `cargo build --release` gives you while working on the application: an
 # optimised binary that does not take minutes to rebuild after an edit.

@@ -18,4 +18,18 @@ expect:dialog=open
 key:escape
 wait:600
 expect:dialog=closed
+# The bar along the bottom: "Transactions", then "Charts".
+click:66,755
+wait:600
+expect:screen=transactions
+click:333,755
+wait:600
+expect:screen=charts
+# The round button floating over the corner is "new".
+click:345,660
+wait:900
+expect:dialog=open
+key:escape
+wait:600
+expect:dialog=closed
 quit

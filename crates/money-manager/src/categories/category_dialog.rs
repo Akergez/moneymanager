@@ -242,7 +242,7 @@ pub fn open_category_dialog(
         None => (format!("New {kind} category"), "Add"),
     };
     let form = cx.new(|cx| CategoryForm::new(book.clone(), mode, category, window, cx));
-    let name = form.read(cx).name.clone();
+    let name = gpui_kit::Focusable::focus_handle(&form.read(cx).name, cx);
     ui::open_form(
         title,
         commit,

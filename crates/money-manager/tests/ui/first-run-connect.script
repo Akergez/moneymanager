@@ -5,10 +5,10 @@
 # not a config string goes nowhere: still the first run, nothing recorded.
 wait:2000
 expect:onboarding=choose
-click:620,536
+click:620,550
 wait:600
 expect:onboarding=connect
-click:620,500
+click:620,506
 wait:300
 type:not-a-config-string
 wait:300
