@@ -4174,7 +4174,7 @@ dependencies = [
 
 [[package]]
 name = "money-core"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -4189,7 +4189,7 @@ dependencies = [
 
 [[package]]
 name = "money-manager"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "android-activity",
  "android_logger",
