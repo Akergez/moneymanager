@@ -19,17 +19,20 @@ key:escape
 wait:600
 expect:dialog=closed
 # The bar along the bottom: "Transactions", then "Charts".
-click:66,755
-wait:600
-expect:screen=transactions
-click:333,755
+click:333,765
 wait:600
 expect:screen=charts
-# The round button floating over the corner is "new".
-click:345,660
+click:66,765
+wait:600
+expect:screen=transactions
+# The round button floating over the corner is "new". It lies over a row of
+# the list, and the press is its alone: one dialog opens, so one Escape is
+# back at the list. If the row under it had opened too, its dialog would
+# still be up.
+click:355,683
 wait:900
 expect:dialog=open
 key:escape
-wait:600
+wait:700
 expect:dialog=closed
 quit

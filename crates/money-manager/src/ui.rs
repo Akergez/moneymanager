@@ -13,8 +13,8 @@ use gpui_kit::component::dialog::{DialogAction, DialogClose, DialogFooter};
 use gpui_kit::component::{ActiveTheme, Icon, Sizable, StyledExt, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, Context, Div, Entity, FocusHandle, Image, ImageFormat, SharedString, Window,
-    div,
+    AnyElement, App, Context, Div, Entity, FocusHandle, Image, ImageFormat, Pixels, SharedString,
+    Window, div,
 };
 
 use crate::book::CategoryLook;
@@ -137,6 +137,13 @@ pub fn empty_state(
         .into_any_element()
 }
 
+/// Over an on-screen keyboard, in rems: the gap a dialog keeps from the top
+/// of the window, what its title and footer take of its height, and the
+/// least its fields are given however little is left.
+const DIALOG_GAP: f32 = 0.5;
+const DIALOG_CHROME: f32 = 9.5;
+const DIALOG_BODY_AT_LEAST: f32 = 6.0;
+
 /// Opens a dialog around a form: its fields, Cancel, and the one commitment
 /// Enter makes. `submit` answers whether the form was acceptable; `false`
 /// keeps the dialog up so the person can fix what it says is wrong.
@@ -156,11 +163,29 @@ pub fn open_form<F: Render>(
 ) {
     let (title, commit): (SharedString, SharedString) = (title.into(), commit.into());
     let submit = Rc::new(submit);
-    window.open_dialog(cx, move |dialog, _, _| {
+    window.open_dialog(cx, move |dialog, window, _| {
         let (form, submit) = (form.clone(), submit.clone());
+        // With the on-screen keyboard up, the dialog moves to the top of
+        // what is left of the window and its fields scroll inside that:
+        // nothing being typed into is ever under the keyboard. Everything
+        // behind the dialog stays where it was.
+        let keyboard = crate::shell::keyboard_inset(window);
+        let (dialog, body) = if keyboard > Pixels::ZERO {
+            let rem = window.rem_size();
+            let top = crate::shell::status_bar_inset() + rem * DIALOG_GAP;
+            let room = window.viewport_size().height - keyboard - top - rem * DIALOG_CHROME;
+            let body = div()
+                .id("form-body")
+                .max_h(room.max(rem * DIALOG_BODY_AT_LEAST))
+                .overflow_y_scroll()
+                .child(form.clone());
+            (dialog.margin_top(top), body.into_any_element())
+        } else {
+            (dialog, form.clone().into_any_element())
+        };
         dialog
             .title(title.clone())
-            .child(form.clone())
+            .child(body)
             .footer(
                 DialogFooter::new()
                     .child(DialogClose::new().child(Button::new("cancel").label("Cancel")))

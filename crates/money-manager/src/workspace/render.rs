@@ -288,20 +288,20 @@ impl Workspace {
                     .flex_1()
                     .min_w_0()
                     .items_center()
-                    .gap_1()
-                    .pt_3()
-                    .pb_2()
+                    .gap_0p5()
+                    .pt_2()
+                    .pb_1p5()
                     .cursor_pointer()
                     .on_click(cx.listener(move |this, _, _, cx| this.show(screen, cx)))
                     .child(
                         h_flex()
-                            .w_16()
-                            .h_8()
+                            .w_12()
+                            .h_7()
                             .justify_center()
                             .rounded_full()
                             .when(active, |pill| pill.bg(accent).text_color(on_accent))
                             .when(!active, |pill| pill.text_color(quiet))
-                            .child(Icon::new(screen.icon()).large()),
+                            .child(Icon::new(screen.icon())),
                     )
                     .child(
                         div()
@@ -317,18 +317,26 @@ impl Workspace {
     /// trailing corner, where a thumb rests, clear of the navigation under
     /// it.
     fn render_floating_new(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        div().absolute().right_4().bottom_4().child(
-            Button::new("new")
-                // Its own icon, at a size that fills the circle: the one a
-                // button draws for itself is sized for a line of text.
-                .child(Icon::new(Lucide::Plus).size_7())
-                .primary()
-                .size_16()
-                .rounded_full()
-                .shadow_lg()
-                .tooltip(self.new_label())
-                .on_click(cx.listener(|this, _, window, cx| this.new_record(window, cx))),
-        )
+        div()
+            .id("floating-new")
+            .absolute()
+            .right_4()
+            .bottom_4()
+            // It lies over the list, and a press on it is a press on it
+            // alone: without this the row underneath would open too.
+            .occlude()
+            .child(
+                Button::new("new")
+                    // Its own icon, at a size that fills the circle: the one a
+                    // button draws for itself is sized for a line of text.
+                    .child(Icon::new(Lucide::Plus).size_6())
+                    .primary()
+                    .size_12()
+                    .rounded_full()
+                    .shadow_lg()
+                    .tooltip(self.new_label())
+                    .on_click(cx.listener(|this, _, window, cx| this.new_record(window, cx))),
+            )
     }
 
     /// What the sidebar's footer holds, for the layout that has no sidebar:

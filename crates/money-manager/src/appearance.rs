@@ -90,7 +90,19 @@ impl InterfaceSize {
         Self::ALL
             .into_iter()
             .find(|size| size.stored() == stored)
-            .unwrap_or_default()
+            .unwrap_or_else(Self::for_platform)
+    }
+
+    /// The size nobody has chosen yet. A phone is held closer than a monitor
+    /// stands, and its system has already scaled everything to be read at
+    /// that distance: the library's own size is the right one there, and a
+    /// step up from it is too much.
+    pub fn for_platform() -> Self {
+        if cfg!(target_os = "android") {
+            InterfaceSize::Compact
+        } else {
+            InterfaceSize::default()
+        }
     }
 
     /// The factor on the component library's own rem. Compact is the
@@ -116,7 +128,7 @@ pub fn interface_size(cx: &App) -> InterfaceSize {
         .ok()
         .or_else(|| Settings::global(cx).interface_size())
         .map(|stored| InterfaceSize::parse(&stored))
-        .unwrap_or_default()
+        .unwrap_or_else(InterfaceSize::for_platform)
 }
 
 pub fn set_interface_size(size: InterfaceSize, cx: &mut App) {

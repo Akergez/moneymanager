@@ -2,7 +2,7 @@ use gpui_kit::component::{ActiveTheme, StyledExt, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{Context, Entity, Pixels, SharedString, Subscription, Window, div, img};
 
-use super::chrome::{system_bars, title_frame};
+use super::chrome::{bottom_bar_room, system_bars, title_frame};
 use crate::book::Book;
 use crate::onboarding::{self, Onboarding, OnboardingEvent};
 use crate::settings::Settings;
@@ -26,6 +26,9 @@ pub struct Shell {
     /// has to follow while the window is open.
     _appearance: Subscription,
     _onboarding: Option<Subscription>,
+    /// The room last left for the system's bar at the bottom; see
+    /// [`bottom_bar_room`].
+    bar_room: f32,
 }
 
 impl Shell {
@@ -38,6 +41,7 @@ impl Shell {
             stage: Stage::Starting,
             _appearance: appearance,
             _onboarding: None,
+            bar_room: 0.0,
         }
     }
 
@@ -136,8 +140,14 @@ impl Shell {
 }
 
 impl Render for Shell {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let (bars_top, bars_bottom) = system_bars();
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let (bars_top, inset_bottom) = system_bars();
+        self.bar_room = bottom_bar_room(
+            inset_bottom,
+            f32::from(window.viewport_size().height),
+            self.bar_room,
+        );
+        let bars_bottom = self.bar_room;
         let body = match &self.stage {
             Stage::Starting => v_flex()
                 .size_full()

@@ -17,7 +17,7 @@ mod shell_view;
 mod window_size;
 
 pub use actions::*;
-pub use chrome::title_frame;
+pub use chrome::{keyboard_inset, status_bar_inset, title_frame};
 pub use layout::Layout;
 pub use open_window::open_window;
 pub use shell_view::{Shell, Stage};
