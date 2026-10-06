@@ -130,6 +130,36 @@ impl Settings {
         self.set("theme", Some(theme));
     }
 
+    /// Where the interface's colours come from, as the stored form of a
+    /// [`crate::appearance::ColorChoice`]: `system` or `#rrggbb`.
+    pub fn color(&self) -> Option<String> {
+        self.get("color")
+    }
+
+    pub fn set_color(&mut self, color: &str) {
+        self.set("color", Some(color));
+    }
+
+    /// What the system said its colour was the last time it was asked, so
+    /// that the next launch starts in it rather than changing to it.
+    pub fn system_color(&self) -> Option<String> {
+        self.get("system_color")
+    }
+
+    pub fn set_system_color(&mut self, color: Option<String>) {
+        self.set("system_color", color);
+    }
+
+    /// The name of the theme worn while the interface is light or dark, for
+    /// someone who chose one over the colour scheme. See [`crate::themes`].
+    pub fn theme_name(&self, dark: bool) -> Option<String> {
+        self.get(if dark { "dark_theme" } else { "light_theme" })
+    }
+
+    pub fn set_theme_name(&mut self, dark: bool, name: Option<&str>) {
+        self.set(if dark { "dark_theme" } else { "light_theme" }, name);
+    }
+
     /// How large the interface is drawn, as the stored name of a
     /// [`crate::appearance::InterfaceSize`].
     pub fn interface_size(&self) -> Option<String> {

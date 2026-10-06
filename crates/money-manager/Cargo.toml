@@ -20,6 +20,15 @@ embed-resource = "3"
 [dependencies]
 money-core = { path = "../money-core" }
 gpui-kit = "0.7.0"
+# The theme's colours: a Material You scheme made from the system's colour.
+# Cargo finds each crate by name within the checkout, and Cargo.lock pins
+# the commit. To work on the library beside the application, swap these for
+# the path variant below.
+gpui-adaptive-colors = { git = "https://github.com/Akergez/gpui-adaptive-colors", branch = "main" }
+# Themes made for the Zed editor, to wear instead of a scheme.
+gpui-zed-themes = { git = "https://github.com/Akergez/gpui-adaptive-colors", branch = "main" }
+# gpui-adaptive-colors = { path = "../../adaptive-colors/crates/gpui-adaptive-colors" }
+# gpui-zed-themes = { path = "../../adaptive-colors/crates/gpui-zed-themes" }
 chrono.workspace = true
 dirs = "6"
 serde.workspace = true

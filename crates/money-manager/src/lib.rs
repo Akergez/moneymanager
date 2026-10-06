@@ -32,6 +32,7 @@ mod script;
 mod settings;
 mod settings_dialog;
 mod shell;
+mod themes;
 mod transactions;
 mod ui;
 mod workspace;
@@ -79,6 +80,8 @@ fn start(cx: &mut gpui_kit::App) {
     gpui_kit::init(cx);
     settings::Settings::install(cx);
     fonts::install(cx);
+    appearance::init(cx);
+    themes::load(cx);
     appearance::apply(None, cx);
     shell::init(cx);
     shell::open_window(cx);

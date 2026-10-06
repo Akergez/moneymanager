@@ -1,14 +1,19 @@
 //! The settings dialog: how the window looks, and where the ledger syncs.
 //!
+//! What is under Appearance takes effect as it is chosen; Save is for the
+//! sync storage alone.
+//!
 //! The sync storage is the same seven fields the first-run form asks for
 //! ([`RemoteFields`]), and takes the same one-string form: a string can be
 //! applied to fill the fields, and the fields can be copied out as a string
 //! for the next device. Nothing is contacted from here — saving only records
 //! the storage; the Sync command is what uses it.
 
+use gpui_adaptive_colors::Color;
 use gpui_kit::component::button::{Button, ButtonGroup};
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::notification::Notification;
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{
     ActiveTheme, Selectable, Sizable, Size, StyledExt, WindowExt, h_flex, v_flex,
 };
@@ -16,12 +21,17 @@ use gpui_kit::prelude::*;
 use gpui_kit::{App, AppContext, ClipboardItem, Context, Entity, SharedString, Window, div};
 use money_core::remote::{self, RemoteConfig};
 
-use crate::appearance::{self, InterfaceSize, ThemeChoice};
+use crate::appearance::{self, ColorChoice, InterfaceSize, SEEDS, ThemeChoice};
 use crate::onboarding::RemoteFields;
 use crate::settings::Settings;
 use crate::ui;
 
+mod theme_rows;
+
+use theme_rows::ThemeRows;
+
 struct SettingsForm {
+    themes: ThemeRows,
     config_string: Entity<InputState>,
     remote: RemoteFields,
     /// Whether a storage was set up when the dialog opened, which is what
@@ -34,6 +44,7 @@ impl SettingsForm {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let stored = Settings::global(cx).remote();
         SettingsForm {
+            themes: ThemeRows::new(window, cx),
             config_string: cx.new(|cx| InputState::new(window, cx).placeholder("tresse1:…")),
             remote: RemoteFields::new(stored.as_ref(), window, cx),
             had_remote: stored.is_some(),
@@ -165,6 +176,22 @@ impl Render for SettingsForm {
                                     }),
                             ),
                     )
+                    // Eight choices do not fit beside their label the way
+                    // three do, so they go under it.
+                    .child(
+                        v_flex()
+                            .gap_2()
+                            .child(
+                                v_flex().child("Color").child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(muted)
+                                        .child("System follows the desktop's accent color"),
+                                ),
+                            )
+                            .child(color_choices(appearance::color_choice(cx), cx)),
+                    )
+                    .child(self.themes.render(cx))
                     .child(
                         h_flex()
                             .gap_3()
@@ -254,6 +281,51 @@ impl Render for SettingsForm {
                     .children(self.error.clone().map(|error| ui::form_error(error, cx))),
             )
     }
+}
+
+/// The system's colour as a button, then ours as swatches. A swatch shows
+/// the seed itself rather than what a scheme makes of it, since that is what
+/// tells them apart; the one chosen is ringed, and the interface around it
+/// has already taken its colour.
+fn color_choices(current: ColorChoice, cx: &App) -> impl IntoElement {
+    let (ring, gap) = (cx.theme().foreground, cx.theme().background);
+    h_flex()
+        .flex_wrap()
+        .gap_2()
+        .child(
+            Button::new("color-system")
+                .label("System")
+                .outline()
+                .small()
+                .selected(current == ColorChoice::System)
+                .on_click(|_, _, cx| appearance::set_color_choice(ColorChoice::System, cx)),
+        )
+        .children(SEEDS.into_iter().filter_map(|(stored, name)| {
+            let color = Color::parse_hex(stored)?;
+            let choice = ColorChoice::Seed(color);
+            Some(
+                div()
+                    .id(stored)
+                    .flex_none()
+                    .size_6()
+                    .rounded_full()
+                    .cursor_pointer()
+                    // The ring is a border in the text colour around a
+                    // border in the background's, so it stands off the
+                    // swatch whatever colour that is.
+                    .when(current == choice, |swatch| swatch.border_2().border_color(ring))
+                    .child(
+                        div()
+                            .size_full()
+                            .rounded_full()
+                            .border_2()
+                            .border_color(gap)
+                            .bg(gpui_adaptive_colors::hsla(color)),
+                    )
+                    .tooltip(move |window, cx| Tooltip::new(name).build(window, cx))
+                    .on_click(move |_, _, cx| appearance::set_color_choice(choice, cx)),
+            )
+        }))
 }
 
 /// Opens the settings dialog. Nothing in it reads or writes the ledger: the

@@ -12,6 +12,8 @@
 //! - `key:<keystroke>` — `ctrl-n`, `escape`, `enter`
 //! - `type:<text>`
 //! - `shot:<name>` — runs `$MONEY_MANAGER_SHOT_CMD <name>`
+//! - `frames:<name>` — draws the window afresh on every frame for two
+//!   seconds and prints `script: frames <name>=<per second>`
 //! - `expect:<what>=<value>` — ends the process with status 1 unless it holds
 //! - `quit`
 //!
@@ -33,6 +35,14 @@
 //!   bars and the running total are each narrowed to; 0 is all of them
 //! - `dialog=open|closed`
 //! - `theme=light|dark`
+//! - `color=system|#rrggbb` — where the colours are set to come from
+//! - `seed=#rrggbb` — the colour the scheme in use was made from, which with
+//!   `color=system` is the desktop's, or ours where it has none
+//! - `themes=<n>` — how many themes are installed
+//! - `light-theme=<name>`, `dark-theme=<name>` — what is chosen for each,
+//!   `Color scheme` being the choice of none
+//! - `wearing=<name>` — the theme on the window right now: `Adaptive Light`
+//!   or `Adaptive Dark` for the scheme
 //! - `sync=idle|running|done|failed`
 //! - `remote=yes|no` — whether a sync storage is set up
 //!
@@ -40,9 +50,9 @@
 //! read straight off a screenshot taken on a scaled display.
 
 use std::collections::VecDeque;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use gpui_kit::component::{ActiveTheme as _, WindowExt as _};
+use gpui_kit::component::{ActiveTheme as _, ThemeMode, WindowExt as _};
 use gpui_kit::{
     AnyWindowHandle, App, Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent,
     MouseUpEvent, Pixels, PlatformInput, Point, ScrollDelta, ScrollWheelEvent, TouchPhase, Window,
@@ -63,8 +73,29 @@ enum Step {
     Key(String),
     Type(String),
     Shot(String),
+    Frames(String),
     Expect(String, String),
     Quit,
+}
+
+/// How long `frames:` draws for.
+const FRAMES_FOR: Duration = Duration::from_secs(2);
+
+/// Draws the whole window again on every frame the display offers for
+/// [`FRAMES_FOR`] and says how many a second that came to. Nothing is cached
+/// between those frames, which is what an animation or a drag costs: a number
+/// well under the display's rate is a screen that cannot keep up.
+fn count_frames(name: String, started: Instant, drawn: u32, window: &mut Window) {
+    window.refresh();
+    window.on_next_frame(move |window, _| {
+        let elapsed = started.elapsed();
+        if elapsed < FRAMES_FOR {
+            count_frames(name, started, drawn + 1, window);
+        } else {
+            let rate = (drawn + 1) as f32 / elapsed.as_secs_f32();
+            eprintln!("script: frames {name}={rate:.0}");
+        }
+    });
 }
 
 fn numbers(text: &str) -> Option<Vec<f32>> {
@@ -94,6 +125,7 @@ fn parse(script: &str) -> Vec<Step> {
                 "key" => Step::Key(rest.to_string()),
                 "type" => Step::Type(rest.to_string()),
                 "shot" => Step::Shot(rest.to_string()),
+                "frames" => Step::Frames(rest.to_string()),
                 "expect" => {
                     let (what, value) = rest.split_once('=')?;
                     Step::Expect(what.trim().to_string(), value.trim().to_string())
@@ -160,6 +192,17 @@ fn observe(what: &str, window: &mut Window, cx: &mut App) -> Option<String> {
             let dark = cx.theme().mode.is_dark();
             return Some(if dark { "dark" } else { "light" }.to_string());
         }
+        "color" => {
+            return Some(match crate::appearance::color_choice(cx) {
+                crate::appearance::ColorChoice::System => "system".to_string(),
+                crate::appearance::ColorChoice::Seed(color) => color.to_hex(),
+            });
+        }
+        "seed" => return Some(crate::appearance::seed(cx)),
+        "themes" => return Some(crate::themes::count(cx).to_string()),
+        "light-theme" => return Some(crate::themes::worn(ThemeMode::Light, cx).to_string()),
+        "dark-theme" => return Some(crate::themes::worn(ThemeMode::Dark, cx).to_string()),
+        "wearing" => return Some(cx.theme().theme_name().to_string()),
         "remote" => {
             let set = Settings::global(cx).remote().is_some();
             return Some(if set { "yes" } else { "no" }.to_string());
@@ -279,6 +322,10 @@ fn next(handle: AnyWindowHandle, mut steps: VecDeque<Step>, cx: &mut App) {
                 };
                 window.dispatch_keystroke(keystroke, cx);
             }
+        }
+        Step::Frames(name) => {
+            pause = FRAMES_FOR.as_millis() as u64 + 300;
+            count_frames(name.clone(), Instant::now(), 0, window);
         }
         Step::Shot(name) => {
             if let Ok(command) = std::env::var("MONEY_MANAGER_SHOT_CMD") {

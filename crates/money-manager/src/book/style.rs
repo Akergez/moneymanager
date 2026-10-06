@@ -32,23 +32,83 @@ pub const PALETTE: [(&str, &str); 8] = [
 ];
 
 /// The built-in icons a category can wear, by the key that is stored.
-pub const ICONS: [(&str, Lucide); 16] = [
+///
+/// A key is the icon's name in the Lucide set and is what the ledger keeps,
+/// so one that has been offered is never renamed or taken away: a category
+/// on another device may be wearing it. The order is only the order they
+/// are shown in — by what they are for, eight to a row — and may change.
+pub const ICONS: [(&str, Lucide); 64] = [
+    // The default, then food and drink.
     ("tag", Lucide::Tag),
     ("utensils", Lucide::Utensils),
     ("coffee", Lucide::Coffee),
+    ("pizza", Lucide::Pizza),
+    ("apple", Lucide::Apple),
+    ("wine", Lucide::Wine),
+    ("beer", Lucide::Beer),
+    ("shopping-cart", Lucide::ShoppingCart),
+    // Shopping, and getting about.
     ("shopping-bag", Lucide::ShoppingBag),
-    ("car", Lucide::Car),
-    ("house", Lucide::House),
-    ("zap", Lucide::Zap),
-    ("heart", Lucide::Heart),
-    ("film", Lucide::Film),
-    ("book", Lucide::Book),
-    ("smartphone", Lucide::Smartphone),
+    ("shirt", Lucide::Shirt),
+    ("gem", Lucide::Gem),
     ("gift", Lucide::Gift),
+    ("package", Lucide::Package),
+    ("car", Lucide::Car),
+    ("car-taxi-front", Lucide::CarTaxiFront),
+    ("fuel", Lucide::Fuel),
+    ("bus", Lucide::Bus),
+    ("train-front", Lucide::TrainFront),
+    ("plane", Lucide::Plane),
+    ("bike", Lucide::Bike),
+    // Home and what it runs on.
+    ("house", Lucide::House),
+    ("sofa", Lucide::Sofa),
+    ("wrench", Lucide::Wrench),
+    ("zap", Lucide::Zap),
+    ("droplet", Lucide::Droplet),
+    ("flame", Lucide::Flame),
+    ("wifi", Lucide::Wifi),
+    ("smartphone", Lucide::Smartphone),
+    ("tv", Lucide::Tv),
+    // Health, looks and the household.
+    ("heart", Lucide::Heart),
+    ("pill", Lucide::Pill),
+    ("stethoscope", Lucide::Stethoscope),
+    ("dumbbell", Lucide::Dumbbell),
+    ("scissors", Lucide::Scissors),
+    ("baby", Lucide::Baby),
+    ("paw-print", Lucide::PawPrint),
+    ("users", Lucide::Users),
+    // Time off.
+    ("film", Lucide::Film),
+    ("music", Lucide::Music),
+    ("gamepad-2", Lucide::Gamepad2),
+    ("book", Lucide::Book),
+    ("ticket", Lucide::Ticket),
+    ("palette", Lucide::Palette),
+    ("camera", Lucide::Camera),
+    ("tree-palm", Lucide::TreePalm),
+    ("luggage", Lucide::Luggage),
+    ("party-popper", Lucide::PartyPopper),
+    ("cake", Lucide::Cake),
+    // Study and work.
+    ("graduation-cap", Lucide::GraduationCap),
     ("briefcase", Lucide::Briefcase),
     ("laptop", Lucide::Laptop),
-    ("trending-up", Lucide::TrendingUp),
+    // Money itself: where it is kept, comes from and goes to.
     ("wallet", Lucide::Wallet),
+    ("credit-card", Lucide::CreditCard),
+    ("banknote", Lucide::Banknote),
+    ("coins", Lucide::Coins),
+    ("piggy-bank", Lucide::PiggyBank),
+    ("hand-coins", Lucide::HandCoins),
+    ("landmark", Lucide::Landmark),
+    ("receipt", Lucide::Receipt),
+    ("percent", Lucide::Percent),
+    ("trending-up", Lucide::TrendingUp),
+    ("shield-check", Lucide::ShieldCheck),
+    ("award", Lucide::Award),
+    ("store", Lucide::Store),
 ];
 
 /// A category as it is drawn.

@@ -1,13 +1,112 @@
-//! Light or dark.
+//! Light or dark, in which colours, and how large.
 //!
-//! Three choices, kept in `settings.json`. "System" is the default and means
-//! what the desktop says right now — and again whenever it changes its mind,
-//! which a desktop on a day/night schedule does twice a day.
+//! Three choices, each kept in `settings.json`. For the first two "System"
+//! is the default and means what the desktop says right now — and again
+//! whenever it changes its mind, which a desktop on a day/night schedule
+//! does twice a day.
+//!
+//! The colours are a Material You scheme (`gpui-adaptive-colors`): the
+//! library makes a light and a dark theme from one colour and puts them
+//! behind the toolkit's two modes, so choosing between light and dark here
+//! goes on being a matter of `Theme::change`.
 
+use gpui_adaptive_colors::{AdaptiveColors, Color, Options, Seed, Source};
 use gpui_kit::component::{Theme, ThemeMode};
 use gpui_kit::{App, Pixels, Window};
 
 use crate::settings::Settings;
+
+/// The colours offered beside the system's, each as it is stored and as it
+/// is named. They are seeds, not paint: a scheme takes the hue of one and
+/// chooses its own lightness.
+pub const SEEDS: [(&str, &str); 7] = [
+    ("#2fb380", "Green"),
+    ("#00838f", "Teal"),
+    ("#0b57d0", "Blue"),
+    ("#6750a4", "Violet"),
+    ("#e91e63", "Pink"),
+    ("#d93025", "Red"),
+    ("#c88800", "Amber"),
+];
+
+/// The colour where the system has none to give: the application icon's
+/// green, which is also the first of [`SEEDS`].
+const OWN_COLOR: Color = Color::from_u32(0x2fb380);
+
+/// The system's colour, or one of ours.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ColorChoice {
+    #[default]
+    System,
+    Seed(Color),
+}
+
+impl ColorChoice {
+    fn stored(self) -> String {
+        match self {
+            ColorChoice::System => "system".to_string(),
+            ColorChoice::Seed(color) => color.to_hex(),
+        }
+    }
+
+    /// Anything that is not a colour is the default, as with the theme.
+    fn parse(stored: &str) -> Self {
+        Color::parse_hex(stored).map_or(ColorChoice::System, ColorChoice::Seed)
+    }
+
+    fn source(self) -> Source {
+        match self {
+            ColorChoice::System => Source::System,
+            ColorChoice::Seed(color) => color.into(),
+        }
+    }
+}
+
+pub fn color_choice(cx: &App) -> ColorChoice {
+    // A screenshot is of one colour scheme; `MONEY_MANAGER_COLOR` pins it
+    // whatever the settings and the desktop say.
+    std::env::var("MONEY_MANAGER_COLOR")
+        .ok()
+        .or_else(|| Settings::global(cx).color())
+        .map(|stored| ColorChoice::parse(&stored))
+        .unwrap_or_default()
+}
+
+pub fn set_color_choice(choice: ColorChoice, cx: &mut App) {
+    Settings::update(cx, |settings| settings.set_color(&choice.stored()));
+    // Read back rather than taken from `choice`: a pinned colour stays.
+    gpui_adaptive_colors::set_source(color_choice(cx).source(), cx);
+}
+
+/// The colour the scheme in use was made from, as it would be stored.
+pub fn seed(cx: &App) -> String {
+    AdaptiveColors::global(cx).seed().to_string()
+}
+
+/// Hands the theme's colours to the scheme. Once, at startup, before the
+/// first [`apply`].
+pub fn init(cx: &mut App) {
+    let remembered = Settings::global(cx)
+        .system_color()
+        .and_then(|stored| stored.parse::<Seed>().ok());
+    gpui_adaptive_colors::init(
+        Options::new(OWN_COLOR)
+            .source(color_choice(cx).source())
+            .remembered(remembered),
+        cx,
+    );
+    // The system is asked off the main thread, so its answer comes after the
+    // first frame. Kept, it is what the next launch starts with.
+    cx.observe_global::<AdaptiveColors>(|cx| {
+        let said = AdaptiveColors::global(cx)
+            .system_seed()
+            .map(|seed| seed.to_string());
+        if Settings::global(cx).system_color() != said {
+            Settings::update(cx, |settings| settings.set_system_color(said));
+        }
+    })
+    .detach();
+}
 
 /// Light, dark, or whatever the system is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -234,6 +333,26 @@ mod tests {
             assert!(size.factor() >= 1.0);
         }
         assert_eq!(InterfaceSize::parse("enormous"), InterfaceSize::Regular);
+    }
+
+    #[test]
+    fn a_colour_choice_survives_being_stored() {
+        let choices = SEEDS
+            .iter()
+            .map(|(stored, _)| ColorChoice::parse(stored))
+            .chain([ColorChoice::System]);
+        for choice in choices {
+            assert_eq!(ColorChoice::parse(&choice.stored()), choice);
+        }
+        assert_eq!(ColorChoice::parse("mauve"), ColorChoice::System);
+    }
+
+    #[test]
+    fn every_colour_offered_is_a_colour_and_the_first_is_our_own() {
+        for (stored, name) in SEEDS {
+            assert_ne!(ColorChoice::parse(stored), ColorChoice::System, "{name}");
+        }
+        assert_eq!(ColorChoice::parse(SEEDS[0].0), ColorChoice::Seed(OWN_COLOR));
     }
 
     #[test]

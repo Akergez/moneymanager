@@ -1,0 +1,40 @@
+# mode: demo
+# size: 1240x800
+#
+# The colours are the system's until one of ours is picked in Settings. A
+# swatch changes the scheme at once, the scheme is the same one in the dark
+# theme, and the System button gives the choice back.
+#
+# What the system's colour is is not checked: under the headless compositor
+# there is none and the application's own stands in, while on a desktop it is
+# whatever that desktop says.
+wait:2500
+expect:color=system
+key:ctrl-,
+wait:900
+expect:dialog=open
+# The violet swatch, fourth in the row under "Color".
+click:619,340
+wait:500
+expect:color=#6750a4
+expect:seed=#6750a4
+shot:colors-violet
+# Dark, in the row above.
+click:789,212
+wait:500
+expect:theme=dark
+expect:seed=#6750a4
+shot:colors-violet-dark
+# The red one, then back to the system's.
+click:691,340
+wait:500
+expect:color=#d93025
+expect:seed=#d93025
+click:450,340
+wait:500
+expect:color=system
+key:escape
+wait:600
+expect:dialog=closed
+shot:colors-system-dark
+quit

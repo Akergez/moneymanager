@@ -175,15 +175,19 @@ pub fn by_month(entries: &[Entry], first: Month, last: Month, chosen: &Chosen) -
         month = month.previous();
     }
     months.reverse();
+    // One pass over the records, not one for every month: a ledger kept for
+    // years has many of both.
+    let mut amounts: HashMap<Month, f64> = HashMap::new();
+    for entry in entries {
+        if counts(chosen, &entry.category_id) {
+            *amounts.entry(Month::of(entry.date)).or_default() += entry.amount;
+        }
+    }
     months
         .into_iter()
         .map(|month| MonthTotal {
             month,
-            amount: entries
-                .iter()
-                .filter(|entry| month.contains(entry.date) && counts(chosen, &entry.category_id))
-                .map(|entry| entry.amount)
-                .sum(),
+            amount: amounts.get(&month).copied().unwrap_or(0.0),
         })
         .collect()
 }

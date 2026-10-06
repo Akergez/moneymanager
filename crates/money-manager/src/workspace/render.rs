@@ -270,9 +270,9 @@ impl Workspace {
     /// gives.
     fn render_bottom_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
-        // A tint of the primary colour: the theme's accent is a grey too
-        // close to the bar's own to mark anything.
-        let (accent, on_accent) = (theme.primary.opacity(0.14), theme.foreground);
+        // The pair the sidebar marks its own current item with, which every
+        // theme has: a colour scheme and one made by hand alike.
+        let (accent, on_accent) = (theme.sidebar_accent, theme.sidebar_accent_foreground);
         let (strong, quiet) = (theme.foreground, theme.muted_foreground);
         h_flex()
             .flex_none()

@@ -3,8 +3,14 @@
 //!
 //! The screen holds only what a person chose on it — the month, whether the
 //! shares are of that month or of everything, and which categories the bars
-//! and the line are of. What is drawn is worked out from the ledger on every
-//! frame by the plain functions in [`data`].
+//! and the line are of. What is drawn is worked out from the ledger by the
+//! plain functions in [`data`].
+//!
+//! It is worked out once for each thing asked ([`Asked`]) and kept
+//! ([`Figures`]), not on every frame. A chart under the pointer animates,
+//! and every frame of that draws this whole screen again: going through
+//! every record of the ledger for each of them made the charts slower the
+//! longer the ledger had been kept.
 //!
 //! Nothing here can be read only by hovering: a phone has no pointer to hover
 //! with. The shares are written out beside the ring, each with its icon, its
@@ -18,8 +24,11 @@ use gpui_kit::component::switch::Switch;
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{ActiveTheme, Selectable, StyledExt, h_flex, v_flex};
 use gpui_kit::prelude::*;
+use std::rc::Rc;
+
 use gpui_kit::{
-    AnyElement, Context, Entity, Pixels, ScrollHandle, SharedString, Subscription, Window, div,
+    AnyElement, Context, Entity, Hsla, Pixels, ScrollHandle, SharedString, Subscription, Window,
+    div,
     point, relative, rems,
 };
 use money_core::format::{format_amount_short, format_money};
@@ -71,8 +80,40 @@ impl Filtered {
     }
 }
 
+/// Everything the figures depend on. Two frames that ask the same get the
+/// same figures, so this is compared and the ledger is not read.
+#[derive(Clone, PartialEq)]
+struct Asked {
+    /// Which state of the ledger: counted up every time the book changes.
+    ledger: u64,
+    mode: Mode,
+    month: Month,
+    all_time: bool,
+    chosen_in_bars: Chosen,
+    chosen_in_line: Chosen,
+    hide_transfers: bool,
+    /// The bars end at this month and the line stops at this day.
+    today: chrono::NaiveDate,
+    months_at_least: usize,
+    /// A category without a colour of its own is drawn in this one.
+    muted: Hsla,
+}
+
+/// What the charts draw.
+struct Figures {
+    /// The shares of the chosen month, or of everything.
+    shares: Vec<Share>,
+    /// The shares of everything, which is what the toggles offer.
+    every_share: Vec<Share>,
+    totals: Vec<MonthTotal>,
+    points: Vec<DayTotal>,
+}
+
 pub struct ChartsView {
     book: Entity<Book>,
+    /// How many times the book has changed; see [`Asked::ledger`].
+    ledger: u64,
+    figures: Option<(Asked, Rc<Figures>)>,
     mode: Mode,
     month: Month,
     /// Whether the shares are of everything rather than of the chosen month.
@@ -92,11 +133,16 @@ pub struct ChartsView {
 impl ChartsView {
     pub fn new(book: Entity<Book>, mode: Mode, cx: &mut Context<Self>) -> Self {
         let subscriptions = vec![
-            cx.observe(&book, |_, _, cx| cx.notify()),
+            cx.observe(&book, |this, _, cx| {
+                this.ledger += 1;
+                cx.notify();
+            }),
             cx.observe_global::<Settings>(|_, cx| cx.notify()),
         ];
         ChartsView {
             book,
+            ledger: 0,
+            figures: None,
             mode,
             month: Month::of(crate::today()),
             all_time: false,
@@ -149,6 +195,60 @@ impl ChartsView {
                 }
             })
             .collect()
+    }
+
+    /// The figures for what is asked now: the ones kept, if that is what
+    /// they are of, and otherwise worked out and kept.
+    fn figures(&mut self, layout: Layout, cx: &Context<Self>) -> Rc<Figures> {
+        let asked = Asked {
+            ledger: self.ledger,
+            mode: self.mode,
+            month: self.month,
+            all_time: self.all_time,
+            chosen_in_bars: self.chosen_in_bars.clone(),
+            chosen_in_line: self.chosen_in_line.clone(),
+            hide_transfers: Settings::global(cx).hides_transfers(),
+            today: crate::today(),
+            months_at_least: if layout.is_phone() {
+                MONTHS_AT_LEAST_ON_PHONE
+            } else {
+                MONTHS_AT_LEAST
+            },
+            muted: cx.theme().muted_foreground,
+        };
+        if let Some((kept, figures)) = &self.figures
+            && *kept == asked
+        {
+            return figures.clone();
+        }
+
+        let entries = self.entries(cx);
+        let shares = self.shares(&entries, (!asked.all_time).then_some(asked.month), cx);
+        // Both sets of toggles offer every category there is a record of,
+        // whichever month is chosen: a row of toggles that changed with the
+        // month would move everything under it.
+        let every_share = if asked.all_time {
+            shares.clone()
+        } else {
+            self.shares(&entries, None, cx)
+        };
+        // The bars run from the first record to this month, or to the chosen
+        // month if that is later.
+        let last = asked.month.max(Month::of(asked.today));
+        let first = data::first_month(&entries, last, asked.months_at_least).min(asked.month);
+        let figures = Rc::new(Figures {
+            shares,
+            every_share,
+            totals: data::by_month(&entries, first, last, &asked.chosen_in_bars),
+            points: data::cumulative(
+                &entries,
+                asked.month,
+                &asked.chosen_in_line,
+                asked.today,
+            ),
+        });
+        self.figures = Some((asked, figures.clone()));
+        figures
     }
 
     fn step_month(&mut self, forward: bool, cx: &mut Context<Self>) {
@@ -606,27 +706,14 @@ fn chart_empty(message: &'static str, cx: &gpui_kit::App) -> AnyElement {
 impl Render for ChartsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let layout = Layout::of(window);
-        let entries = self.entries(cx);
-        let shares = self.shares(&entries, (!self.all_time).then_some(self.month), cx);
-        // Both sets of toggles offer every category there is a record of,
-        // whichever month is chosen: a row of toggles that changed with the
-        // month would move everything under it.
-        let every_share = if self.all_time {
-            shares.clone()
-        } else {
-            self.shares(&entries, None, cx)
-        };
-        let at_least = if layout.is_phone() {
-            MONTHS_AT_LEAST_ON_PHONE
-        } else {
-            MONTHS_AT_LEAST
-        };
-        // The bars run from the first record to this month, or to the chosen
-        // month if that is later.
-        let last = self.month.max(Month::of(crate::today()));
-        let first = data::first_month(&entries, last, at_least).min(self.month);
-        let totals = data::by_month(&entries, first, last, &self.chosen_in_bars);
-        let points = data::cumulative(&entries, self.month, &self.chosen_in_line, crate::today());
+        let figures = self.figures(layout, cx);
+        let Figures {
+            shares,
+            every_share,
+            totals,
+            points,
+        } = &*figures;
+        let (totals, points) = (totals.clone(), points.clone());
 
         if std::mem::take(&mut self.reveal_month) {
             let count = totals.len();
@@ -640,9 +727,9 @@ impl Render for ChartsView {
             });
         }
 
-        let by_category = self.render_shares(&shares, layout, window, cx);
-        let bars = self.render_bars(totals, &every_share, layout, cx);
-        let line = self.render_line(points, &every_share, cx);
+        let by_category = self.render_shares(shares, layout, window, cx);
+        let bars = self.render_bars(totals, every_share, layout, cx);
+        let line = self.render_line(points, every_share, cx);
 
         // Each chart has the full width, in every layout. Side by side,
         // none of the three has room to be read: the bars lose their

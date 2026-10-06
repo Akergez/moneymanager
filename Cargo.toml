@@ -2,6 +2,9 @@
 [workspace]
 resolver = "2"
 members = ["crates/money-core", "crates/money-manager"]
+# A checkout of the colour library (github.com/Akergez/gpui-adaptive-colors)
+# may sit here for working on both at once; it is a workspace of its own.
+exclude = ["adaptive-colors"]
 
 [workspace.package]
 version = "1.0.2"

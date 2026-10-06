@@ -83,9 +83,41 @@ fi
 work=$(mktemp -d)
 cleanup() {
   [[ -z ${compositor_pid:-} ]] || kill "$compositor_pid" 2>/dev/null || true
+  [[ -z ${registry_pid:-} ]] || kill "$registry_pid" 2>/dev/null || true
   rm -rf -- "$work" ${runtime:+"$runtime"}
 }
 trap cleanup EXIT
+
+# A stand-in for the Zed editor's extension registry, which the settings
+# dialog installs themes from: a scenario must not depend on somebody else's
+# service, or on there being a network at all. It is the two addresses the
+# application asks, as files under a plain web server — the list, and one
+# extension, "sample", packaged the way the registry packages them out of
+# tests/ui/registry/. (The list is an index.html because that is what the
+# server answers a directory with; the application reads it as what it is.)
+# Without python3 there is no stand-in and the scenario that installs a theme
+# fails; the others do not ask.
+registry_port=${UI_TEST_REGISTRY_PORT:-18765}
+if command -v python3 >/dev/null; then
+  registry=$work/registry
+  mkdir -p -- "$registry/extensions/sample"
+  cat > "$registry/extensions/index.html" <<'JSON'
+{"data": [
+  {"id": "sample", "name": "Sample", "description": "A theme written for the tests",
+   "authors": ["Nobody <nobody@example.invalid>"], "download_count": 1234},
+  {"id": "another", "name": "Another", "description": "Listed, never installed",
+   "authors": [], "download_count": 7}
+]}
+JSON
+  tar -czf "$registry/extensions/sample/download" -C "$scenarios_dir/registry" themes
+  python3 -m http.server "$registry_port" --bind 127.0.0.1 --directory "$registry" \
+    >"$work/registry.log" 2>&1 &
+  registry_pid=$!
+  for _ in $(seq 50); do
+    (exec 3<>"/dev/tcp/127.0.0.1/$registry_port") 2>/dev/null && break
+    sleep 0.1
+  done
+fi
 
 header() { sed -n "s/^# *$2: *//p" "$1" | head -n1; }
 
@@ -104,6 +136,7 @@ for file in "${files[@]}"; do
     XDG_CONFIG_HOME="$home/config" XDG_DATA_HOME="$home/data"
     MONEY_MANAGER_TODAY="$today"
     MONEY_MANAGER_SIZE="${size:-1240x800}" MONEY_MANAGER_SCRIPT="$script"
+    MONEY_MANAGER_THEMES_API="http://127.0.0.1:$registry_port"
   )
   case $mode in
     demo) env+=(MONEY_MANAGER_DEMO=1) ;;

@@ -37,13 +37,22 @@ pub fn settings_file() -> PathBuf {
         .join("settings.json")
 }
 
-/// The chunk directory of the ledger: sealed chunks and `staging.rdx`, laid
-/// out exactly as the terminal version's `money_manager.chunks`.
-pub fn ledger_dir() -> PathBuf {
+fn data_dir() -> PathBuf {
     static DIR: OnceLock<PathBuf> = OnceLock::new();
     DIR.get_or_init(|| resolve("XDG_DATA_HOME", ".local/share"))
         .join(crate::APP_ID)
-        .join("ledger")
+}
+
+/// The chunk directory of the ledger: sealed chunks and `staging.rdx`, laid
+/// out exactly as the terminal version's `money_manager.chunks`.
+pub fn ledger_dir() -> PathBuf {
+    data_dir().join("ledger")
+}
+
+/// The themes installed from Zed's registry, one directory to an extension.
+/// Beside the ledger and never in it: a theme is this device's, not synced.
+pub fn themes_dir() -> PathBuf {
+    data_dir().join("themes")
 }
 
 #[cfg(test)]

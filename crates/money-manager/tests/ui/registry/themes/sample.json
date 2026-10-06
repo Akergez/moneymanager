@@ -1,0 +1,65 @@
+// A theme family in the Zed editor's format, written for the UI tests: the
+// stand-in registry (build-aux/ui-tests.sh) serves it as the extension
+// "sample". The keys are the ones a published theme has; the colours are
+// nobody's. The comment and the trailing commas are on purpose — published
+// themes have them.
+{
+  "name": "Sample",
+  "author": "Nobody",
+  "themes": [
+    {
+      "name": "Sample Dark",
+      "appearance": "dark",
+      "style": {
+        "background": "#2b2433ff",
+        "editor.background": "#1b1622ff",
+        "panel.background": "#241d2dff",
+        "elevated_surface.background": "#2b2433ff",
+        "surface.background": "#2b2433ff",
+        "element.background": "#352c40ff",
+        "element.hover": "#40364dff",
+        "element.selected": "#4b4059ff",
+        "ghost_element.hover": "#352c40ff",
+        "ghost_element.selected": "#40364dff",
+        "border": "#40364dff",
+        "border.variant": "#352c40ff",
+        "border.focused": "#f0a050ff",
+        "text": "#ece6f2ff",
+        "text.muted": "#a89cb5ff",
+        "text.accent": "#f0a050ff",
+        "error": "#f06070ff",
+        "success": "#70c090ff",
+        "warning": "#e0c060ff",
+        "info": "#60a0e0ff",
+        "players": [{ "cursor": "#f0a050ff", "selection": "#f0a0503d" }],
+      },
+    },
+    {
+      "name": "Sample Light",
+      "appearance": "light",
+      "style": {
+        "background": "#ece6f2ff",
+        "editor.background": "#fbf8fdff",
+        "panel.background": "#f1ecf5ff",
+        "elevated_surface.background": "#ffffffff",
+        "surface.background": "#ece6f2ff",
+        "element.background": "#e2dae9ff",
+        "element.hover": "#d6ccdfff",
+        "element.selected": "#c9bdd4ff",
+        "ghost_element.hover": "#e2dae9ff",
+        "ghost_element.selected": "#d6ccdfff",
+        "border": "#d6ccdfff",
+        "border.variant": "#e2dae9ff",
+        "border.focused": "#a04a00ff",
+        "text": "#1b1622ff",
+        "text.muted": "#6b6075ff",
+        "text.accent": "#a04a00ff",
+        "error": "#b3261eff",
+        "success": "#1a7f5aff",
+        "warning": "#8a6a00ff",
+        "info": "#0b57d0ff",
+        "players": [{ "cursor": "#a04a00ff", "selection": "#a04a003d" }],
+      },
+    },
+  ],
+}

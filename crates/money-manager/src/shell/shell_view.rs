@@ -25,6 +25,9 @@ pub struct Shell {
     /// The system switching between light and dark, which a "System" theme
     /// has to follow while the window is open.
     _appearance: Subscription,
+    /// The window coming back to the front, which is when a phone's colours
+    /// may have changed: nothing announces a new wallpaper.
+    _activation: Subscription,
     _onboarding: Option<Subscription>,
     /// The room last left for the system's bar at the bottom; see
     /// [`bottom_bar_room`].
@@ -37,9 +40,15 @@ impl Shell {
         crate::appearance::apply(Some(window), cx);
         let appearance = window
             .observe_window_appearance(|window, cx| crate::appearance::apply(Some(window), cx));
+        let activation = cx.observe_window_activation(window, |_, window, cx| {
+            if window.is_window_active() {
+                gpui_adaptive_colors::refresh(cx);
+            }
+        });
         Shell {
             stage: Stage::Starting,
             _appearance: appearance,
+            _activation: activation,
             _onboarding: None,
             bar_room: 0.0,
         }

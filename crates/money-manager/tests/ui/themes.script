@@ -1,0 +1,54 @@
+# mode: demo
+# size: 1240x800
+#
+# A theme from the Zed editor's registry is installed from Settings, chosen
+# for dark, worn, and removed again — after which the colour scheme is back,
+# since a theme that is gone cannot be worn. The registry here is the
+# stand-in build-aux/ui-tests.sh serves, with one extension, "sample", of
+# two themes.
+wait:2500
+expect:themes=0
+expect:dark-theme=Color scheme
+key:ctrl-,
+wait:900
+expect:dialog=open
+# Down to "More themes", scrolling over the dialog's own rows, and Browse.
+scroll:620,200,-200
+wait:500
+click:772,335
+wait:1500
+# The search box has the keyboard; one extension is left, and its Install.
+type:samp
+wait:500
+click:775,468
+wait:2000
+expect:themes=2
+expect:dark-theme=Color scheme
+shot:themes-installed
+# The Dark theme list, and "Sample Dark" in it under the scheme.
+click:709,265
+wait:700
+click:662,360
+wait:700
+expect:dark-theme=Sample Dark
+expect:light-theme=Color scheme
+# Back up to Theme, and Dark: the window wears it.
+scroll:620,200,300
+wait:500
+click:789,212
+wait:700
+expect:theme=dark
+expect:wearing=Sample Dark
+shot:themes-worn
+# Down again and Remove, a line lower now that the install has been reported.
+scroll:620,200,-200
+wait:500
+click:767,499
+wait:1500
+expect:themes=0
+expect:dark-theme=Color scheme
+expect:wearing=Adaptive Dark
+key:escape
+wait:600
+expect:dialog=closed
+quit
