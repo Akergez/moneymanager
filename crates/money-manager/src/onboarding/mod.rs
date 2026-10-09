@@ -1,13 +1,9 @@
 //! The first-run question: a new ledger, or one that already syncs somewhere.
 //!
-//! Nothing is written to the settings until the answer has worked. A new
-//! ledger is recorded once it exists; a connected one only after its first
-//! sync has come back — so a mistyped key leaves the installation exactly as
-//! it was found, and the question is simply asked again.
-//!
-//! Connecting takes the remote either as the one string the other clients
-//! export (`tresse1:…`) or field by field. Both end in the same
-//! [`RemoteConfig`], checked the same way before anything is contacted.
+//! A new ledger gets its default account. A connected ledger first reads the
+//! remote history, then creates the account only if one was not received.
+//! Both S3 and HTTP settings are written to `.tresse/remotes.toml`; strings
+//! use the same `tresse://` format as the CLI and other clients.
 
 mod connect_form;
 mod render;
@@ -24,7 +20,7 @@ use crate::settings::{self, Settings};
 pub use connect_form::RemoteFields;
 
 pub enum OnboardingEvent {
-    /// A ledger is open and recorded in the settings.
+    /// A native ledger is open.
     Ready(Entity<Book>),
 }
 
@@ -42,12 +38,9 @@ pub(crate) enum ConnectBy {
     Details,
 }
 
-/// A first sync in flight: the ledger it is filling, and what to record once
-/// it has worked.
+/// The ledger being filled by the first sync.
 struct Connecting {
     book: Entity<Book>,
-    source: u64,
-    remote: RemoteConfig,
     _watch: Subscription,
 }
 
@@ -64,7 +57,7 @@ pub struct Onboarding {
 
 impl EventEmitter<OnboardingEvent> for Onboarding {}
 
-/// Makes a new, empty ledger with its default account, and records it.
+/// Makes a new, empty ledger with its default account.
 pub fn create_ledger(currency: &str, cx: &mut App) -> Result<Entity<Book>, String> {
     let currency = currency.trim().to_uppercase();
     if currency.len() != 3 || !currency.chars().all(|c| c.is_ascii_alphabetic()) {
@@ -74,7 +67,6 @@ pub fn create_ledger(currency: &str, cx: &mut App) -> Result<Entity<Book>, Strin
     let mut book = Book::open(&crate::paths::ledger_dir(), source, None)?;
     book.ensure_default_account(&currency)?;
     Settings::update(cx, |settings| {
-        settings.set_source(source);
         settings.set_default_currency(&currency);
     });
     Ok(cx.new(|_| book))
@@ -88,7 +80,7 @@ impl Onboarding {
                 .default_value(default_currency)
                 .placeholder("USD")
         });
-        let config_string = cx.new(|cx| InputState::new(window, cx).placeholder("tresse1:…"));
+        let config_string = cx.new(|cx| InputState::new(window, cx).placeholder("tresse://…"));
         let remote = RemoteFields::new(None, window, cx);
 
         // Enter in any field is the same as the step's button.
@@ -164,10 +156,10 @@ impl Onboarding {
                     return Err("Paste the config string first.".to_string());
                 }
                 RemoteConfig::from_share_string(&text).map_err(|_| {
-                    "That is not a config string. It starts with tresse1:".to_string()
+                    "That is not a config string. It starts with tresse://".to_string()
                 })?
             }
-            ConnectBy::Details => self.remote.read(cx),
+            ConnectBy::Details => self.remote.read(cx)?,
         };
         remote.validate()?;
         Ok(remote)
@@ -196,12 +188,17 @@ impl Onboarding {
         };
         let currency = Settings::global(cx).default_currency();
         let watch = cx.observe(&book, |this, book, cx| this.first_sync_changed(book, cx));
-        book.update(cx, |book, cx| book.sync(remote.clone(), currency, cx));
+        if let Err(error) =
+            money_core::tresse::config::write_remote(&crate::paths::ledger_dir(), Some(&remote))
+        {
+            self.error = Some(error.into());
+            cx.notify();
+            return;
+        }
+        book.update(cx, |book, cx| book.sync(currency, cx));
         self.error = None;
         self.connecting = Some(Connecting {
             book,
-            source,
-            remote,
             _watch: watch,
         });
         cx.notify();
@@ -214,15 +211,10 @@ impl Onboarding {
                 let Some(connecting) = self.connecting.take() else {
                     return;
                 };
-                Settings::update(cx, |settings| {
-                    settings.set_source(connecting.source);
-                    settings.set_remote(Some(connecting.remote));
-                });
                 cx.emit(OnboardingEvent::Ready(connecting.book));
             }
             SyncState::Failed(message) => {
-                // The half-opened ledger is dropped; whatever chunks did
-                // arrive stay on disk and are simply there next time.
+                // Tresse keeps fetched objects and its recovery journal on disk.
                 self.connecting = None;
                 self.error = Some(message);
                 cx.notify();

@@ -61,8 +61,7 @@ impl ThemeRows {
         let light = picker(ThemeMode::Light);
         let dark = picker(ThemeMode::Dark);
 
-        let browser =
-            cx.new(|cx| Browser::new(themes::registry(), themes::store(), window, cx));
+        let browser = cx.new(|cx| Browser::new(themes::registry(), themes::store(), window, cx));
         subscriptions.push(cx.subscribe_in(
             &browser,
             window,

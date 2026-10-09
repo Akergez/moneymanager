@@ -1,0 +1,33 @@
+# mode: demo
+# size: 1240x800
+#
+# Tresse configuration is saved from the GUI, read again on reopening, and
+# removed explicitly without removing the ledger.
+wait:2500
+expect:remote=no
+key:ctrl-,
+wait:900
+scroll:620,200,-440
+wait:600
+shot:tresse-settings
+click:550,415
+type:tresse://http?url=http%3A%2F%2F127.0.0.1%3A9&token=test&repo_id=money-test&encryption_key=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA%3D
+click:785,415
+wait:500
+click:726,594
+wait:700
+expect:dialog=closed
+expect:remote=yes
+key:ctrl-,
+wait:700
+scroll:620,200,-2000
+wait:600
+shot:tresse-settings-saved
+click:651,485
+wait:300
+click:726,594
+wait:700
+expect:dialog=closed
+expect:remote=no
+expect:records=44
+quit

@@ -1,9 +1,9 @@
 //! What this installation remembers that is not the ledger.
 //!
-//! One JSON file, `settings.json`, takes the place of the terminal version's
-//! `money_manager.toml`: the stamp source, the sync remote, the currency of a
-//! new ledger and the account last looked at — under the same names — plus
-//! what only an interface has, such as the theme. Nothing here is synced.
+//! `settings.json` holds display preferences, the currency of a new ledger
+//! and the last selected account. Tresse settings are read from repository
+//! files and never cached here. Old `source` and `remote` keys are read only
+//! until migration completes. Nothing in this file is synced.
 //!
 //! The file is read once, at startup, and kept in memory as a GPUI global;
 //! every change is written straight back. A key this version does not know is
@@ -84,22 +84,36 @@ impl Settings {
         };
     }
 
-    /// This installation's CRDT stamp source. Having one is what says a
-    /// ledger has been set up here.
+    /// Legacy stamp source, read only while converting the previous format.
     pub fn source(&self) -> Option<u64> {
         self.get("source")
     }
 
-    pub fn set_source(&mut self, source: u64) {
-        self.set("source", Some(source));
+    /// Read Tresse's file, rather than keeping a second copy in this global.
+    pub fn remote(&self) -> Result<Option<RemoteConfig>, String> {
+        money_core::tresse::config::read_remote(&crate::paths::ledger_dir())
     }
 
-    pub fn remote(&self) -> Option<RemoteConfig> {
-        self.get("remote")
+    /// Drop old transport settings only after the native baseline is durable.
+    pub fn finish_migration(cx: &mut App) -> Result<(), String> {
+        let settings = cx.global_mut::<Self>();
+        settings.clear_legacy_transport()
     }
 
-    pub fn set_remote(&mut self, remote: Option<RemoteConfig>) {
-        self.set("remote", remote);
+    fn clear_legacy_transport(&mut self) -> Result<(), String> {
+        let settings = self;
+        let old = settings.values.clone();
+        settings.values.remove("source");
+        settings.values.remove("remote");
+        if let Err(error) = settings.save() {
+            settings.values = old;
+            return Err(format!("could not reset old sync settings: {error}"));
+        }
+        Ok(())
+    }
+
+    pub fn has_legacy_config(&self) -> bool {
+        self.values.contains_key("source") || self.values.contains_key("remote")
     }
 
     /// Currency (ISO-4217) of a brand-new default account.
@@ -244,10 +258,38 @@ mod tests {
     }
 
     #[test]
+    fn migration_drops_old_transport_settings_and_preserves_preferences() {
+        let file = scratch("migration-reset");
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(&file, r#"{"source":42,"remote":{"secret_access_key":"old"},"theme":"dark","default_currency":"EUR","last_account":"aa"}"#).unwrap();
+        let mut settings = Settings::load(file.clone());
+        settings.clear_legacy_transport().unwrap();
+        let reloaded = Settings::load(file);
+        assert!(!reloaded.has_legacy_config());
+        assert_eq!(reloaded.theme().as_deref(), Some("dark"));
+        assert_eq!(reloaded.default_currency(), "EUR");
+        assert_eq!(reloaded.last_account().as_deref(), Some("aa"));
+    }
+
+    #[test]
+    fn a_failed_migration_reset_keeps_the_old_settings_for_retry() {
+        let file = scratch("migration-reset-failed");
+        let mut settings = Settings::load(file.clone());
+        settings.values.insert("source".into(), Value::from(42));
+        settings
+            .values
+            .insert("remote".into(), serde_json::json!({"key":"old"}));
+        fs::create_dir_all(&file).unwrap();
+        assert!(settings.clear_legacy_transport().is_err());
+        assert_eq!(settings.source(), Some(42));
+        assert_eq!(settings.values["remote"]["key"], "old");
+    }
+
+    #[test]
     fn a_first_run_has_no_ledger_and_the_default_currency() {
         let settings = Settings::load(scratch("first-run"));
         assert_eq!(settings.source(), None);
-        assert_eq!(settings.remote(), None);
+        assert!(!settings.has_legacy_config());
         assert_eq!(settings.default_currency(), "RUB");
         assert!(!settings.hides_transfers());
     }
@@ -256,23 +298,15 @@ mod tests {
     fn what_is_set_is_there_after_a_reload() {
         let file = scratch("reload");
         let mut settings = Settings::load(file.clone());
-        settings.set_source(42);
         settings.set_default_currency("EUR");
         settings.set_last_account("00ff");
-        settings.set_remote(Some(RemoteConfig {
-            endpoint: "https://s3.example.com".into(),
-            bucket: "b".into(),
-            access_key_id: "ak".into(),
-            secret_access_key: "sk".into(),
-            ..Default::default()
-        }));
         settings.save().unwrap();
 
         let reloaded = Settings::load(file);
-        assert_eq!(reloaded.source(), Some(42));
+        assert_eq!(reloaded.source(), None);
         assert_eq!(reloaded.default_currency(), "EUR");
         assert_eq!(reloaded.last_account().as_deref(), Some("00ff"));
-        assert_eq!(reloaded.remote().unwrap().bucket, "b");
+        assert!(!reloaded.has_legacy_config());
     }
 
     #[test]

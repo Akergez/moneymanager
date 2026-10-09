@@ -176,6 +176,8 @@ fn pointer(window: &mut Window, position: Point<Pixels>, cx: &mut App) {
 fn observe(what: &str, window: &mut Window, cx: &mut App) -> Option<String> {
     let shell = crate::shell::current(cx)?;
     let (stage, onboarding, workspace) = match shell.read(cx).stage() {
+        Stage::Upgrade => ("upgrade", None, None),
+        Stage::Converting => ("converting", None, None),
         Stage::Starting => ("starting", None, None),
         Stage::Welcome(onboarding) => ("welcome", Some(onboarding.clone()), None),
         Stage::Workspace(workspace) => ("workspace", None, Some(workspace.clone())),
@@ -204,7 +206,7 @@ fn observe(what: &str, window: &mut Window, cx: &mut App) -> Option<String> {
         "dark-theme" => return Some(crate::themes::worn(ThemeMode::Dark, cx).to_string()),
         "wearing" => return Some(cx.theme().theme_name().to_string()),
         "remote" => {
-            let set = Settings::global(cx).remote().is_some();
+            let set = Settings::global(cx).remote().ok()?.is_some();
             return Some(if set { "yes" } else { "no" }.to_string());
         }
         "onboarding" => {

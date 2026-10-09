@@ -28,8 +28,7 @@ use std::rc::Rc;
 
 use gpui_kit::{
     AnyElement, Context, Entity, Hsla, Pixels, ScrollHandle, SharedString, Subscription, Window,
-    div,
-    point, relative, rems,
+    div, point, relative, rems,
 };
 use money_core::format::{format_amount_short, format_money};
 
@@ -240,12 +239,7 @@ impl ChartsView {
             shares,
             every_share,
             totals: data::by_month(&entries, first, last, &asked.chosen_in_bars),
-            points: data::cumulative(
-                &entries,
-                asked.month,
-                &asked.chosen_in_line,
-                asked.today,
-            ),
+            points: data::cumulative(&entries, asked.month, &asked.chosen_in_line, asked.today),
         });
         self.figures = Some((asked, figures.clone()));
         figures

@@ -1,6 +1,6 @@
 [package]
 name = "money-core"
-description = "The ledger of Money Manager: records, their RDX store, and sync. No interface."
+description = "The ledger of Money Manager: records and native RDX versioned by Tresse. No interface."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,20 +9,17 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
-# RDX CRDT storage + sync. These crates are workspace members of the tresse repo;
-# cargo locates each by package name within the git checkout. Cargo.lock pins the
-# exact resolved commit. For local development against a tresse checkout, swap
-# these for the path variant below.
+# Native RDX is versioned and synchronized by the embedded Tresse client.
+money-tresse = { path = "../money-tresse" }
 rdx-rs = { git = "https://gitlab.com/ragusseven/tresse.git", branch = "master" }
+# Only used to read the previous chunk format during migration.
 rdx-sync = { git = "https://gitlab.com/ragusseven/tresse.git", branch = "master" }
-rdx-sync-s3 = { git = "https://gitlab.com/ragusseven/tresse.git", branch = "master" }
 rdx-sync-fs = { git = "https://gitlab.com/ragusseven/tresse.git", branch = "master" }
-# rdx-rs = { path = "../../../tresse/rdx-rs" }
-# rdx-sync = { path = "../../../tresse/rdx-sync" }
-# rdx-sync-s3 = { path = "../../../tresse/rdx-sync-s3" }
-# rdx-sync-fs = { path = "../../../tresse/rdx-sync-fs" }
 chrono = { workspace = true, features = ["serde"] }
 uuid = { version = "1.11", features = ["v4"] }
 serde.workspace = true
 serde_json.workspace = true
 base64 = "0.22"
+
+[dev-dependencies]
+tempfile = "3"

@@ -28,7 +28,7 @@ impl Onboarding {
                     .on_click(cx.listener(|this, _, _, cx| this.go_to(Step::Create, cx))),
             ))
             .child(option(
-                "Brings in a ledger that already syncs with S3 storage.",
+                "Brings in a ledger from a Tresse repository.",
                 Button::new("connect-ledger")
                     .label("Connect to sync storage…")
                     .on_click(cx.listener(|this, _, _, cx| this.go_to(Step::Connect, cx))),
@@ -87,7 +87,7 @@ impl Onboarding {
                             ),
                     )
                 }
-                ConnectBy::Details => self.remote.render(Size::Large),
+                ConnectBy::Details => self.remote.render(Size::Large, cx),
             })
             .child(self.render_actions("Connect", cx))
             .into_any_element()

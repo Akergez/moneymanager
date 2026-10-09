@@ -2,14 +2,14 @@
 //!
 //! [`Book`] is the one owner of the [`Store`]. Every screen reads from the
 //! snapshot it keeps and asks it to make changes; nothing else touches the
-//! store, which is what keeps the staging file, the in-memory document and
+//! store, which is what keeps the native file, the in-memory document and
 //! what is on screen from ever disagreeing.
 //!
-//! A sync is the one slow operation — the S3 client blocks — so it runs on a
+//! A sync is the one slow operation — the Tresse client blocks — so it runs on a
 //! background thread *with the store moved into it*. For as long as it runs
 //! the book has no store, and a write is refused with a reason rather than
-//! queued: a write that landed between sealing and the exchange would be
-//! staged against a document that is about to be replaced.
+//! queued: a write that landed during the exchange would be
+//! written against a document that is about to be replaced.
 
 mod demo;
 mod entry;
@@ -22,7 +22,6 @@ use chrono::NaiveDate;
 use gpui_kit::{AppContext, Context, SharedString};
 use money_core::ledger::{self, AccountLedger, AccountSummary};
 use money_core::models::{Account, Category, Expense, TopUp, TopUpCategory, Transfer};
-use money_core::remote::RemoteConfig;
 use money_core::store::{Store, hex_encode};
 
 pub use entry::{Entry, EntryDraft, Mode, TransferDraft, latest_date};
@@ -474,19 +473,14 @@ impl Book {
 
     // ------------------------------------------------------------ syncing
 
-    /// Exchanges chunks with `remote` on a background thread. The store goes
+    /// Exchanges Tresse objects through the configured origin on a background thread. The store goes
     /// with the work and comes back with the result; see the module comment.
     ///
     /// The default account is made only *after* the exchange, and only if the
     /// remote did not bring one: made before, its fresh stamp would win over
     /// the synced account's name, currency and opening balance.
-    pub fn sync(&mut self, remote: RemoteConfig, default_currency: String, cx: &mut Context<Self>) {
+    pub fn sync(&mut self, default_currency: String, cx: &mut Context<Self>) {
         if self.is_syncing() {
-            return;
-        }
-        if let Err(message) = remote.validate() {
-            self.sync = SyncState::Failed(message.into());
-            cx.notify();
             return;
         }
         let Some(mut store) = self.store.take() else {
@@ -498,9 +492,9 @@ impl Book {
         cx.spawn(async move |book, cx| {
             let (store, result) = cx
                 .background_spawn(async move {
-                    let result = store.sync(&remote).and_then(|report| {
+                    let result = store.sync().and_then(|report| {
                         Account::ensure_default(&mut store, &default_currency)?;
-                        Ok((report.pulled.len(), report.pushed.len()))
+                        Ok((report.pulled, report.pushed))
                     });
                     (store, result)
                 })

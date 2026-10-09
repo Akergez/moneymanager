@@ -2,7 +2,7 @@
 //! what is in it afterwards.
 //!
 //! ```sh
-//! cargo run -p money-core --example sync_probe -- <ledger-dir> 'tresse1:…'
+//! cargo run -p money-core --example sync_probe -- <ledger-dir> 'tresse://…'
 //! ```
 //!
 //! For checking a storage's credentials, or what a device would receive,
@@ -23,12 +23,9 @@ fn main() -> Result<(), String> {
 
     // A throwaway source: the probe writes nothing of its own to stamp.
     let mut store = Store::open(std::path::Path::new(&dir), remote::generate_source())?;
-    let report = store.sync(&remote)?;
-    println!(
-        "pulled {} chunks, pushed {}",
-        report.pulled.len(),
-        report.pushed.len()
-    );
+    money_core::tresse::config::write_remote(std::path::Path::new(&dir), Some(&remote))?;
+    let report = store.sync()?;
+    println!("pulled {} chunks, pushed {}", report.pulled, report.pushed);
     println!("accounts: {}", Account::read_all(&store)?.len());
     for account in Account::read_all(&store)? {
         println!(

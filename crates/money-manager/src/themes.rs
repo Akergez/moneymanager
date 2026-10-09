@@ -122,9 +122,7 @@ pub fn worn(mode: ThemeMode, cx: &App) -> SharedString {
 /// Chooses by name, as [`names`] lists them.
 pub fn choose(mode: ThemeMode, name: &str, cx: &mut App) {
     let name = (name != SCHEME).then_some(name);
-    Settings::update(cx, |settings| {
-        settings.set_theme_name(mode.is_dark(), name)
-    });
+    Settings::update(cx, |settings| settings.set_theme_name(mode.is_dark(), name));
     apply(cx);
 }
 

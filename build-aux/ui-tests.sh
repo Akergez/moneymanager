@@ -10,7 +10,7 @@
 # A scenario is a MONEY_MANAGER_SCRIPT (crates/money-manager/src/script.rs)
 # kept in a file, one step per line, with what it needs said in its header:
 #
-#   # mode: demo | fresh      the sample ledger, or an installation with none
+#   # mode: demo | fresh | legacy      the sample ledger, or an installation with none
 #   # size: 1240x800          the window it was written against
 #
 # It passes when the application reaches the script's `quit` and exits with
@@ -141,13 +141,35 @@ for file in "${files[@]}"; do
   case $mode in
     demo) env+=(MONEY_MANAGER_DEMO=1) ;;
     fresh) ;;
-    *) echo "$name: header must say '# mode: demo' or '# mode: fresh'" >&2; exit 2 ;;
+    legacy)
+      mkdir -p -- "$home/data/app.akergez.MoneyManager/ledger" "$home/config/app.akergez.MoneyManager"
+      cp -- "$scenarios_dir/legacy/staging.rdx" "$home/data/app.akergez.MoneyManager/ledger/staging.rdx"
+      printf '%s\n' '{"source":42,"remote":{"endpoint":"https://old.invalid","secret_access_key":"old-test-key"},"default_currency":"RUB","theme":"light"}' \
+        > "$home/config/app.akergez.MoneyManager/settings.json"
+      ;;
+    *) echo "$name: header must say '# mode: demo', '# mode: fresh' or '# mode: legacy'" >&2; exit 2 ;;
   esac
 
   $headless && swaymsg -q output HEADLESS-1 resolution "${size:-1240x800}"
 
   status=0
   env "${env[@]}" timeout "$timeout_s" "$app" >"$home/app.log" 2>&1 || status=$?
+
+  if (( status == 0 )) && [[ $mode == legacy ]]; then
+    [[ -f $home/data/app.akergez.MoneyManager/ledger-tresse/ledger.rdx ]] || status=1
+    [[ ! -e $home/data/app.akergez.MoneyManager/ledger-tresse/.tresse/remotes.toml ]] || status=1
+    python3 - "$home/config/app.akergez.MoneyManager/settings.json" \
+      "$scenarios_dir/legacy/staging.rdx" "$home/data/app.akergez.MoneyManager/ledger.pre-tresse/staging.rdx" <<'PY_CHECK' || status=1
+import json, sys
+from pathlib import Path
+assert Path(sys.argv[2]).read_bytes() == Path(sys.argv[3]).read_bytes()
+settings = json.load(open(sys.argv[1]))
+assert 'source' not in settings and 'remote' not in settings
+assert settings['theme'] == 'light' and settings['default_currency'] == 'RUB'
+PY_CHECK
+    env "${env[@]}" MONEY_MANAGER_SCRIPT="wait:2000;expect:stage=workspace;expect:records=1;expect:remote=no;expect:dialog=closed;quit" \
+      timeout "$timeout_s" "$app" >"$home/restart.log" 2>&1 || status=$?
+  fi
 
   if (( status == 0 )); then
     echo "ok    $name"

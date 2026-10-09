@@ -1,0 +1,22 @@
+# mode: legacy
+# size: 1240x800
+#
+# The migration notice appears before changing data. After conversion the
+# default account and old expense are present, and Tresse settings are open.
+wait:2000
+expect:stage=upgrade
+shot:migration-notice
+click:620,475
+wait:2000
+expect:stage=workspace
+expect:accounts=1
+expect:records=1
+expect:categories=1
+expect:balance=-12.50 ₽
+expect:remote=no
+expect:dialog=open
+shot:migration-settings
+key:escape
+wait:600
+expect:dialog=closed
+quit

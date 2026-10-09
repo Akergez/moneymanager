@@ -3,11 +3,11 @@
 //! What is under Appearance takes effect as it is chosen; Save is for the
 //! sync storage alone.
 //!
-//! The sync storage is the same seven fields the first-run form asks for
+//! The sync storage uses the same fields as the first-run form
 //! ([`RemoteFields`]), and takes the same one-string form: a string can be
 //! applied to fill the fields, and the fields can be copied out as a string
-//! for the next device. Nothing is contacted from here — saving only records
-//! the storage; the Sync command is what uses it.
+//! for the next device. Saving writes `.tresse/remotes.toml`; the Sync command
+//! reads that file again to contact the configured origin.
 
 use gpui_adaptive_colors::Color;
 use gpui_kit::component::button::{Button, ButtonGroup};
@@ -42,19 +42,29 @@ struct SettingsForm {
 
 impl SettingsForm {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let stored = Settings::global(cx).remote();
+        let loaded = Settings::global(cx).remote();
+        let error = loaded.as_ref().err().cloned().map(Into::into);
+        let stored = loaded.unwrap_or_default();
         SettingsForm {
             themes: ThemeRows::new(window, cx),
-            config_string: cx.new(|cx| InputState::new(window, cx).placeholder("tresse1:…")),
+            config_string: cx.new(|cx| InputState::new(window, cx).placeholder("tresse://…")),
             remote: RemoteFields::new(stored.as_ref(), window, cx),
             had_remote: stored.is_some(),
-            error: None,
+            error,
         }
     }
 
     /// Whether every field is empty, which is how "no storage" is said.
     fn is_blank(remote: &RemoteConfig) -> bool {
-        *remote == RemoteConfig::default()
+        remote.url.is_empty()
+            && remote.token.is_empty()
+            && remote.repo_id.is_empty()
+            && remote.encryption_key.is_empty()
+            && remote.s3_endpoint.is_empty()
+            && remote.s3_region.is_empty()
+            && remote.s3_bucket.is_empty()
+            && remote.s3_access_key_id.is_empty()
+            && remote.s3_secret_access_key.is_empty()
     }
 
     /// Fills the fields from the pasted string.
@@ -68,7 +78,7 @@ impl SettingsForm {
                 self.error = None;
             }
             Err(_) => {
-                self.error = Some("That is not a config string. It starts with tresse1:".into())
+                self.error = Some("That is not a config string. It starts with tresse://".into())
             }
         }
         cx.notify();
@@ -76,7 +86,14 @@ impl SettingsForm {
 
     /// Puts the fields on the clipboard as one string, for the next device.
     fn copy_string(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let remote = self.remote.read(cx);
+        let remote = match self.remote.read(cx) {
+            Ok(remote) => remote,
+            Err(error) => {
+                self.error = Some(error.into());
+                cx.notify();
+                return;
+            }
+        };
         match remote.validate() {
             Ok(()) => {
                 cx.write_to_clipboard(ClipboardItem::new_string(remote.to_share_string()));
@@ -95,13 +112,20 @@ impl SettingsForm {
     /// storage that already holds an encrypted ledger would lock it out, so
     /// this is only offered while the field is empty.
     fn generate_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let mut remote = self.remote.read(cx);
-        if remote.encryption_key.is_some() {
+        let mut remote = match self.remote.read(cx) {
+            Ok(remote) => remote,
+            Err(error) => {
+                self.error = Some(error.into());
+                cx.notify();
+                return;
+            }
+        };
+        if !remote.encryption_key.is_empty() {
             return;
         }
         match remote::generate_encryption_key() {
             Ok(key) => {
-                remote.encryption_key = Some(key);
+                remote.encryption_key = key;
                 self.remote.fill(&remote, window, cx);
                 self.error = None;
             }
@@ -112,7 +136,14 @@ impl SettingsForm {
 
     /// Records the storage. Answers whether it did.
     fn submit(&mut self, cx: &mut Context<Self>) -> bool {
-        let remote = self.remote.read(cx);
+        let remote = match self.remote.read(cx) {
+            Ok(remote) => remote,
+            Err(error) => {
+                self.error = Some(error.into());
+                cx.notify();
+                return false;
+            }
+        };
         let remote = if Self::is_blank(&remote) {
             None
         } else if let Err(error) = remote.validate() {
@@ -122,8 +153,15 @@ impl SettingsForm {
         } else {
             Some(remote)
         };
-        Settings::update(cx, |settings| settings.set_remote(remote));
-        true
+        match money_core::tresse::config::write_remote(&crate::paths::ledger_dir(), remote.as_ref())
+        {
+            Ok(()) => true,
+            Err(error) => {
+                self.error = Some(error.into());
+                cx.notify();
+                false
+            }
+        }
     }
 }
 
@@ -132,7 +170,10 @@ impl Render for SettingsForm {
         let muted = cx.theme().muted_foreground;
         let current = appearance::theme_choice(cx);
         let current_size = appearance::interface_size(cx);
-        let has_key = self.remote.read(cx).encryption_key.is_some();
+        let has_key = self
+            .remote
+            .read(cx)
+            .is_ok_and(|remote| !remote.encryption_key.is_empty());
 
         let section = |title: &'static str| div().font_semibold().child(title);
         // The dialog is as tall as a small window already, so its body is
@@ -224,7 +265,7 @@ impl Render for SettingsForm {
                     )
                     .child(section("Sync storage"))
                     .child(div().text_sm().text_color(muted).child(
-                        "An S3-compatible bucket the ledger is kept in step with. \
+                        "A Tresse repository on S3 or an HTTP server. \
                          Leave every field empty to keep the ledger on this device only.",
                     ))
                     .child(
@@ -248,7 +289,7 @@ impl Render for SettingsForm {
                             "Paste the string another device copied to fill in the fields below.",
                         )),
                     )
-                    .child(self.remote.render(Size::Medium))
+                    .child(self.remote.render(Size::Medium, cx))
                     .child(
                         h_flex()
                             .flex_wrap()
@@ -259,6 +300,16 @@ impl Render for SettingsForm {
                                     .small()
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.copy_string(window, cx)
+                                    })),
+                            )
+                            .child(
+                                Button::new("clear-sync")
+                                    .label("Clear sync fields")
+                                    .small()
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.remote.fill(&RemoteConfig::default(), window, cx);
+                                        this.error = None;
+                                        cx.notify();
                                     })),
                             )
                             .when(!has_key, |row| {
@@ -313,7 +364,9 @@ fn color_choices(current: ColorChoice, cx: &App) -> impl IntoElement {
                     // The ring is a border in the text colour around a
                     // border in the background's, so it stands off the
                     // swatch whatever colour that is.
-                    .when(current == choice, |swatch| swatch.border_2().border_color(ring))
+                    .when(current == choice, |swatch| {
+                        swatch.border_2().border_color(ring)
+                    })
                     .child(
                         div()
                             .size_full()

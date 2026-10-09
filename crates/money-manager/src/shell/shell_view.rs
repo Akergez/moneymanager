@@ -1,3 +1,6 @@
+use gpui_kit::component::WindowExt;
+use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::notification::Notification;
 use gpui_kit::component::{ActiveTheme, StyledExt, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{Context, Entity, Pixels, SharedString, Subscription, Window, div, img};
@@ -13,6 +16,8 @@ use crate::workspace::Workspace;
 pub enum Stage {
     /// Nothing has been decided yet: the window has only just opened.
     Starting,
+    Upgrade,
+    Converting,
     /// No ledger is set up here, so ask which there should be.
     Welcome(Entity<Onboarding>),
     Workspace(Entity<Workspace>),
@@ -60,16 +65,39 @@ impl Shell {
 
     /// Decides what this window is for. Runs once, right after it opens.
     pub(super) fn start(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let (source, last_account, currency) = {
+        let (last_account, currency) = {
             let settings = Settings::global(cx);
-            (
-                settings.source(),
-                settings.last_account(),
-                settings.default_currency(),
-            )
+            (settings.last_account(), settings.default_currency())
         };
 
-        if let Some(source) = source {
+        let root = crate::paths::ledger_dir();
+        let legacy = money_core::store::has_legacy_data(&crate::paths::legacy_ledger_dir());
+        match legacy {
+            Err(error) => {
+                self.stage = Stage::Failed(error.into());
+                cx.notify();
+                return;
+            }
+            Ok(has_data)
+                if has_data
+                    || (root.join(money_core::store::LEDGER_FILE).exists()
+                        && Settings::global(cx).has_legacy_config()) =>
+            {
+                self.stage = Stage::Upgrade;
+                cx.notify();
+                return;
+            }
+            _ => {}
+        }
+        if Settings::global(cx).has_legacy_config()
+            && let Err(error) = Settings::finish_migration(cx)
+        {
+            self.stage = Stage::Failed(error.into());
+            cx.notify();
+            return;
+        }
+        if root.join(money_core::store::LEDGER_FILE).is_file() {
+            let source = crate::settings::new_source();
             // A ledger was set up here before. It always has its default
             // account, as the terminal version made sure of on every launch.
             let opened = Book::open(&crate::paths::ledger_dir(), source, last_account).and_then(
@@ -127,6 +155,69 @@ impl Shell {
         cx.notify();
     }
 
+    fn convert(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.stage = Stage::Converting;
+        cx.notify();
+        let source = Settings::global(cx)
+            .source()
+            .unwrap_or_else(crate::settings::new_source);
+        let last_account = Settings::global(cx).last_account();
+        let currency = Settings::global(cx).default_currency();
+        cx.spawn_in(window, async move |shell, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let old = crate::paths::legacy_ledger_dir();
+                    let root = crate::paths::ledger_dir();
+                    if money_core::store::has_legacy_data(&old)? {
+                        money_core::store::migrate_legacy(&old, &root, source)?;
+                    }
+                    money_core::tresse::config::write_remote(&root, None)?;
+                    let mut book = Book::open(&root, crate::settings::new_source(), last_account)?;
+                    book.ensure_default_account(&currency)?;
+                    if old.exists() {
+                        let base = crate::paths::legacy_backup_dir();
+                        let mut backup = base.clone();
+                        let mut suffix = 1;
+                        while backup.exists() {
+                            backup = base.with_extension(format!("pre-tresse.{suffix}"));
+                            suffix += 1;
+                        }
+                        std::fs::rename(&old, &backup)
+                            .map_err(|e| format!("could not keep the legacy backup: {e}"))?;
+                    }
+                    Ok::<_, String>(book)
+                })
+                .await;
+            shell
+                .update_in(cx, |shell, window, cx| {
+                    let result = result.and_then(|book| {
+                        Settings::finish_migration(cx)?;
+                        Ok(book)
+                    });
+                    match result {
+                        Ok(book) => {
+                            let book = cx.new(|_| book);
+                            book.update(cx, |book, cx| book.adopt_legacy_styles(cx));
+                            shell.show_workspace(book, window, cx);
+                            window.push_notification(
+                                Notification::success(
+                                    "Data converted to Tresse. Sync settings were reset.",
+                                ),
+                                cx,
+                            );
+                            crate::settings_dialog::open(window, cx);
+                        }
+                        Err(error) => {
+                            shell.stage = Stage::Failed(error.into());
+                            cx.notify();
+                        }
+                    }
+                })
+                .ok();
+        })
+        .detach();
+    }
+
     fn show_workspace(&mut self, book: Entity<Book>, window: &mut Window, cx: &mut Context<Self>) {
         let workspace = cx.new(|cx| Workspace::new(book, window, cx));
         workspace.update(cx, |workspace, cx| workspace.focus(window, cx));
@@ -162,6 +253,25 @@ impl Render for Shell {
                 .size_full()
                 .child(Self::plain_bar(cx))
                 .into_any_element(),
+            Stage::Upgrade => v_flex()
+                .size_full()
+                .child(Self::plain_bar(cx))
+                .child(div().flex_1().min_h_0().child(ui::empty_state(
+                    Lucide::RefreshCw,
+                    "Convert your ledger to Tresse",
+                    "Your data will be converted to the new format. Sync settings will be reset. Set up Tresse sync in Settings afterwards. The original data will be kept as a backup.",
+                    Some(Button::new("convert-ledger").primary().label("Convert and reset sync")
+                        .on_click(cx.listener(|shell, _, window, cx| shell.convert(window, cx))).into_any_element()),
+                    cx,
+                )))
+                .into_any_element(),
+            Stage::Converting => v_flex()
+                .size_full()
+                .child(Self::plain_bar(cx))
+                .child(div().flex_1().min_h_0().child(ui::empty_state(
+                    Lucide::RefreshCw, "Converting your ledger", "Saving your data in Tresse and resetting sync settings…", None, cx,
+                )))
+                .into_any_element(),
             Stage::Welcome(onboarding) => v_flex()
                 .size_full()
                 .child(Self::plain_bar(cx))
@@ -175,7 +285,7 @@ impl Render for Shell {
                     Lucide::TriangleAlert,
                     "Couldn’t open the ledger",
                     format!(
-                        "Nothing was changed. The ledger is in {}. ({error})",
+                        "The ledger and original backup are kept in {}. ({error})",
                         crate::paths::ledger_dir().display()
                     ),
                     None,

@@ -1,0 +1,20 @@
+[package]
+name = "money-tresse"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+tresse-lib = { git = "https://gitlab.com/ragusseven/tresse.git", branch = "master" }
+rdx-rs = { git = "https://gitlab.com/ragusseven/tresse.git", branch = "master" }
+rdx-sync = { git = "https://gitlab.com/ragusseven/tresse.git", branch = "master" }
+rdx-sync-fs = { git = "https://gitlab.com/ragusseven/tresse.git", branch = "master" }
+rdx-sync-s3 = { git = "https://gitlab.com/ragusseven/tresse.git", branch = "master" }
+serde.workspace = true
+serde_json.workspace = true
+toml = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+
+[dev-dependencies]
+tempfile = "3"

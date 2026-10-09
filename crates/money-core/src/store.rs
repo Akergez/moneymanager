@@ -11,17 +11,8 @@
 //! with fewer collections (legacy, pre-accounts) merge losslessly into this
 //! six-collection shape; and a record missing a trailing field reads as empty.
 //!
-//! **Chunking.** A *chunk is the delta of one sync* — not the whole document
-//! (no dedup, re-sends everything) and not one record (object explosion). Local
-//! writes accumulate in a small mutable **staging** delta (`staging.rdx`, a
-//! 6-collection doc holding only the records changed since the last seal),
-//! persisted on every write so a crash loses nothing. On sync the staged delta
-//! is *sealed* into a single immutable, content-addressed chunk in a
-//! [`FileChunkStore`] (one file per chunk, named by its hash), then exchanged
-//! with the remote. Because `merge` is commutative/idempotent, merging the
-//! committed chunks plus staging reconstructs the full document. Net effect:
-//! O(syncs-with-changes) chunks, content-addressed and idempotent, with
-//! incremental, hash-verified transfer.
+//! `ledger.rdx` is a native RDX file inside a standard Tresse repository.
+//! Tresse owns deltas, version history, CAS, locking and remote synchronization.
 //!
 //! [`Tuple`]: rdx_rs::RdxValue::Tuple
 //! [`Eulerian`]: rdx_rs::RdxValue::Eulerian
@@ -30,12 +21,10 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rdx_rs::{RdxElement, RdxValue, Stamp};
-use rdx_sync::{ChunkStore, SyncReport};
+use rdx_sync::ChunkStore;
 use rdx_sync_fs::FileChunkStore;
-use rdx_sync_s3::{S3ChunkStore, S3Config};
 
 use crate::models::CategoryStyle;
-use crate::remote::RemoteConfig;
 
 pub const CATEGORIES_IDX: usize = 0;
 pub const EXPENSES_IDX: usize = 1;
@@ -56,86 +45,61 @@ const TIME_STEP: u64 = 1 << 6;
 
 /// The persistent dataset plus the local clock/source used to stamp writes.
 pub struct Store {
-    /// Persistent, content-addressed store of sealed delta chunks.
-    chunks: FileChunkStore,
-    /// Where the uncommitted staging delta is persisted.
-    staging_path: PathBuf,
-    /// Uncommitted writes since the last seal: a 6-collection delta document.
-    staged: RdxElement,
-    /// In-memory full view = `merge(get_completed(chunks), staged)`.
+    root: PathBuf,
     doc: RdxElement,
-    /// This installation's stamp source id (stable, from the config file).
     source: u64,
-    /// Monotonic Lamport time; strictly increasing so later local writes win.
     clock: u64,
 }
 
+/// Native document path, shared by the GUI and ordinary Tresse clients.
+pub const LEDGER_FILE: &str = "ledger.rdx";
+
+#[derive(Debug, Clone, Default)]
+pub struct SyncReport {
+    pub pulled: usize,
+    pub pushed: usize,
+}
+
 impl Store {
-    /// Open the data directory at `dir` (creating it if absent): load the sealed
-    /// chunks and any staged-but-unsynced writes, and merge them into the view.
     pub fn open(dir: &Path, source: u64) -> Result<Self, String> {
-        let chunks = FileChunkStore::open(dir).map_err(|e| format!("open chunk dir: {e}"))?;
-        let staging_path = dir.join("staging.rdx");
-        let staged = read_doc(&staging_path)?.unwrap_or_else(empty_doc);
-        let committed = chunks
-            .get_completed()
-            .map_err(|e| format!("merge chunks: {e}"))?
-            .unwrap_or_else(empty_doc);
-        let doc = rdx_rs::merge(&committed, &staged);
+        money_tresse::init(dir)?;
+        money_tresse::recover(dir)?;
+        let doc = read_doc(&dir.join(LEDGER_FILE))?.unwrap_or_else(empty_doc);
         let clock = max_time(&doc);
         Ok(Self {
-            chunks,
-            staging_path,
-            staged,
+            root: dir.to_path_buf(),
             doc,
             source,
             clock,
         })
     }
 
-    /// True if there is nothing stored at all — no sealed chunks and no staged
-    /// writes (a fresh install, eligible for legacy migration).
     pub fn is_empty(&self) -> Result<bool, String> {
-        let no_chunks = self
-            .chunks
-            .is_empty()
-            .map_err(|e| format!("list chunks: {e}"))?;
-        Ok(no_chunks && !has_records(&self.staged))
+        Ok(!has_records(&self.doc))
     }
 
-    /// Seal the staged writes into a single immutable delta chunk. A no-op when
-    /// nothing is staged. This is the local "commit" boundary; [`Store::sync`]
-    /// calls it before exchanging chunks.
+    /// Commit the native file, using Tresse's delta computation.
     pub fn seal(&mut self) -> Result<(), String> {
-        if has_records(&self.staged) {
-            self.chunks
-                .put(&self.staged)
-                .map_err(|e| format!("store chunk: {e}"))?;
-            self.staged = empty_doc();
-            // Best-effort: the data now lives in an immutable chunk.
-            let _ = std::fs::remove_file(&self.staging_path);
-        }
-        Ok(())
+        money_tresse::commit(&self.root)
     }
 
-    /// One-time migration from the legacy single-blob format: decode the blob at
-    /// `path` and seal it as one baseline chunk (preserving every stamp and id).
-    /// Returns the number of records migrated.
     pub fn import_legacy_blob(&mut self, path: &Path) -> Result<usize, String> {
-        let bytes = std::fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
-        let (legacy, _) = rdx_rs::decode(&bytes).map_err(|e| format!("decode blob: {e:?}"))?;
+        let legacy = read_doc(path)?.ok_or_else(|| format!("missing {}", path.display()))?;
         let n = count_records(&legacy);
-        self.chunks
-            .put(&legacy)
-            .map_err(|e| format!("store chunk: {e}"))?;
-        let committed = self
-            .chunks
-            .get_completed()
-            .map_err(|e| format!("merge chunks: {e}"))?
-            .unwrap_or_else(empty_doc);
-        self.doc = rdx_rs::merge(&committed, &self.staged);
-        self.clock = self.clock.max(max_time(&self.doc));
+        self.merge_document(&legacy)?;
         Ok(n)
+    }
+
+    fn merge_document(&mut self, patch: &RdxElement) -> Result<(), String> {
+        let mut doc = self.doc.clone();
+        money_tresse::edit(&self.root, || {
+            let current = read_doc(&self.root.join(LEDGER_FILE))?.unwrap_or_else(empty_doc);
+            doc = rdx_rs::merge(&current, patch);
+            write_doc(&self.root, &doc)
+        })?;
+        self.clock = self.clock.max(max_time(&doc));
+        self.doc = doc;
+        Ok(())
     }
 
     /// Next strictly-increasing stamp for a local write.
@@ -167,79 +131,70 @@ impl Store {
     /// record itself) is stamped with a fresh local stamp, then merged into the
     /// document so a repeat key updates in place via CRDT merge.
     pub fn upsert(&mut self, idx: usize, key: &str, fields: Vec<RdxValue>) -> Result<(), String> {
-        let stamp = self.next_stamp();
-        let mut children = Vec::with_capacity(fields.len() + 1);
-        children.push(RdxElement::with_stamp(
-            RdxValue::Str(key.to_string()),
-            stamp,
-        ));
-        for v in fields {
-            children.push(RdxElement::with_stamp(v, stamp));
-        }
-        let record = RdxElement::with_stamp(RdxValue::Tuple(children), stamp);
-        self.merge_record(idx, record)
+        self.edit_record(idx, key, fields, false)
     }
 
-    /// Tombstone the record keyed by `key` in collection `idx`.
+    /// Tombstone a record; deletions remain native CRDT updates.
     pub fn delete(&mut self, idx: usize, key: &str) -> Result<(), String> {
-        let mut stamp = self.next_stamp();
-        stamp.time |= 1; // mark tombstone (odd time)
-        let record = RdxElement::with_stamp(
-            RdxValue::Tuple(vec![RdxElement::with_stamp(
+        self.edit_record(idx, key, Vec::new(), true)
+    }
+
+    fn edit_record(
+        &mut self,
+        idx: usize,
+        key: &str,
+        fields: Vec<RdxValue>,
+        deleted: bool,
+    ) -> Result<(), String> {
+        let root = self.root.clone();
+        money_tresse::edit(&root, || {
+            // Use the current disk state after Tresse has settled pending work.
+            let current = read_doc(&root.join(LEDGER_FILE))?.unwrap_or_else(empty_doc);
+            self.clock = self.clock.max(max_time(&current));
+            let mut stamp = self.next_stamp();
+            if deleted {
+                stamp.time |= 1;
+            }
+            let mut children = vec![RdxElement::with_stamp(
                 RdxValue::Str(key.to_string()),
                 stamp,
-            )]),
-            stamp,
-        );
-        self.merge_record(idx, record)
+            )];
+            children.extend(
+                fields
+                    .into_iter()
+                    .map(|value| RdxElement::with_stamp(value, stamp)),
+            );
+            let record = RdxElement::with_stamp(RdxValue::Tuple(children), stamp);
+            let doc = rdx_rs::merge(&current, &patch_doc(idx, record));
+            write_doc(&root, &doc)?;
+            self.doc = doc;
+            Ok(())
+        })
     }
 
-    /// Fold `record` into the staged delta and the in-memory view, then persist
-    /// staging. The write becomes part of the next sealed chunk, not its own.
-    fn merge_record(&mut self, idx: usize, record: RdxElement) -> Result<(), String> {
-        let patch = patch_doc(idx, record);
-        self.staged = rdx_rs::merge(&self.staged, &patch);
-        self.doc = rdx_rs::merge(&self.doc, &patch);
-        write_doc(&self.staging_path, &self.staged)
+    /// Exchange through the remote specified on disk. The GUI passes no hidden
+    /// transport settings to Tresse.
+    pub fn sync(&mut self) -> Result<SyncReport, String> {
+        let result = money_tresse::sync(&self.root);
+        self.reload()?;
+        let (pulled, pushed) = result?;
+        Ok(SyncReport { pulled, pushed })
     }
 
-    /// Synchronize with the configured S3 remote: seal pending writes into a
-    /// delta chunk, exchange the missing chunks both ways, then rebuild the view.
-    pub fn sync(&mut self, remote: &RemoteConfig) -> Result<SyncReport, String> {
-        let config = S3Config {
-            endpoint: remote.endpoint.clone(),
-            region: remote.region.clone(),
-            bucket: remote.bucket.clone(),
-            access_key_id: remote.access_key_id.clone(),
-            secret_access_key: remote.secret_access_key.clone(),
-            prefix: remote.prefix.clone(),
-        };
-        let mut s3 = match &remote.encryption_key {
-            Some(key) => S3ChunkStore::with_encryption_key(config, key),
-            None => S3ChunkStore::new(config),
-        }
-        .map_err(|e| format!("open S3 store: {e}"))?;
-        self.sync_with(&mut s3)
+    pub fn sync_with<R: rdx_sync::RemoteKv>(
+        &mut self,
+        remote: &mut R,
+    ) -> Result<SyncReport, String> {
+        let result = money_tresse::sync_with(&self.root, remote);
+        self.reload()?;
+        let (pulled, pushed) = result?;
+        Ok(SyncReport { pulled, pushed })
     }
 
-    /// Synchronize with any chunk store: seal pending writes into a delta
-    /// chunk, exchange the missing chunks both ways, then rebuild the view.
-    /// [`Store::sync`] is this against S3; it is separate so the exchange can
-    /// be exercised without a network.
-    pub fn sync_with<R: ChunkStore>(&mut self, remote: &mut R) -> Result<SyncReport, String> {
-        self.seal()?;
-
-        // The local store persists every chunk we hold, so this transfers only
-        // chunks one side is missing; each fetched chunk is hash-verified.
-        let report = rdx_sync::sync(&mut self.chunks, remote).map_err(|e| format!("sync: {e}"))?;
-
-        self.doc = self
-            .chunks
-            .get_completed()
-            .map_err(|e| format!("merge chunks: {e}"))?
-            .unwrap_or_else(empty_doc);
+    fn reload(&mut self) -> Result<(), String> {
+        self.doc = read_doc(&self.root.join(LEDGER_FILE))?.unwrap_or_else(empty_doc);
         self.clock = self.clock.max(max_time(&self.doc));
-        Ok(report)
+        Ok(())
     }
 }
 
@@ -307,18 +262,48 @@ fn read_doc(path: &Path) -> Result<Option<RdxElement>, String> {
         return Ok(None);
     }
     let bytes = std::fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
-    let (el, _) =
+    let (el, used) =
         rdx_rs::decode(&bytes).map_err(|e| format!("decode {}: {e:?}", path.display()))?;
+    if !used.is_empty() {
+        return Err(format!("trailing data in {}", path.display()));
+    }
     Ok(Some(el))
 }
 
 /// Encode `doc` and write it to `path` atomically (temp file then rename), so a
 /// crash mid-write can never leave a half-written staging file.
-fn write_doc(path: &Path, doc: &RdxElement) -> Result<(), String> {
+fn write_doc(root: &Path, doc: &RdxElement) -> Result<(), String> {
+    // Temporary bytes belong to the Tresse layout, never to the tracked tree.
+    let tmp = root.join(".tresse/ledger-write.tmp");
     let bytes = rdx_rs::encode(doc);
-    let tmp = path.with_extension("rdx.tmp");
-    std::fs::write(&tmp, &bytes).map_err(|e| format!("write {}: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, path).map_err(|e| format!("rename {}: {e}", path.display()))
+    let mut file = std::fs::File::create(&tmp).map_err(|e| e.to_string())?;
+    std::io::Write::write_all(&mut file, &bytes).map_err(|e| e.to_string())?;
+    file.sync_all().map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, root.join(LEDGER_FILE)).map_err(|e| e.to_string())
+}
+
+/// Read old chunks and staging without changing them. Conversion is restartable:
+/// originals remain outside the new worktree until a native baseline is committed.
+pub fn migrate_legacy(old: &Path, new: &Path, source: u64) -> Result<usize, String> {
+    let chunks = FileChunkStore::open(old).map_err(|e| e.to_string())?;
+    let committed = chunks
+        .get_completed()
+        .map_err(|e| e.to_string())?
+        .unwrap_or_else(empty_doc);
+    let staged = read_doc(&old.join("staging.rdx"))?.unwrap_or_else(empty_doc);
+    let doc = rdx_rs::merge(&committed, &staged);
+    let mut store = Store::open(new, source)?;
+    store.merge_document(&doc)?;
+    Ok(count_records(&doc))
+}
+
+pub fn has_legacy_data(dir: &Path) -> Result<bool, String> {
+    if !dir.exists() {
+        return Ok(false);
+    }
+    let chunks = FileChunkStore::open(dir).map_err(|e| e.to_string())?;
+    Ok(!chunks.is_empty().map_err(|e| e.to_string())?
+        || read_doc(&dir.join("staging.rdx"))?.is_some_and(|doc| has_records(&doc)))
 }
 
 // ---------------------------------------------------------------------------
@@ -431,6 +416,100 @@ mod tests {
         std::env::temp_dir().join(format!("mm_test_{tag}_{nanos}"))
     }
 
+    fn configure_remote(dir: &Path) {
+        money_tresse::config::write_remote(
+            dir,
+            Some(&crate::remote::RemoteConfig {
+                storage_type: crate::remote::StorageType::S3,
+                s3_endpoint: "https://example.com".into(),
+                s3_bucket: "test".into(),
+                s3_access_key_id: "test".into(),
+                s3_secret_access_key: "test".into(),
+                repo_id: "ledger".into(),
+                encryption_key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
+                ..Default::default()
+            }),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn migration_preserves_chunks_staging_stamps_and_tombstones() {
+        use rdx_sync::ObjectStore;
+        let old = tempfile::tempdir().unwrap();
+        let new = tempfile::tempdir().unwrap();
+        let baseline = patch_doc(
+            CATEGORIES_IDX,
+            legacy_record("aa", vec![RdxValue::Str("Old".into())], Stamp::new(11, 64)),
+        );
+        let tombstone = patch_doc(
+            CATEGORIES_IDX,
+            legacy_record("aa", vec![], Stamp::new(22, 129)),
+        );
+        let added = patch_doc(
+            CATEGORIES_IDX,
+            legacy_record(
+                "bb",
+                vec![RdxValue::Str("Unsynced".into())],
+                Stamp::new(22, 192),
+            ),
+        );
+        let staged = rdx_rs::merge(&tombstone, &added);
+        let mut chunks = FileChunkStore::open(old.path()).unwrap();
+        let id = chunks.put(&baseline).unwrap();
+        let staging_bytes = rdx_rs::encode(&staged);
+        std::fs::write(old.path().join("staging.rdx"), &staging_bytes).unwrap();
+        let expected = rdx_rs::merge(&baseline, &staged);
+        assert!(has_legacy_data(old.path()).unwrap());
+        migrate_legacy(old.path(), new.path(), 7).unwrap();
+        let store = Store::open(new.path(), 7).unwrap();
+        assert_eq!(store.doc, expected);
+        assert_eq!(Category::read_all(&store).unwrap()[0].name, "Unsynced");
+        assert_eq!(
+            std::fs::read(old.path().join("staging.rdx")).unwrap(),
+            staging_bytes
+        );
+        assert_eq!(chunks.get(&id).unwrap(), baseline);
+        let local = rdx_sync_fs::FileObjectStore::open(new.path().join(".tresse")).unwrap();
+        let versions = local.list_objects(rdx_sync::ChunkClass::Meta).unwrap();
+        migrate_legacy(old.path(), new.path(), 7).unwrap();
+        assert_eq!(
+            local.list_objects(rdx_sync::ChunkClass::Meta).unwrap(),
+            versions
+        );
+    }
+
+    #[test]
+    fn a_corrupt_legacy_staging_file_does_not_create_a_new_repository() {
+        let old = tempfile::tempdir().unwrap();
+        let parent = tempfile::tempdir().unwrap();
+        let new = parent.path().join("new");
+        std::fs::write(old.path().join("staging.rdx"), b"corrupt").unwrap();
+        assert!(migrate_legacy(old.path(), &new, 7).is_err());
+        assert!(!new.exists());
+        assert_eq!(
+            std::fs::read(old.path().join("staging.rdx")).unwrap(),
+            b"corrupt"
+        );
+    }
+
+    #[test]
+    fn a_write_rereads_external_edits_and_advances_the_native_clock() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut a = Store::open(dir.path(), 1).unwrap();
+        let mut b = Store::open(dir.path(), 2).unwrap();
+        a.upsert(CATEGORIES_IDX, "aa", vec![RdxValue::Str("First".into())])
+            .unwrap();
+        b.upsert(CATEGORIES_IDX, "aa", vec![RdxValue::Str("Second".into())])
+            .unwrap();
+        a.upsert(CATEGORIES_IDX, "aa", vec![RdxValue::Str("Third".into())])
+            .unwrap();
+        assert_eq!(
+            Category::read_all(&Store::open(dir.path(), 3).unwrap()).unwrap()[0].name,
+            "Third"
+        );
+    }
+
     #[test]
     fn a_category_style_is_optional_trailing_fields() {
         let dir = temp_dir("category_style");
@@ -492,14 +571,21 @@ mod tests {
 
         // A rewrite replaces the record whole: the colour changes, the icon
         // goes, and a later rewrite without a style leaves none.
-        Category::create_with_id(&mut store, &styled.id, "Food", &style(Some("#4c8df6"), None))
-            .unwrap();
-        assert_eq!(
-            find(&store, &styled.id).style,
-            style(Some("#4c8df6"), None)
-        );
-        Category::create_with_id(&mut store, &styled.id, "Groceries", &CategoryStyle::default())
-            .unwrap();
+        Category::create_with_id(
+            &mut store,
+            &styled.id,
+            "Food",
+            &style(Some("#4c8df6"), None),
+        )
+        .unwrap();
+        assert_eq!(find(&store, &styled.id).style, style(Some("#4c8df6"), None));
+        Category::create_with_id(
+            &mut store,
+            &styled.id,
+            "Groceries",
+            &CategoryStyle::default(),
+        )
+        .unwrap();
         let renamed = find(&store, &styled.id);
         assert_eq!(renamed.name, "Groceries");
         assert!(renamed.style.is_empty());
@@ -546,33 +632,16 @@ mod tests {
     }
 
     #[test]
-    fn writes_stage_until_sealed_into_one_chunk() {
-        let dir = temp_dir("chunks");
+    fn writes_are_native_files_and_tresse_versions() {
+        let dir = temp_dir("native");
         let mut store = Store::open(&dir, 7).unwrap();
-        assert!(store.is_empty().unwrap());
-
-        // Writes accumulate in staging — no chunks yet.
         Category::create(&mut store, "A").unwrap();
         Category::create(&mut store, "B").unwrap();
-        Category::create(&mut store, "C").unwrap();
-        assert_eq!(store.chunks.list().unwrap().len(), 0);
-        assert!(store.staging_path.exists());
-
-        // Sealing folds the whole batch into exactly one delta chunk.
-        store.seal().unwrap();
-        assert_eq!(store.chunks.list().unwrap().len(), 1);
-        assert!(!store.staging_path.exists());
-        // Sealing again with nothing staged is a no-op.
-        store.seal().unwrap();
-        assert_eq!(store.chunks.list().unwrap().len(), 1);
-
-        // The sealed data reloads, and a further write stages anew.
-        let mut store2 = Store::open(&dir, 7).unwrap();
-        assert_eq!(Category::read_all(&store2).unwrap().len(), 3);
-        Category::create(&mut store2, "D").unwrap();
-        store2.seal().unwrap();
-        assert_eq!(store2.chunks.list().unwrap().len(), 2); // one chunk per sealed batch
-
+        assert!(dir.join(LEDGER_FILE).is_file());
+        assert!(!dir.join("staging.rdx").exists());
+        assert!(dir.join(".tresse/meta").is_dir());
+        let reopened = Store::open(&dir, 7).unwrap();
+        assert_eq!(Category::read_all(&reopened).unwrap().len(), 2);
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -604,7 +673,9 @@ mod tests {
         let da = temp_dir("merge_a");
         let db = temp_dir("merge_b");
         let mut a = Store::open(&da, 0xA).unwrap();
+        configure_remote(&da);
         let mut b = Store::open(&db, 0xB).unwrap();
+        configure_remote(&db);
 
         Category::create(&mut a, "FromA").unwrap();
         Category::create(&mut b, "FromB").unwrap();
@@ -725,7 +796,9 @@ mod tests {
         let da = temp_dir("default_a");
         let db = temp_dir("default_b");
         let mut a = Store::open(&da, 0xA).unwrap();
+        configure_remote(&da);
         let mut b = Store::open(&db, 0xB).unwrap();
+        configure_remote(&db);
 
         Account::ensure_default(&mut a, "RUB").unwrap();
         Account::ensure_default(&mut a, "RUB").unwrap();
@@ -817,9 +890,11 @@ mod tests {
     #[test]
     fn two_devices_converge_through_a_shared_remote() {
         let (da, db) = (temp_dir("sync_a"), temp_dir("sync_b"));
-        let mut remote = rdx_sync::MemChunkStore::new();
+        let mut remote = rdx_sync::MemRemoteKv::new();
         let mut a = Store::open(&da, 0xA).unwrap();
+        configure_remote(&da);
         let mut b = Store::open(&db, 0xB).unwrap();
+        configure_remote(&db);
         Account::ensure_default(&mut a, "RUB").unwrap();
         let food = Category::create(&mut a, "Food").unwrap();
         let date = NaiveDate::from_ymd_opt(2026, 9, 12).unwrap();
@@ -835,9 +910,11 @@ mod tests {
 
         // A pushes its one sealed chunk; B pulls it.
         let pushed = a.sync_with(&mut remote).unwrap();
-        assert_eq!((pushed.pulled.len(), pushed.pushed.len()), (0, 1));
+        assert_eq!(pushed.pulled, 0);
+        assert!(pushed.pushed > 0);
         let pulled = b.sync_with(&mut remote).unwrap();
-        assert_eq!((pulled.pulled.len(), pulled.pushed.len()), (1, 0));
+        assert!(pulled.pulled > 0);
+
         assert_eq!(Expense::read_all(&b).unwrap().len(), 1);
 
         // Both edit: B deletes the lunch, A records a coffee.
@@ -863,7 +940,7 @@ mod tests {
         }
         // Syncing again with nothing new moves nothing and seals nothing.
         let idle = a.sync_with(&mut remote).unwrap();
-        assert_eq!((idle.pulled.len(), idle.pushed.len()), (0, 0));
+        assert_eq!((idle.pulled, idle.pushed), (0, 0));
 
         // And what sync wrote is what a restart reads.
         drop(b);
@@ -879,8 +956,9 @@ mod tests {
         // The first device has made the default account its own: renamed,
         // in another currency, with an opening balance.
         let (da, db, dc) = (temp_dir("join_a"), temp_dir("join_b"), temp_dir("join_c"));
-        let mut remote = rdx_sync::MemChunkStore::new();
+        let mut remote = rdx_sync::MemRemoteKv::new();
         let mut a = Store::open(&da, 0xA).unwrap();
+        configure_remote(&da);
         Account::ensure_default(&mut a, "RUB").unwrap();
         Account::update(&mut a, &DEFAULT_ACCOUNT_ID, "Main card", "EUR", 250.0).unwrap();
         a.sync_with(&mut remote).unwrap();
@@ -888,6 +966,7 @@ mod tests {
         // A second device joins the right way: sync first, and only then
         // make sure a default account exists. It finds one, and leaves it.
         let mut b = Store::open(&db, 0xB).unwrap();
+        configure_remote(&db);
         b.sync_with(&mut remote).unwrap();
         Account::ensure_default(&mut b, "RUB").unwrap();
         b.sync_with(&mut remote).unwrap();
@@ -911,6 +990,7 @@ mod tests {
         // categories only move this device's clock on, the way the minutes
         // between two real devices' first runs would.)
         let mut c = Store::open(&dc, 0xC).unwrap();
+        configure_remote(&dc);
         for name in ["one", "two", "three"] {
             Category::create(&mut c, name).unwrap();
         }

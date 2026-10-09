@@ -6,12 +6,15 @@ on a phone. Written in Rust and drawn with [GPUI](https://www.gpui.rs/) through
 [GPUI Kit](https://gpui-kit.com).
 
 The ledger is a CRDT document (RDX, from [tresse](https://gitlab.com/ragusseven/tresse)).
-It is kept inside the application and can sync with any S3-compatible storage,
-end-to-end encrypted, merging what several devices changed without conflicts.
+It is a native `ledger.rdx` file in a Tresse repository. Tresse stores its
+version history and synchronizes it with S3-compatible storage or an HTTP
+server, with end-to-end encryption and CRDT merging across devices.
 
-This is the graphical successor of the terminal version (0.4 and earlier). It
-reads and writes **exactly the same ledger format**, so the two — and every
-device already syncing a ledger — keep working against the same storage.
+On upgrade, the application offers to convert the previous chunk format and
+reset its sync settings. Records, identifiers, stamps and deletions are
+preserved; the old directory is kept as a backup. Afterwards, configure Tresse
+sync in the application's Settings. Old chunk remotes and `tresse1:` strings
+are not compatible with the new repository protocol.
 
 ## What it does
 
@@ -28,7 +31,7 @@ device already syncing a ledger — keep working against the same storage.
   separately and the exchange rate derived from them. A transfer shows as an
   expense on one account and an income on the other; deleting either side
   deletes both.
-- **Sync** — on demand, with S3-compatible storage.
+- **Sync** — on demand, through Tresse, with S3 or an HTTP server.
 
 ## First run
 
@@ -37,13 +40,13 @@ With no ledger on the device the application asks which there should be:
 - **Create a new ledger** — asks for the currency of the first account and
   starts empty. Sync storage can be added later in Settings.
 - **Connect to sync storage** — brings in a ledger that already syncs. The
-  storage is given either as one **config string** (`tresse1:…`, what another
-  device copies out of its Settings, or what the terminal version prints with
-  `money_manager config --export`) or field by field: endpoint, region, bucket,
-  access key ID, secret access key, prefix and the optional encryption key.
+  storage is given either as one **config string** (`tresse://…`, exported by
+  another device or `tresse config export`) or through the S3/HTTP fields.
+  An encryption key and repository ID are required.
 
-Nothing is recorded until it has worked: a mistyped key leaves the
-installation as it was found, and the question is asked again.
+The first-run choice is unchanged. The repository config is written to files,
+not application preferences. Sync settings can also be changed using Tresse's
+CLI; the GUI re-reads them when opening Settings and synchronizing.
 
 ## Where things are kept
 
@@ -54,17 +57,45 @@ and the flatpak has no filesystem access at all.
 
 | What | Where |
 |------|-------|
-| The ledger: sealed chunks and `staging.rdx` | `$XDG_DATA_HOME/app.akergez.MoneyManager/ledger/` |
+| Tresse worktree: `ledger.rdx`, `tresse.toml`, `.tresse/` | `$XDG_DATA_HOME/app.akergez.MoneyManager/ledger-tresse/` |
+| Original data after conversion | `$XDG_DATA_HOME/app.akergez.MoneyManager/ledger.pre-tresse/` |
 | Settings: `settings.json` | `$XDG_CONFIG_HOME/app.akergez.MoneyManager/` |
 
 On Android both are under the application's internal data directory.
 
-`settings.json` takes the place of the terminal version's
-`money_manager.toml`, under the same names: `source` (this installation's CRDT
-stamp source), `remote` (the sync storage), `default_currency` and
-`last_account`. It also holds what only an interface has, such as the theme.
-**None of it is synced.** The sync storage's keys are in this file in the
-clear, as they were in the `.toml`.
+`settings.json` contains interface preferences, `default_currency` and
+`last_account`. Old `source` and `remote` keys are removed after conversion.
+Tresse configuration has one source of truth:
+
+- `tresse.toml` at the worktree root: tracked language and ignore rules;
+- `.tresse/remotes.toml`: device-local `[[remotes.origin]]` with coordinates,
+  credentials, repository ID and encryption key (owner-only permissions on Unix);
+- `.tresse/`: standard Tresse CAS, index, lock and recovery journal.
+
+The application reads these files and honors their values without adding
+in-memory language, ignore or remote settings. The ledger's internal RDX
+stamps are produced by the application; Tresse version stamps are produced by
+Tresse. The GUI and the CLI share the same repository format and locks.
+For example, on a desktop with the usual XDG paths:
+
+```sh
+cd ~/.local/share/app.akergez.MoneyManager/ledger-tresse
+tresse config validate
+tresse log --changes
+tresse commit
+tresse sync
+tresse restore
+```
+
+`money-tresse` embeds the filesystem adapters from `tresse-cli` at the commit
+pinned in Cargo.lock. Upstream currently provides domain libraries but no CLI
+library target. Diff, native RDX restore, CAS and object exchange remain in the
+upstream crates. Adapter changes are covered by an interoperability test:
+
+```sh
+TRESSE_CLI_BIN=/path/to/tresse cargo test -p money-tresse \
+  upstream_cli_and_embedded_client_share_config_history_locks_and_sync -- --ignored
+```
 
 ### Category colours and icons
 
@@ -81,8 +112,8 @@ moved into the ledger the first time it is opened.
 
 ## The ledger format
 
-Unchanged from the terminal version; `crates/money-core/src/store.rs` describes
-it in full. In short:
+The internal record schema is unchanged from the terminal version;
+`crates/money-core/src/store.rs` describes it:
 
 - The document is a tuple of six collections: categories, expenses, income
   categories, income, accounts, transfers. A record is a tuple whose first
@@ -90,9 +121,10 @@ it in full. In short:
 - Every write is stamped (source + Lamport time); a newer write replaces the
   record, and a deletion is a tombstone. This is what makes two devices'
   changes merge.
-- Local writes accumulate in `staging.rdx`. A sync seals them into one
-  immutable, content-addressed chunk and exchanges the missing chunks with the
-  storage both ways.
+- Each local write atomically updates `ledger.rdx` and commits a Tresse
+  version. Native RDX diff, content fragmentation and synchronization belong
+  to Tresse. Sync commits local edits, exchanges objects, restores incoming
+  versions and reloads the ledger.
 
 A device joining a ledger syncs **first** and only then makes sure the default
 account exists: made before the first sync, its fresh stamp would win over the
@@ -191,11 +223,12 @@ nobody can update an installed copy.
 
 ## What the terminal version had that this does not
 
-The command-line subcommands are gone with the terminal interface: `sync` is
-the Sync command, `keygen` and `config --export/--import` are in Settings, and
-`import-csv` and the one-time migration from the single-blob format have no
-counterpart. To bring an existing ledger over, connect to its sync storage; a
-ledger that was never synced has to be synced from the terminal version first.
+The terminal application's `import-csv` command is not available in the GUI.
+Local chunk-format data from the previous GUI is converted on launch. A
+terminal ledger can first be copied into the application's old `ledger/`
+directory, or imported using the core library's `import_legacy_blob` API.
+Remote-only old ledgers must be downloaded by an old client before conversion.
+The new Tresse repository cannot sync with the old chunk protocol.
 
 ## License
 

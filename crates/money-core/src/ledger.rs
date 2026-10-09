@@ -296,12 +296,24 @@ mod tests {
             account(a2.clone(), "B", "USD", 50.0),
         ];
 
-        let l1 = ledger_for(&accounts[0], &accounts, &[e.clone()], &[t.clone()], &[]);
+        let l1 = ledger_for(
+            &accounts[0],
+            &accounts,
+            std::slice::from_ref(&e),
+            std::slice::from_ref(&t),
+            &[],
+        );
         // e lands on A only; t on B only.
         assert_eq!(l1.expenses.len(), 1);
         assert_eq!(l1.top_ups.len(), 0);
 
-        let l2 = ledger_for(&accounts[1], &accounts, &[e.clone()], &[t.clone()], &[]);
+        let l2 = ledger_for(
+            &accounts[1],
+            &accounts,
+            std::slice::from_ref(&e),
+            std::slice::from_ref(&t),
+            &[],
+        );
         assert_eq!(l2.expenses.len(), 0);
         assert_eq!(l2.top_ups.len(), 1);
 

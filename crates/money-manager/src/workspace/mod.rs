@@ -198,10 +198,9 @@ impl Workspace {
             (settings.remote(), settings.default_currency())
         };
         match remote {
-            Some(remote) => self
-                .book
-                .update(cx, |book, cx| book.sync(remote, currency, cx)),
-            None => self.open_settings(window, cx),
+            Ok(Some(_)) => self.book.update(cx, |book, cx| book.sync(currency, cx)),
+            Ok(None) => self.open_settings(window, cx),
+            Err(error) => window.push_notification(Notification::error(error), cx),
         }
     }
 

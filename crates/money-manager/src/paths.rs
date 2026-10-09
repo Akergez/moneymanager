@@ -43,10 +43,17 @@ fn data_dir() -> PathBuf {
         .join(crate::APP_ID)
 }
 
-/// The chunk directory of the ledger: sealed chunks and `staging.rdx`, laid
-/// out exactly as the terminal version's `money_manager.chunks`.
+/// A standard Tresse working tree, containing `ledger.rdx` and `tresse.toml`.
 pub fn ledger_dir() -> PathBuf {
+    data_dir().join("ledger-tresse")
+}
+
+pub fn legacy_ledger_dir() -> PathBuf {
     data_dir().join("ledger")
+}
+
+pub fn legacy_backup_dir() -> PathBuf {
+    data_dir().join("ledger.pre-tresse")
 }
 
 /// The themes installed from Zed's registry, one directory to an extension.

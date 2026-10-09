@@ -1,6 +1,6 @@
 [package]
 name = "money-manager"
-description = "Expenses, income and transfers across accounts, kept in a CRDT ledger that syncs to S3"
+description = "Expenses, income and transfers across accounts, kept in a native RDX ledger versioned and synchronized by Tresse"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
