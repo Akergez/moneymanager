@@ -48,6 +48,7 @@ pub struct Onboarding {
     step: Step,
     connect_by: ConnectBy,
     currency: Entity<InputState>,
+    account_name: Entity<InputState>,
     config_string: Entity<InputState>,
     remote: RemoteFields,
     connecting: Option<Connecting>,
@@ -58,14 +59,18 @@ pub struct Onboarding {
 impl EventEmitter<OnboardingEvent> for Onboarding {}
 
 /// Makes a new, empty ledger with its default account.
-pub fn create_ledger(currency: &str, cx: &mut App) -> Result<Entity<Book>, String> {
+pub fn create_ledger(name: &str, currency: &str, cx: &mut App) -> Result<Entity<Book>, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("Account name is required.".into());
+    }
     let currency = currency.trim().to_uppercase();
     if currency.len() != 3 || !currency.chars().all(|c| c.is_ascii_alphabetic()) {
         return Err("Currency is a three-letter code, like USD.".to_string());
     }
     let source = settings::new_source();
     let mut book = Book::open(&crate::paths::ledger_dir(), source, None)?;
-    book.ensure_default_account(&currency)?;
+    book.create_first_account(name, &currency)?;
     Settings::update(cx, |settings| {
         settings.set_default_currency(&currency);
     });
@@ -75,6 +80,11 @@ pub fn create_ledger(currency: &str, cx: &mut App) -> Result<Entity<Book>, Strin
 impl Onboarding {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let default_currency = Settings::global(cx).default_currency();
+        let account_name = cx.new(|cx| {
+            InputState::new(window, cx)
+                .default_value("Основной")
+                .placeholder("Account name")
+        });
         let currency = cx.new(|cx| {
             InputState::new(window, cx)
                 .default_value(default_currency)
@@ -87,7 +97,7 @@ impl Onboarding {
         let mut subscriptions: Vec<Subscription> = remote
             .inputs()
             .into_iter()
-            .chain([&currency, &config_string])
+            .chain([&account_name, &currency, &config_string])
             .map(|input| {
                 cx.subscribe_in(input, window, |this, _, event: &InputEvent, _, cx| {
                     if matches!(event, InputEvent::PressEnter { .. }) {
@@ -102,6 +112,7 @@ impl Onboarding {
             step: Step::Choose,
             connect_by: ConnectBy::ConfigString,
             currency,
+            account_name,
             config_string,
             remote,
             connecting: None,
@@ -138,7 +149,8 @@ impl Onboarding {
 
     fn create(&mut self, cx: &mut Context<Self>) {
         let currency = self.currency.read(cx).value().to_string();
-        match create_ledger(&currency, cx) {
+        let name = self.account_name.read(cx).value().to_string();
+        match create_ledger(&name, &currency, cx) {
             Ok(book) => cx.emit(OnboardingEvent::Ready(book)),
             Err(error) => {
                 self.error = Some(error.into());

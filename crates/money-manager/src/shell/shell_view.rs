@@ -126,7 +126,7 @@ impl Shell {
         // A layout-only mode, so the screens can be reviewed, and scripted,
         // without anybody answering the first-run question.
         if crate::demo_requested() {
-            match onboarding::create_ledger(&currency, cx) {
+            match onboarding::create_ledger("Основной", &currency, cx) {
                 Ok(book) => {
                     let today = crate::today();
                     if let Err(error) = book.update(cx, |book, cx| book.seed_demo(today, cx)) {

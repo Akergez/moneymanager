@@ -84,8 +84,7 @@ impl Workspace {
             let (accounts, current) = {
                 let book = book.read(cx);
                 let accounts: Vec<_> = book
-                    .accounts()
-                    .iter()
+                    .visible_accounts()
                     .map(|account| {
                         let balance = book.summary(&account.id).balance;
                         (account.clone(), format_money(balance, &account.currency))
@@ -107,6 +106,7 @@ impl Workspace {
             let transfer = book.clone();
             let add = book.clone();
             let edit = book.clone();
+            let manage = book.clone();
             menu.separator()
                 .item(
                     PopupMenuItem::new("New transfer…")
@@ -128,6 +128,13 @@ impl Workspace {
                         .disabled(current.is_none())
                         .on_click(move |_, window, cx| {
                             crate::accounts::open_account_dialog(&edit, current.clone(), window, cx)
+                        }),
+                )
+                .item(
+                    PopupMenuItem::new("Accounts…")
+                        .icon(Lucide::Wallet)
+                        .on_click(move |_, window, cx| {
+                            crate::accounts::open_accounts(&manage, window, cx)
                         }),
                 )
         })

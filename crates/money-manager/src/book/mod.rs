@@ -57,6 +57,7 @@ pub struct Book {
     /// Gone while a sync has it.
     store: Option<Store>,
     accounts: Vec<Account>,
+    account_preferences: money_core::account_preferences::AccountPreferences,
     expense_categories: Vec<Category>,
     income_categories: Vec<TopUpCategory>,
     expenses: Vec<Expense>,
@@ -125,6 +126,7 @@ impl Book {
     }
 
     /// Opens the ledger in `dir`, creating an empty one if nothing is there.
+    /// The synced main account takes precedence over legacy selection memory.
     /// No account is made: a ledger about to be filled by its first sync must
     /// not get a fresh default account that would outrank the synced one.
     pub fn open(dir: &Path, source: u64, last_account: Option<String>) -> Result<Self, String> {
@@ -132,6 +134,7 @@ impl Book {
         let mut book = Book {
             store: Some(store),
             accounts: Vec::new(),
+            account_preferences: Default::default(),
             expense_categories: Vec::new(),
             income_categories: Vec::new(),
             expenses: Vec::new(),
@@ -148,6 +151,10 @@ impl Book {
             sync: SyncState::Idle,
         };
         book.reload()?;
+        if let Some(main) = book.account_preferences.main_id() {
+            book.account = main.to_vec();
+            book.reload()?;
+        }
         Ok(book)
     }
 
@@ -156,6 +163,18 @@ impl Book {
     pub fn ensure_default_account(&mut self, currency: &str) -> Result<(), String> {
         let store = self.store.as_mut().ok_or(SYNCING)?;
         Account::ensure_default(store, currency)?;
+        self.reload()
+    }
+
+    pub fn create_first_account(&mut self, name: &str, currency: &str) -> Result<(), String> {
+        let store = self.store.as_mut().ok_or(SYNCING)?;
+        Account::create_with_id(
+            store,
+            &money_core::store::DEFAULT_ACCOUNT_ID,
+            name,
+            currency,
+            0.0,
+        )?;
         self.reload()
     }
 
@@ -169,6 +188,8 @@ impl Book {
         self.accounts = Account::read_all(store)?;
         self.accounts
             .sort_by(|a, b| a.name.cmp(&b.name).then(a.id.cmp(&b.id)));
+        self.account_preferences =
+            money_core::account_preferences::AccountPreferences::read(store, &self.accounts);
         self.expense_categories = Category::read_all(store)?;
         self.expense_categories.sort_by(|a, b| a.name.cmp(&b.name));
         self.income_categories = TopUpCategory::read_all(store)?;
@@ -183,16 +204,13 @@ impl Book {
             &self.transfers,
         );
 
-        // The account being looked at may be gone after a sync, or never
-        // have been chosen: the default one, then whichever comes first.
-        if !self.accounts.iter().any(|a| a.id == self.account) {
+        // A hidden or missing selection falls back to the resolved main account.
+        if !self.visible_accounts().any(|a| a.id == self.account) {
             self.account = self
-                .accounts
-                .iter()
-                .find(|a| a.id == money_core::store::DEFAULT_ACCOUNT_ID)
-                .or(self.accounts.first())
-                .map(|a| a.id.clone())
-                .unwrap_or_default();
+                .account_preferences
+                .main_id()
+                .unwrap_or_default()
+                .to_vec();
         }
         self.ledger = match self.current_account() {
             Some(account) => ledger::ledger_for(
@@ -227,6 +245,39 @@ impl Book {
 
     pub fn accounts(&self) -> &[Account] {
         &self.accounts
+    }
+
+    pub fn visible_accounts(&self) -> impl Iterator<Item = &Account> {
+        self.accounts
+            .iter()
+            .filter(|account| !self.is_account_hidden(&account.id))
+    }
+
+    pub fn is_account_hidden(&self, id: &[u8]) -> bool {
+        self.account_preferences.is_hidden(id)
+    }
+
+    pub fn main_account(&self) -> Option<&Account> {
+        self.accounts
+            .iter()
+            .find(|account| self.account_preferences.main_id() == Some(account.id.as_slice()))
+    }
+
+    pub fn set_account_hidden(
+        &mut self,
+        id: &[u8],
+        hidden: bool,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        self.write(cx, |store| {
+            money_core::account_preferences::AccountPreferences::set_hidden(store, id, hidden)
+        })
+    }
+
+    pub fn set_main_account(&mut self, id: &[u8], cx: &mut Context<Self>) -> Result<(), String> {
+        self.write(cx, |store| {
+            money_core::account_preferences::AccountPreferences::set_main(store, id)
+        })
     }
 
     pub fn current_account(&self) -> Option<&Account> {
@@ -323,7 +374,7 @@ impl Book {
     // ------------------------------------------------------------ writing
 
     pub fn select_account(&mut self, account_id: &[u8], cx: &mut Context<Self>) {
-        if self.account == account_id || !self.accounts.iter().any(|a| a.id == account_id) {
+        if self.account == account_id || !self.visible_accounts().any(|a| a.id == account_id) {
             return;
         }
         self.account = account_id.to_vec();
@@ -634,7 +685,7 @@ mod tests {
     }
 
     #[test]
-    fn the_account_last_looked_at_is_restored_when_it_still_exists() {
+    fn the_main_account_is_opened_instead_of_the_last_viewed_account() {
         let dir = scratch("last-account");
         let other = {
             let mut store = Store::open(&dir, 7).unwrap();
@@ -643,15 +694,55 @@ mod tests {
                 .unwrap()
                 .id
         };
-        let book = Book::open(&dir, 7, Some(hex_encode(&other))).unwrap();
+        let mut store = Store::open(&dir, 7).unwrap();
+        money_core::account_preferences::AccountPreferences::set_main(&mut store, &other).unwrap();
+        let book = Book::open(
+            &dir,
+            7,
+            Some(hex_encode(&money_core::store::DEFAULT_ACCOUNT_ID)),
+        )
+        .unwrap();
         assert_eq!(book.current_account().unwrap().name, "Savings");
 
-        // One that is gone falls back to the default account.
+        // A stale local setting cannot override the synced main account.
         let book = Book::open(&dir, 7, Some("abcd".to_string())).unwrap();
+        assert_eq!(book.current_account().unwrap().id, other);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn hiding_the_selected_account_switches_to_the_main_without_changing_transfers() {
+        let dir = scratch("hidden-account");
+        let mut store = Store::open(&dir, 7).unwrap();
+        Account::ensure_default(&mut store, "RUB").unwrap();
+        let other = Account::create(&mut store, "Savings", "USD", 0.0).unwrap();
+        let mut book = Book::open(&dir, 7, None).unwrap();
+        book.account = other.id.clone();
+        money_core::account_preferences::AccountPreferences::set_hidden(
+            book.store.as_mut().unwrap(),
+            &other.id,
+            true,
+        )
+        .unwrap();
+        book.reload().unwrap();
         assert_eq!(
             book.current_account().unwrap().id,
-            money_core::store::DEFAULT_ACCOUNT_ID.to_vec()
+            money_core::store::DEFAULT_ACCOUNT_ID
         );
+        assert_eq!(book.accounts().len(), 2);
+        assert_eq!(book.visible_accounts().count(), 1);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_named_first_account_is_preserved_after_reopening() {
+        let dir = scratch("named-account");
+        let mut book = Book::open(&dir, 7, None).unwrap();
+        book.create_first_account("Cash", "EUR").unwrap();
+        let mut book = Book::open(&dir, 8, None).unwrap();
+        book.ensure_default_account("USD").unwrap();
+        assert_eq!(book.current_account().unwrap().name, "Cash");
+        assert_eq!(book.currency(), "EUR");
         std::fs::remove_dir_all(&dir).ok();
     }
 

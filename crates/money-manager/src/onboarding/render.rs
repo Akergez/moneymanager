@@ -39,6 +39,10 @@ impl Onboarding {
     fn render_create(&self, cx: &mut Context<Self>) -> AnyElement {
         v_flex()
             .gap_4()
+            .child(ui::field(
+                "Account name",
+                Input::new(&self.account_name).large(),
+            ))
             .child(
                 ui::field("Currency", Input::new(&self.currency).large()).child(
                     div()

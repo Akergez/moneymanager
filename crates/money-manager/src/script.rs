@@ -28,6 +28,7 @@
 //! - `mode=expense|income`
 //! - `layout=phone|tablet|desktop`
 //! - `account=<name>` — the account every screen is about
+//! - `main-account=<name>`, `visible-accounts=<n>` — synced account preferences
 //! - `accounts=<n>`, `records=<n>`, `categories=<n>` — how many there are, the
 //!   last two of the current kind
 //! - `balance=<amount>` — the current account's, as the top bar writes it
@@ -239,6 +240,11 @@ fn observe(what: &str, window: &mut Window, cx: &mut App) -> Option<String> {
             .map(|account| account.name.clone())
             .unwrap_or_default(),
         "accounts" => book.accounts().len().to_string(),
+        "visible-accounts" => book.visible_accounts().count().to_string(),
+        "main-account" => book
+            .main_account()
+            .map(|account| account.name.clone())
+            .unwrap_or_default(),
         "records" => book.entries(mode).len().to_string(),
         "categories" => book.categories(mode).len().to_string(),
         "bars-chosen" => workspace.charts().read(cx).chosen_counts().0.to_string(),

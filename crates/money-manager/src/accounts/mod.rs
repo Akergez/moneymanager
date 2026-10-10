@@ -2,10 +2,12 @@
 //!
 //! Choosing the account is the workspace's (it is at the top of every
 //! screen). What lives here are the two dialogs behind its menu: an account's
-//! own details, and a transfer.
+//! own details, a transfer, and the list for visibility and startup choice.
 
 mod account_dialog;
+mod accounts_view;
 mod transfer_dialog;
 
 pub use account_dialog::open_account_dialog;
+pub use accounts_view::open_accounts;
 pub use transfer_dialog::open_transfer_dialog;

@@ -1,0 +1,23 @@
+# mode: fresh
+# size: 1240x800
+# restart: wait:2000;expect:stage=workspace;expect:account=Cash;expect:main-account=Cash;expect:balance=0.00 €;quit
+# The name and currency entered at creation survive reopening.
+wait:2000
+click:620,428
+wait:600
+expect:onboarding=create
+click:530,432
+key:ctrl-a
+type:Cash
+click:530,528
+key:ctrl-a
+type:EUR
+key:enter
+wait:1200
+expect:stage=workspace
+expect:accounts=1
+expect:main-account=Cash
+expect:account=Cash
+expect:balance=0.00 €
+expect:records=0
+quit

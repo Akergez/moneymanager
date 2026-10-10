@@ -12,6 +12,7 @@
 #
 #   # mode: demo | fresh | legacy      the sample ledger, or an installation with none
 #   # size: 1240x800          the window it was written against
+#   # restart: wait:2000;expect:account=Cash;quit   optional second launch
 #
 # It passes when the application reaches the script's `quit` and exits with
 # status 0: an `expect:` step that does not hold exits with 1, a crash exits
@@ -169,6 +170,15 @@ assert settings['theme'] == 'light' and settings['default_currency'] == 'RUB'
 PY_CHECK
     env "${env[@]}" MONEY_MANAGER_SCRIPT="wait:2000;expect:stage=workspace;expect:records=1;expect:remote=no;expect:dialog=closed;quit" \
       timeout "$timeout_s" "$app" >"$home/restart.log" 2>&1 || status=$?
+  fi
+
+  restart=$(header "$file" restart)
+  if (( status == 0 )) && [[ -n $restart ]]; then
+    env "${env[@]}" MONEY_MANAGER_SCRIPT="$restart" \
+      timeout "$timeout_s" "$app" >"$home/restart.log" 2>&1 || status=$?
+    if (( status != 0 )); then
+      cat "$home/restart.log" >> "$home/app.log"
+    fi
   fi
 
   if (( status == 0 )); then

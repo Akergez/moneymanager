@@ -1,0 +1,49 @@
+# mode: demo
+# size: 1240x800
+# restart: wait:2000;expect:stage=workspace;expect:account=Savings;expect:main-account=Savings;expect:visible-accounts=2;expect:balance=1 716.50 $;quit
+# Hide/show preserve transfers and balances. Main choice survives a restart
+# even when a different account was last viewed.
+wait:2500
+expect:accounts=2
+expect:visible-accounts=2
+expect:main-account=Основной
+click:160,16
+wait:500
+key:up
+key:enter
+wait:800
+expect:dialog=open
+click:530,242
+wait:400
+expect:main-account=Savings
+expect:account=Основной
+click:440,325
+wait:400
+expect:visible-accounts=1
+expect:accounts=2
+expect:account=Savings
+expect:balance=1 716.50 $
+click:440,325
+wait:400
+expect:visible-accounts=2
+click:440,242
+wait:400
+expect:visible-accounts=1
+expect:account=Основной
+expect:main-account=Основной
+expect:records=44
+expect:balance=1 054 237.45 ₽
+click:440,325
+wait:400
+expect:visible-accounts=1
+click:440,242
+wait:400
+expect:visible-accounts=2
+expect:main-account=Savings
+expect:account=Основной
+expect:records=44
+expect:balance=1 054 237.45 ₽
+key:escape
+wait:400
+expect:dialog=closed
+quit

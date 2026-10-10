@@ -34,8 +34,7 @@ impl TransferForm {
         let (choices, current) = {
             let book = book.read(cx);
             let choices: Vec<Choice> = book
-                .accounts()
-                .iter()
+                .visible_accounts()
                 .map(|account| {
                     Choice::new(
                         account.id.clone(),
@@ -192,7 +191,7 @@ impl Render for TransferForm {
 pub fn open_transfer_dialog(book: &Entity<Book>, window: &mut Window, cx: &mut App) {
     // A transfer needs somewhere to go: with one account, the next step is
     // making the second, and that is where this leads.
-    if book.read(cx).accounts().len() < 2 {
+    if book.read(cx).visible_accounts().count() < 2 {
         window.push_notification(
             Notification::info("A transfer needs two accounts. Add the second one first."),
             cx,

@@ -132,7 +132,7 @@ balances or presentation settings.
 
 With no ledger on the device the application asks which there should be:
 
-- **Create a new ledger** — asks for the currency of the first account and
+- **Create a new ledger** — asks for the name and currency of the first account and
   starts empty. Sync storage can be added later in Settings.
 - **Connect to sync storage** — brings in a ledger that already syncs. The
   storage is given either as one **config string** (`tresse://…`, exported by
@@ -159,7 +159,9 @@ and the flatpak has no filesystem access at all.
 On Android both are under the application's internal data directory.
 
 `settings.json` contains interface preferences, `default_currency` and
-`last_account`. Old `source` and `remote` keys are removed after conversion.
+`last_account` (legacy selection memory). Account visibility and the main
+account are stored in the synced RDX ledger instead. Old `source` and `remote`
+keys are removed after conversion.
 Tresse configuration has one source of truth:
 
 - `tresse.toml` at the worktree root: tracked language and ignore rules;
@@ -210,9 +212,10 @@ moved into the ledger the first time it is opened.
 The internal record schema is unchanged from the terminal version;
 `crates/money-core/src/store.rs` describes it:
 
-- The document is a tuple of six collections: categories, expenses, income
-  categories, income, accounts, transfers. A record is a tuple whose first
-  child is its hex id.
+- The document is a tuple of seven collections: categories, expenses, income
+  categories, income, accounts, transfers, and account preferences (an optional
+  trailing collection, absent in older ledgers). A record is a tuple whose first
+  child is its key: a hex ID for domain records or a name for preferences.
 - Every write is stamped (source + Lamport time); a newer write replaces the
   record, and a deletion is a tombstone. This is what makes two devices'
   changes merge.
@@ -222,6 +225,22 @@ The internal record schema is unchanged from the terminal version;
   `tresse commit` commits the accumulated edits. Native RDX diff, content
   fragmentation and synchronization belong to Tresse. Sync then exchanges
   objects, restores incoming versions and reloads the ledger.
+
+**Accounts…** in the account menu lists every account, including hidden ones.
+**Hide** removes an account from the account menu and transfer selectors;
+**Show** restores it. History, transfers, balances and CSV exports stay intact.
+**Make main** chooses the account opened at startup and also shows it if hidden.
+These choices sync with the ledger. Hiding the last visible account is refused.
+
+Visibility uses separate `hidden:<account-id>` records, so renaming an account
+cannot overwrite its visibility. The main account is one `main_account` record
+containing an account ID. Concurrent main choices merge by the RDX stamp's
+deterministic last-write-wins order. If that account is hidden or missing, the
+visible default account, then the visible account with the smallest ID, is used.
+If concurrent hides leave every account hidden, the default account (or the
+smallest ID) stays visible as the effective main account. A later **Show** writes
+a fresh stamp and restores the account normally. There is always exactly one
+effective main account when the ledger has accounts.
 
 A device joining a ledger syncs **first** and only then makes sure the default
 account exists: made before the first sync, its fresh stamp would win over the

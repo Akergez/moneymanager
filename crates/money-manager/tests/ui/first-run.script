@@ -9,7 +9,7 @@ expect:onboarding=choose
 click:620,428
 wait:600
 expect:onboarding=create
-click:794,567
+click:794,615
 wait:1200
 expect:stage=workspace
 expect:accounts=1

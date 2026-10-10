@@ -1,15 +1,15 @@
 //! RDX-backed persistence: replaces the former SQLite/diesel layer.
 //!
-//! The dataset is a CRDT document — a positional [`Tuple`] of six [`Eulerian`]
+//! The dataset is a CRDT document — a positional [`Tuple`] of seven [`Eulerian`]
 //! collections (categories, expenses, top-up categories, top-ups, accounts,
-//! transfers, in the order of the `*_IDX` constants below). Each record is a
-//! `Tuple` whose first child is its hex id (the Eulerian map key); the rest are
-//! fields. Per-record stamps give last-write-wins semantics and tombstones mark
+//! transfers, then account preferences, in the order of the `*_IDX` constants below). Each record is a
+//! `Tuple` whose first child is its key (a hex id for domain records, a name for
+//! preferences); the rest are fields. Per-record stamps give last-write-wins semantics and tombstones mark
 //! deletions.
 //!
 //! Collections are merged positionally with zero-padding, so documents written
 //! with fewer collections (legacy, pre-accounts) merge losslessly into this
-//! six-collection shape; and a record missing a trailing field reads as empty.
+//! seven-collection shape; and a record missing a trailing field reads as empty.
 //!
 //! `ledger.rdx` is a native RDX file inside a standard Tresse repository.
 //! Tresse owns deltas, version history, CAS, locking and remote synchronization.
@@ -32,7 +32,8 @@ pub const TOP_UP_CATEGORIES_IDX: usize = 2;
 pub const TOP_UPS_IDX: usize = 3;
 pub const ACCOUNTS_IDX: usize = 4;
 pub const TRANSFERS_IDX: usize = 5;
-const COLLECTION_COUNT: usize = 6;
+pub const ACCOUNT_PREFERENCES_IDX: usize = 6;
+const COLLECTION_COUNT: usize = 7;
 
 /// Fixed id of the implicit default account. Existing records with no
 /// `account_id` belong to it; the id is deterministic so two devices creating
@@ -242,7 +243,7 @@ impl Store {
     }
 }
 
-/// An empty document: a 6-tuple of empty Eulerian collections.
+/// An empty document, including the optional trailing preferences collection.
 fn empty_doc() -> RdxElement {
     let cols = (0..COLLECTION_COUNT)
         .map(|_| RdxElement::new(RdxValue::Eulerian(Vec::new())))

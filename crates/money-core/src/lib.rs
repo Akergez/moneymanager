@@ -13,6 +13,7 @@
 //! The internal record schema is preserved during migration; storage and the
 //! remote protocol now belong to Tresse.
 
+pub mod account_preferences;
 pub mod csv;
 pub mod format;
 pub mod ledger;
