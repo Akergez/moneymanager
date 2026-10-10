@@ -109,7 +109,9 @@ impl Store {
             .map(|d| d.as_secs())
             .unwrap_or(0)
             << 6;
-        let time = wall.max(self.clock + TIME_STEP);
+        // Revisions include the tombstone bit. A fresh write starts at the
+        // next tick with a live revision instead of inheriting a deletion.
+        let time = wall.max((self.clock & !(TIME_STEP - 1)) + TIME_STEP);
         self.clock = time;
         Stamp::new(self.source, time)
     }
@@ -336,6 +338,9 @@ pub fn migrate_legacy(old: &Path, new: &Path, source: u64) -> Result<usize, Stri
     let doc = rdx_rs::merge(&committed, &staged);
     let mut store = Store::open(new, source)?;
     store.merge_document(&doc)?;
+    // Migration deliberately creates one baseline before retaining the old
+    // directory as a backup. Ordinary edits remain uncommitted until sync.
+    store.seal()?;
     Ok(count_records(&doc))
 }
 
@@ -674,7 +679,8 @@ mod tests {
     }
 
     #[test]
-    fn writes_are_native_files_and_tresse_versions() {
+    fn writes_are_persisted_native_files_without_tresse_objects() {
+        use rdx_sync::{ChunkClass, ObjectStore};
         let dir = temp_dir("native");
         let mut store = Store::open(&dir, 7).unwrap();
         Category::create(&mut store, "A").unwrap();
@@ -682,9 +688,65 @@ mod tests {
         assert!(dir.join(LEDGER_FILE).is_file());
         assert!(!dir.join("staging.rdx").exists());
         assert!(dir.join(".tresse/meta").is_dir());
+        let local = rdx_sync_fs::FileObjectStore::open(dir.join(".tresse")).unwrap();
+        assert!(local.list_objects(ChunkClass::Meta).unwrap().is_empty());
+        assert!(local.list_objects(ChunkClass::Content).unwrap().is_empty());
         let reopened = Store::open(&dir, 7).unwrap();
         assert_eq!(Category::read_all(&reopened).unwrap().len(), 2);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn ledger_operations_and_csv_import_do_not_grow_tresse_history_or_blobs() {
+        use rdx_sync::{ChunkClass, ObjectStore};
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(dir.path(), 7).unwrap();
+        let from = Account::create(&mut store, "Карта", "RUB", 0.0).unwrap();
+        let to = Account::create(&mut store, "Доллары", "USD", 0.0).unwrap();
+        let expense_category = Category::create(&mut store, "Еда").unwrap();
+        let income_category = TopUpCategory::create(&mut store, "Зарплата").unwrap();
+        store.seal().unwrap();
+        let local = rdx_sync_fs::FileObjectStore::open(dir.path().join(".tresse")).unwrap();
+        let meta = local.list_objects(ChunkClass::Meta).unwrap();
+        let content = local.list_objects(ChunkClass::Content).unwrap();
+        let date = NaiveDate::from_ymd_opt(2026, 10, 11).unwrap();
+        for _ in 0..10 {
+            Expense::create(&mut store, &expense_category.id, 12.5, None, date, &from.id).unwrap();
+            TopUp::create(&mut store, &income_category.id, 100.0, None, date, &from.id).unwrap();
+        }
+        let transfer =
+            Transfer::create(&mut store, &from.id, &to.id, 900.0, 10.0, None, date).unwrap();
+        Transfer::delete(&mut store, &transfer.id).unwrap();
+        crate::csv::import(
+            &mut store,
+            concat!(
+                "2026-10-11,расход,Карта,Еда,1,RUB,,,\n",
+                "2026-10-11,доход,Карта,Зарплата,,,2,RUB,\n",
+                "2026-10-11,перевод,Карта,Доллары,90,RUB,1,USD,\n",
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        let reopened = Store::open(dir.path(), 7).unwrap();
+        assert_eq!(Expense::read_all(&reopened).unwrap().len(), 11);
+        assert_eq!(TopUp::read_all(&reopened).unwrap().len(), 11);
+        assert_eq!(Transfer::read_all(&reopened).unwrap().len(), 1);
+        assert_eq!(local.list_objects(ChunkClass::Meta).unwrap(), meta);
+        assert_eq!(local.list_objects(ChunkClass::Content).unwrap(), content);
+    }
+
+    #[test]
+    fn creating_a_record_after_a_deletion_does_not_inherit_the_tombstone() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(dir.path(), 7).unwrap();
+        let removed = Category::create(&mut store, "Removed").unwrap();
+        Category::delete(&mut store, &removed.id).unwrap();
+        let created = Category::create(&mut store, "Live").unwrap();
+        let reopened = Store::open(dir.path(), 7).unwrap();
+        let categories = Category::read_all(&reopened).unwrap();
+        assert_eq!(categories.len(), 1);
+        assert_eq!(categories[0].id, created.id);
     }
 
     #[test]

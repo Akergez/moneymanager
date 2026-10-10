@@ -216,10 +216,12 @@ The internal record schema is unchanged from the terminal version;
 - Every write is stamped (source + Lamport time); a newer write replaces the
   record, and a deletion is a tombstone. This is what makes two devices'
   changes merge.
-- Each local write atomically updates `ledger.rdx` and commits a Tresse
-  version. Native RDX diff, content fragmentation and synchronization belong
-  to Tresse. Sync commits local edits, exchanges objects, restores incoming
-  versions and reloads the ledger.
+- Each local write atomically updates `ledger.rdx` under the shared repository
+  lock, without creating a Tresse version or CAS objects. Reopening the
+  application preserves these uncommitted edits. Sync or an explicit
+  `tresse commit` commits the accumulated edits. Native RDX diff, content
+  fragmentation and synchronization belong to Tresse. Sync then exchanges
+  objects, restores incoming versions and reloads the ledger.
 
 A device joining a ledger syncs **first** and only then makes sure the default
 account exists: made before the first sync, its fresh stamp would win over the

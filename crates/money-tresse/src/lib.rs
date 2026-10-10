@@ -35,10 +35,12 @@ pub fn recover(root: &Path) -> Result<(), String> {
     commands::restore::run(root, None).map_err(|e| e.to_string())
 }
 
-/// Edit the worktree and commit under one repository lock. The callback must
-/// read the file afresh: another client may have changed it since the last view.
+/// Edit the worktree under the repository lock, settling interrupted operations
+/// first. This does not commit or create CAS objects; sync or an explicit commit
+/// versions the accumulated edits. The callback must read the file afresh and
+/// persist its changes atomically.
 pub fn edit(root: &Path, write: impl FnOnce() -> Result<(), String>) -> Result<(), String> {
-    commands::commit::run_with(root, || write().map_err(Into::into)).map_err(|e| e.to_string())
+    operation::edit_worktree(root, || write().map_err(Into::into)).map_err(|e| e.to_string())
 }
 
 pub fn commit(root: &Path) -> Result<(), String> {

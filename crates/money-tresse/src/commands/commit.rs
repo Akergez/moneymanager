@@ -13,13 +13,6 @@ use crate::config::TresseConfig;
 use crate::fs_writer::{DiskSource, build_shape};
 
 pub fn run(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    run_with(root, || Ok(()))
-}
-
-pub fn run_with(
-    root: &Path,
-    write: impl FnOnce() -> Result<(), Box<dyn std::error::Error>>,
-) -> Result<(), Box<dyn std::error::Error>> {
     let tresse_dir = root.join(".tresse");
     if !tresse_dir.is_dir() {
         return Err("not a tresse repository; run `tresse init` first".into());
@@ -31,7 +24,6 @@ pub fn run_with(
     let mut operation =
         crate::operation::begin(root, OperationKind::Commit, [Step::new(StepKind::Commit)])?;
     operation.start(StepKind::Commit)?;
-    write()?;
     let config = TresseConfig::load(root)?;
     let mut local = open_local_store(root)?;
     let meta = load_merged_meta(&local)?;

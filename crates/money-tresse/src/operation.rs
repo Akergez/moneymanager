@@ -25,6 +25,20 @@ type Failure = Box<dyn std::error::Error>;
 
 const APP: &str = "money-manager";
 
+/// A local atomic file edit needs the shared lock and recovery, but no commit
+/// journal: recovery must never turn an ordinary save into a version.
+pub(crate) fn edit_worktree(
+    root: &Path,
+    write: impl FnOnce() -> Result<(), Failure>,
+) -> Result<(), Failure> {
+    if !root.join(TRESSE_DIR).is_dir() {
+        return Err("not a tresse repository; run `tresse init` first".into());
+    }
+    let _lock = RepoLock::acquire(root)?;
+    settle(root)?;
+    write()
+}
+
 /// Блокировка репозитория на время одной операции.
 ///
 /// Блокировку ОС отпускает сама система, когда процесс умирает, — зависших

@@ -46,6 +46,66 @@ fn read(root: &Path) -> RdxElement {
 }
 
 #[test]
+fn worktree_edits_do_not_create_versions_or_cas_objects() {
+    use rdx_sync::{ChunkClass, ObjectStore};
+
+    let dir = tempfile::tempdir().unwrap();
+    setup(dir.path());
+    write(dir.path(), &record("baseline", 1, 64));
+    crate::commit(dir.path()).unwrap();
+    let local = crate::cas::open_local_store(dir.path()).unwrap();
+    let meta = local.list_objects(ChunkClass::Meta).unwrap();
+    let content = local.list_objects(ChunkClass::Content).unwrap();
+    for time in [128, 192, 256] {
+        write(dir.path(), &record("baseline", 1, time));
+    }
+    crate::recover(dir.path()).unwrap();
+    assert_eq!(read(dir.path()), record("baseline", 1, 256));
+    assert_eq!(local.list_objects(ChunkClass::Meta).unwrap(), meta);
+    assert_eq!(local.list_objects(ChunkClass::Content).unwrap(), content);
+    assert_eq!(
+        crate::cas::load_merged_meta(&local).unwrap().versions.len(),
+        1
+    );
+    crate::commit(dir.path()).unwrap();
+    assert_eq!(
+        crate::cas::load_merged_meta(&local).unwrap().versions.len(),
+        2
+    );
+}
+
+#[test]
+fn an_edit_restores_pending_remote_changes_before_reading_the_worktree() {
+    use rdx_sync::{ChunkClass, ObjectStore};
+
+    let a = tempfile::tempdir().unwrap();
+    let b = tempfile::tempdir().unwrap();
+    setup(a.path());
+    setup(b.path());
+    let mut transport = MemRemoteKv::new();
+    write(a.path(), &record("remote", 1, 64));
+    crate::sync_with(a.path(), &mut transport).unwrap();
+    crate::commands::sync::exchange(b.path(), &mut transport, &[0; 32]).unwrap();
+    crate::hydrate(b.path(), &transport, &[0; 32]).unwrap();
+    assert!(b.path().join(tresse_lib::operation::PATH).exists());
+    let local = crate::cas::open_local_store(b.path()).unwrap();
+    let meta = local.list_objects(ChunkClass::Meta).unwrap();
+    let content = local.list_objects(ChunkClass::Content).unwrap();
+    let amended = rdx_rs::merge(&record("remote", 1, 64), &record("local", 2, 128));
+    crate::edit(b.path(), || {
+        assert_eq!(read(b.path()), record("remote", 1, 64));
+        std::fs::write(b.path().join("ledger.rdx"), rdx_rs::encode(&amended))
+            .map_err(|e| e.to_string())
+    })
+    .unwrap();
+    crate::recover(b.path()).unwrap();
+    assert_eq!(read(b.path()), amended);
+    assert!(!b.path().join(tresse_lib::operation::PATH).exists());
+    assert_eq!(local.list_objects(ChunkClass::Meta).unwrap(), meta);
+    assert_eq!(local.list_objects(ChunkClass::Content).unwrap(), content);
+}
+
+#[test]
 fn remotes_are_read_from_disk_after_another_client_changes_them() {
     let dir = tempfile::tempdir().unwrap();
     setup(dir.path());
@@ -77,6 +137,7 @@ fn equal_stat_metadata_does_not_hide_a_native_rdx_edit() {
         dir.path(),
         &RdxElement::with_stamp(RdxValue::Str("a".into()), Stamp::new(1, 64)),
     );
+    crate::commit(dir.path()).unwrap();
     let path = dir.path().join("ledger.rdx");
     let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
     crate::edit(dir.path(), || {
@@ -97,6 +158,7 @@ fn equal_stat_metadata_does_not_hide_a_native_rdx_edit() {
         Ok(())
     })
     .unwrap();
+    crate::commit(dir.path()).unwrap();
     let local = crate::cas::open_local_store(dir.path()).unwrap();
     assert_eq!(
         crate::cas::load_merged_meta(&local).unwrap().versions.len(),
