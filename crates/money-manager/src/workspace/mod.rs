@@ -75,6 +75,79 @@ pub struct Workspace {
 }
 
 impl Workspace {
+    fn csv_file(&mut self, export: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.book.read(cx).is_busy() {
+            window.push_notification(
+                Notification::error("The ledger is busy. Try again when it finishes."),
+                cx,
+            );
+            return;
+        }
+        let book = self.book.clone();
+        #[cfg(not(target_os = "android"))]
+        let save = export.then(|| {
+            cx.prompt_for_new_path(
+                &dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from(".")),
+                Some("transactions.csv"),
+            )
+        });
+        let open = (!export).then(|| {
+            cx.prompt_for_paths(gpui_kit::PathPromptOptions {
+                files: true,
+                directories: false,
+                multiple: false,
+                prompt: Some("Import CSV".into()),
+            })
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let result = async {
+                let path = if export {
+                    #[cfg(target_os = "android")]
+                    {
+                        None
+                    }
+                    #[cfg(not(target_os = "android"))]
+                    {
+                        let Some(save) = save else {
+                            return Ok(None);
+                        };
+                        save.await
+                            .map_err(|e| e.to_string())?
+                            .map_err(|e| e.to_string())?
+                    }
+                } else if let Some(open) = open {
+                    open.await
+                        .map_err(|e| e.to_string())?
+                        .map_err(|e| e.to_string())?
+                        .and_then(|paths| paths.into_iter().next())
+                } else {
+                    None
+                };
+                // Android saves directly to a SAF URI, without a filesystem path.
+                if path.is_none() && !(export && cfg!(target_os = "android")) {
+                    return Ok(None);
+                }
+                let task = book.update(cx, |book, cx| book.csv_file(path, export, cx))?;
+                task.await
+            }
+            .await;
+            this.update_in(cx, |_, window, cx| match result {
+                Ok(Some(count)) => window.push_notification(
+                    Notification::success(if export {
+                        "CSV exported".to_string()
+                    } else {
+                        format!("Imported {count} transactions")
+                    }),
+                    cx,
+                ),
+                Ok(None) => {}
+                Err(error) => window.push_notification(Notification::error(error), cx),
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     pub fn new(book: Entity<Book>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mode = Mode::default();
         let transactions = cx.new(|cx| TransactionsView::new(book.clone(), mode, window, cx));

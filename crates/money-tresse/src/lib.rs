@@ -11,6 +11,7 @@ mod config_share;
 mod file_index;
 mod fs_writer;
 mod operation;
+mod os_lock;
 mod restore_sink;
 mod storage;
 mod worktree;

@@ -46,6 +46,8 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("ctrl-n", NewRecord, Some(CONTEXT)),
         KeyBinding::new("ctrl-e", EditRecord, Some(CONTEXT)),
         KeyBinding::new("ctrl-t", NewTransfer, Some(CONTEXT)),
+        KeyBinding::new("ctrl-shift-i", ImportCsv, Some(CONTEXT)),
+        KeyBinding::new("ctrl-shift-e", ExportCsv, Some(CONTEXT)),
         KeyBinding::new("ctrl-s", SyncNow, Some(CONTEXT)),
         KeyBinding::new("ctrl-,", OpenSettings, Some(CONTEXT)),
     ]);

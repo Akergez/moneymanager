@@ -14,6 +14,8 @@ gpui_kit::actions!(
         NewRecord,
         EditRecord,
         NewTransfer,
+        ImportCsv,
+        ExportCsv,
         SyncNow,
         OpenSettings
     ]

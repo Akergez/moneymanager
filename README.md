@@ -32,6 +32,101 @@ are not compatible with the new repository protocol.
   expense on one account and an income on the other; deleting either side
   deletes both.
 - **Sync** — on demand, through Tresse, with S3 or an HTTP server.
+- **CSV** — import and export all accounts through the **More** menu (`…`) at
+  the top of the window. Shortcuts: `Ctrl+Shift+I` and `Ctrl+Shift+E`.
+
+## CSV import and export
+
+Open **More** (`…`) at the top of the window and choose **Import CSV…** or
+**Export CSV…**. The keyboard shortcuts are `Ctrl+Shift+I` and `Ctrl+Shift+E`.
+On Android, import opens the system document picker and export opens the system
+save dialog. Choosing a document grants access to that document; no storage
+permission is requested. Cancelling a picker leaves the ledger unchanged.
+
+Both commands use the same format: **UTF-8, comma-separated, exactly nine
+columns in the order below**. The column names and operation types are Russian
+regardless of the interface language. Empty fields still occupy a column, so
+keep their commas, including the trailing comma for an empty comment.
+
+| Column | Header | Value |
+|--------|--------|-------|
+| 1 | `дата` | Operation date. Export writes `YYYY-MM-DD`; import also accepts `DD.MM.YYYY`. |
+| 2 | `тип` | `расход` (expense), `доход` (income), or `перевод` (transfer). |
+| 3 | `счёт` | Account name. For a transfer, this is the source account. |
+| 4 | `категория или другой счет` | Expense/income category name, or the destination account name for a transfer. |
+| 5 | `сумма в валюте из` | Positive amount debited from the account; empty for income. |
+| 6 | `валюта из` | Source currency code, such as `RUB`; empty for income. |
+| 7 | `сумма в валюте в` | Positive amount credited to the account; empty for expenses. |
+| 8 | `валюта в` | Destination currency code, such as `USD`; empty for expenses. |
+| 9 | `коммент` | Optional comment; may contain commas, quotes and line breaks when quoted. |
+
+Which fields to fill depends on the operation:
+
+| Type | Column 4 | Source amount/currency (5–6) | Destination amount/currency (7–8) |
+|------|----------|-----------------------------|----------------------------------|
+| `расход` | Expense category | Required | Both empty |
+| `доход` | Income category | Both empty | Required |
+| `перевод` | Destination account | Required | Required |
+
+For transfers, the two accounts must differ. Both amounts are entered in their
+respective account currencies; the exchange rate is implied by their ratio.
+Currency codes must contain three ASCII letters. Import accepts lowercase
+codes and normalizes them to uppercase. Amounts must be finite and greater
+than zero; use a decimal point in exported files.
+
+### Example
+
+```csv
+дата,тип,счёт,категория или другой счет,сумма в валюте из,валюта из,сумма в валюте в,валюта в,коммент
+2026-10-01,доход,Карта,Зарплата,,,10000,RUB,
+2026-10-02,расход,Карта,Еда,125.55,RUB,,,Обед
+2026-10-03,перевод,Карта,Доллары,900,RUB,10,USD,Обмен
+```
+
+The example credits 10,000 RUB to `Карта`, debits 125.55 RUB for `Еда`, then
+transfers 900 RUB from `Карта` to `Доллары`, crediting 10 USD there.
+
+Use standard CSV quoting: enclose a field in double quotes if it contains a
+comma, double quote or line break, and double any quote inside it. Import also
+accepts a decimal comma inside a quoted amount:
+
+```csv
+2026-10-04,расход,Карта,Еда,"12,34",RUB,,,"Кофе, размер ""большой"""
+```
+
+### Import behavior
+
+The header is optional on import; if present, it must be the first row and the
+columns must retain the documented order. A UTF-8 BOM is accepted. Every
+operation row must contain all nine columns.
+
+Import appends operations to the existing ledger. Accounts are matched by
+name; categories are matched by name within their type (expense or income).
+Names are case-sensitive, with surrounding whitespace removed from imported
+names. Missing accounts are created in the specified currency with a zero
+opening balance; missing categories are created with the default style.
+Existing opening balances, account currencies and category styles are
+preserved; account balances change with the imported operations.
+
+An account currency that conflicts with the CSV, or multiple matching accounts
+or categories with the same name, causes an error. Invalid dates, operation
+types, amounts or field combinations also cause an error. The whole file is
+validated before saving, so an invalid row leaves the ledger unchanged.
+
+**Repeated imports add the operations again.** There are no operation IDs in
+this format, so import does not deduplicate or update existing operations.
+
+### Export behavior
+
+Export writes the header and all stored expenses, income and transfers from
+**all accounts**, ordered by date, regardless of the current account or screen.
+Each transfer is written once, with both amounts, rather than as two separate
+expense/income rows. Comments are escaped using standard CSV quoting.
+
+Opening balances, account/category IDs, category styles and sync settings are
+not included. This is an operation interchange format: importing an export
+into a fresh ledger restores its operations, but does not restore opening
+balances or presentation settings.
 
 ## First run
 
@@ -50,8 +145,8 @@ CLI; the GUI re-reads them when opening Settings and synchronizing.
 
 ## Where things are kept
 
-Everything is private to the application. Nothing is read from or written to
-your documents or to shared storage, so no storage permission is ever asked
+The ledger is private to the application. CSV files are read and written only
+at the locations chosen in the system file picker, so no storage permission is ever asked
 for — on a phone the Android manifest declares the network permission only,
 and the flatpak has no filesystem access at all.
 

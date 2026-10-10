@@ -5,8 +5,8 @@
 //! store, which is what keeps the native file, the in-memory document and
 //! what is on screen from ever disagreeing.
 //!
-//! A sync is the one slow operation — the Tresse client blocks — so it runs on a
-//! background thread *with the store moved into it*. For as long as it runs
+//! Sync and CSV file operations run on a background thread *with the store
+//! moved into it*. For as long as one runs
 //! the book has no store, and a write is refused with a reason rather than
 //! queued: a write that landed during the exchange would be
 //! written against a document that is about to be replaced.
@@ -70,9 +70,60 @@ pub struct Book {
     sync: SyncState,
 }
 
-const SYNCING: &str = "A sync is running. Try again when it finishes.";
+const SYNCING: &str = "The ledger is busy. Try again when it finishes.";
 
 impl Book {
+    /// Whether an operation currently owns the store on a background thread.
+    pub fn is_busy(&self) -> bool {
+        self.store.is_none()
+    }
+
+    /// Import or export the complete ledger without blocking the window.
+    pub fn csv_file(
+        &mut self,
+        path: Option<std::path::PathBuf>,
+        export: bool,
+        cx: &mut Context<Self>,
+    ) -> Result<gpui_kit::Task<Result<Option<usize>, String>>, String> {
+        let mut store = self.store.take().ok_or(SYNCING)?;
+        cx.notify();
+        Ok(cx.spawn(async move |book, cx| {
+            let (store, result) = cx
+                .background_spawn(async move {
+                    let result = (|| {
+                        if export {
+                            let mut bytes = Vec::new();
+                            money_core::csv::export(&store, &mut bytes)?;
+                            #[cfg(target_os = "android")]
+                            {
+                                crate::android_csv::export(&bytes).map(|saved| saved.then_some(0))
+                            }
+                            #[cfg(not(target_os = "android"))]
+                            {
+                                let path = path.ok_or("No export file selected")?;
+                                std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+                                Ok(Some(0))
+                            }
+                        } else {
+                            let path = path.ok_or("No import file selected")?;
+                            let file = std::fs::File::open(&path).map_err(|e| e.to_string())?;
+                            money_core::csv::import(&mut store, file).map(Some)
+                        }
+                    })();
+                    (store, result)
+                })
+                .await;
+            book.update(cx, |book, cx| {
+                book.store = Some(store);
+                let reload = book.reload();
+                cx.notify();
+                reload?;
+                result
+            })
+            .map_err(|e| e.to_string())?
+        }))
+    }
+
     /// Opens the ledger in `dir`, creating an empty one if nothing is there.
     /// No account is made: a ledger about to be filled by its first sync must
     /// not get a fresh default account that would outrank the synced one.

@@ -12,11 +12,12 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 
-/** GPUI file prompts import SAF documents into cache before releasing URI access. */
+/** SAF file access is used only while this Activity holds the temporary URI grant. */
 public final class GpuiPathPicker extends Activity {
     private static final int PICK_FILES = 9010;
     private static Request pending;
@@ -25,10 +26,14 @@ public final class GpuiPathPicker extends Activity {
     private static final class Request {
         final CountDownLatch done = new CountDownLatch(1);
         final boolean multiple;
+        final byte[] export;
         String[] paths;
         Exception error;
 
-        Request(boolean multiple) { this.multiple = multiple; }
+        Request(boolean multiple, byte[] export) {
+            this.multiple = multiple;
+            this.export = export;
+        }
 
         synchronized void complete(String[] paths, Exception error) {
             if (done.getCount() == 0) return;
@@ -40,10 +45,18 @@ public final class GpuiPathPicker extends Activity {
 
     /** Called by a Rust worker, never the UI or GPUI event thread. */
     public static String[] openFiles(Activity activity, boolean multiple) throws Exception {
+        return runRequest(activity, new Request(multiple, null));
+    }
+
+    /** Returns false on cancellation; write failures are propagated to Rust. */
+    public static boolean saveCsv(Activity activity, byte[] bytes) throws Exception {
+        return runRequest(activity, new Request(false, bytes)) != null;
+    }
+
+    private static String[] runRequest(Activity activity, Request current) throws Exception {
         if (Looper.myLooper() == Looper.getMainLooper()) {
             throw new IllegalStateException("File prompts must run on a worker thread");
         }
-        final Request current = new Request(multiple);
         synchronized (GpuiPathPicker.class) {
             if (pending != null) throw new IllegalStateException("A file picker is already open");
             pending = current;
@@ -72,11 +85,18 @@ public final class GpuiPathPicker extends Activity {
         // After process death the original GPUI request no longer exists.
         if (request == null) { finish(); return; }
         if (state != null) return;
-        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        Intent intent = new Intent(request.export == null
+                ? Intent.ACTION_OPEN_DOCUMENT : Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.setType("*/*");
-        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, request.multiple);
-        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        if (request.export == null) {
+            intent.setType("*/*");
+            intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, request.multiple);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } else {
+            intent.setType("text/csv");
+            intent.putExtra(Intent.EXTRA_TITLE, "transactions.csv");
+            intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+        }
         try {
             startActivityForResult(intent, PICK_FILES);
         } catch (Exception error) {
@@ -91,6 +111,24 @@ public final class GpuiPathPicker extends Activity {
         if (result != RESULT_OK || data == null) {
             request.complete(null, null);
             finish();
+            return;
+        }
+        if (request.export != null) {
+            Uri uri = data.getData();
+            new Thread(() -> {
+                try {
+                    if (uri == null) throw new IOException("No document selected");
+                    try (OutputStream output = getContentResolver().openOutputStream(uri, "wt")) {
+                        if (output == null) throw new IOException("Could not write selected document");
+                        output.write(request.export);
+                    }
+                    request.complete(new String[0], null);
+                } catch (Exception error) {
+                    request.complete(null, error);
+                } finally {
+                    runOnUiThread(this::finish);
+                }
+            }, "money-csv-export").start();
             return;
         }
         ArrayList<Uri> uris = new ArrayList<>();

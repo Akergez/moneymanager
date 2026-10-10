@@ -45,6 +45,14 @@
         android:theme="@style/GpuiTheme"
     >
 
+        <!-- SAF grants access only to the document the user chooses. -->
+        <activity
+            android:name="dev.gpui.mobile.GpuiPathPicker"
+            android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+        />
+
         <!--
           `configChanges` keeps the activity across rotation and the keyboard
           appearing: the Rust side is told through the NDK instead.

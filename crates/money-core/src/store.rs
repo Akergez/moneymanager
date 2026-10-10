@@ -134,6 +134,48 @@ impl Store {
         self.edit_record(idx, key, fields, false)
     }
 
+    /// Save a validated import in one native-file edit. No records are written
+    /// if preparing the import fails.
+    pub(crate) fn import_records(
+        &mut self,
+        records: Vec<(usize, String, Vec<RdxValue>)>,
+    ) -> Result<(), String> {
+        if records.is_empty() {
+            return Ok(());
+        }
+        let root = self.root.clone();
+        money_tresse::edit(&root, || {
+            let doc = read_doc(&root.join(LEDGER_FILE))?.unwrap_or_else(empty_doc);
+            self.clock = self.clock.max(max_time(&doc));
+            let mut collections: Vec<Vec<RdxElement>> = vec![Vec::new(); COLLECTION_COUNT];
+            for (idx, key, fields) in records {
+                let stamp = self.next_stamp();
+                let mut children = vec![RdxElement::with_stamp(RdxValue::Str(key), stamp)];
+                children.extend(
+                    fields
+                        .into_iter()
+                        .map(|value| RdxElement::with_stamp(value, stamp)),
+                );
+                let record = RdxElement::with_stamp(RdxValue::Tuple(children), stamp);
+                collections[idx].push(record);
+            }
+            let patch = RdxElement::new(RdxValue::Tuple(
+                collections
+                    .into_iter()
+                    .map(|mut records| {
+                        // Eulerian merge requires records ordered by their key.
+                        records.sort_by_cached_key(|record| child_str(record, 0));
+                        RdxElement::new(RdxValue::Eulerian(records))
+                    })
+                    .collect(),
+            ));
+            let doc = rdx_rs::merge(&doc, &patch);
+            write_doc(&root, &doc)?;
+            self.doc = doc;
+            Ok(())
+        })
+    }
+
     /// Tombstone a record; deletions remain native CRDT updates.
     pub fn delete(&mut self, idx: usize, key: &str) -> Result<(), String> {
         self.edit_record(idx, key, Vec::new(), true)

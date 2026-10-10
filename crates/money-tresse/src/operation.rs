@@ -49,7 +49,7 @@ impl RepoLock {
         };
         let os_lock = open(OS_LOCK_PATH)?;
         let mut record = open(LOCK_PATH)?;
-        match os_lock.try_lock() {
+        match crate::os_lock::try_lock(&os_lock) {
             Ok(()) => {}
             Err(TryLockError::WouldBlock) => return Err(busy(read_record(&mut record)).into()),
             Err(TryLockError::Error(error)) => return Err(error.into()),

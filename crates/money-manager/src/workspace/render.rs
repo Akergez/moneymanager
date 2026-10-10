@@ -13,8 +13,8 @@ use money_core::format::format_money;
 use super::{Screen, Workspace};
 use crate::book::Mode;
 use crate::shell::{
-    CONTEXT, EditRecord, Layout, NewRecord, NewTransfer, OpenSettings, ShowCategories, ShowCharts,
-    ShowTransactions, SyncNow, ToggleMode, title_frame,
+    CONTEXT, EditRecord, ExportCsv, ImportCsv, Layout, NewRecord, NewTransfer, OpenSettings,
+    ShowCategories, ShowCharts, ShowTransactions, SyncNow, ToggleMode, title_frame,
 };
 use crate::ui::{self, Lucide};
 
@@ -197,9 +197,7 @@ impl Workspace {
                 bar.child(self.render_mode_switch(layout, cx))
             })
             .child(div().flex_1())
-            .when(layout.is_phone(), |bar| {
-                bar.child(self.render_more_menu(cx))
-            });
+            .child(self.render_more_menu(cx));
         title_frame(controls.pr_2(), cx)
     }
 
@@ -234,6 +232,7 @@ impl Workspace {
             &SyncNow,
         )
         .loading(syncing)
+        .disabled(self.book.read(cx).is_busy())
         .on_click(cx.listener(|this, _, window, cx| this.sync_now(window, cx)));
         let settings = command(
             Button::new("settings").ghost(),
@@ -344,6 +343,7 @@ impl Workspace {
     fn render_more_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let workspace = cx.entity();
         let syncing = self.book.read(cx).is_syncing();
+        let busy = self.book.read(cx).is_busy();
         Button::new("more")
             .icon(Lucide::Ellipsis)
             .ghost()
@@ -351,10 +351,22 @@ impl Workspace {
             .accessibility_label("More")
             .dropdown_menu(move |menu, _, _| {
                 let (sync, settings) = (workspace.clone(), workspace.clone());
-                menu.item(
+                let (import, export) = (workspace.clone(), workspace.clone());
+                menu.item(PopupMenuItem::new("Import CSV…").disabled(busy).on_click(
+                    move |_, window, cx| {
+                        import.update(cx, |this, cx| this.csv_file(false, window, cx))
+                    },
+                ))
+                .item(PopupMenuItem::new("Export CSV…").disabled(busy).on_click(
+                    move |_, window, cx| {
+                        export.update(cx, |this, cx| this.csv_file(true, window, cx))
+                    },
+                ))
+                .separator()
+                .item(
                     PopupMenuItem::new("Sync")
                         .icon(Lucide::RefreshCw)
-                        .disabled(syncing)
+                        .disabled(busy)
                         .on_click(move |_, window, cx| {
                             sync.update(cx, |this, cx| this.sync_now(window, cx))
                         }),
@@ -428,6 +440,12 @@ impl Render for Workspace {
                 cx.listener(|this, _: &NewTransfer, window, cx| this.new_transfer(window, cx)),
             )
             .on_action(cx.listener(|this, _: &SyncNow, window, cx| this.sync_now(window, cx)))
+            .on_action(
+                cx.listener(|this, _: &ImportCsv, window, cx| this.csv_file(false, window, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &ExportCsv, window, cx| this.csv_file(true, window, cx)),
+            )
             .on_action(
                 cx.listener(|this, _: &OpenSettings, window, cx| this.open_settings(window, cx)),
             )

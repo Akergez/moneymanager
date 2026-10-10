@@ -19,6 +19,8 @@
 //! [`android_main`]. Everywhere else `main.rs` calls [`run`].
 
 mod accounts;
+#[cfg(target_os = "android")]
+mod android_csv;
 mod appearance;
 mod assets;
 mod book;

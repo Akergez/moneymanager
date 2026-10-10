@@ -11,6 +11,15 @@ The ledger and the settings are kept in the application's private directory
 at it). The manifest declares the network permission and nothing else: no
 storage permission exists to be asked for.
 
+CSV import and export use the Android Storage Access Framework. **Import CSV…**
+opens the system document picker; **Export CSV…** opens the system save dialog.
+Choosing a document grants access only to that document. The import is copied
+to the private cache while the temporary read grant is active; export writes
+through `ContentResolver` while the temporary write grant is active. Cancelling
+either picker makes no change to the ledger. No persistent URI access or
+`READ_EXTERNAL_STORAGE`, `WRITE_EXTERNAL_STORAGE`, or `MANAGE_EXTERNAL_STORAGE`
+permission is requested.
+
 ## What is needed
 
 - The Android SDK with a platform (`android-36`) and build tools, and an NDK
