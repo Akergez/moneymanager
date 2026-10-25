@@ -10,6 +10,7 @@
 //! reads that file again to contact the configured origin.
 
 use gpui_adaptive_colors::Color;
+use gpui_android_glue::keyboard::{self, Purpose};
 use gpui_kit::component::button::{Button, ButtonGroup};
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::notification::Notification;
@@ -47,7 +48,11 @@ impl SettingsForm {
         let stored = loaded.unwrap_or_default();
         SettingsForm {
             themes: ThemeRows::new(window, cx),
-            config_string: cx.new(|cx| InputState::new(window, cx).placeholder("tresse://…")),
+            config_string: {
+                let input = cx.new(|cx| InputState::new(window, cx).placeholder("tresse://…"));
+                ui::keyboard_for(&input, Purpose::Address, cx);
+                input
+            },
             remote: RemoteFields::new(stored.as_ref(), window, cx),
             had_remote: stored.is_some(),
             error,
@@ -273,12 +278,11 @@ impl Render for SettingsForm {
                             "Config string",
                             h_flex()
                                 .gap_2()
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .child(Input::new(&self.config_string)),
-                                )
+                                .child(div().flex_1().min_w_0().child(keyboard::on_tap(
+                                    Input::new(&self.config_string),
+                                    &self.config_string,
+                                    cx,
+                                )))
                                 .child(Button::new("apply-string").label("Fill in").on_click(
                                     cx.listener(|this, _, window, cx| {
                                         this.apply_string(window, cx)

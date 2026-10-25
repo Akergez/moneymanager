@@ -8,6 +8,7 @@
 mod connect_form;
 mod render;
 
+use gpui_android_glue::keyboard::Purpose;
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::{
     App, AppContext, Context, Entity, EventEmitter, SharedString, Subscription, Window,
@@ -53,6 +54,8 @@ pub struct Onboarding {
     remote: RemoteFields,
     connecting: Option<Connecting>,
     error: Option<SharedString>,
+    /// Back, past the first step: to the first step.
+    back: Option<gpui_android_glue::back::Guard>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -91,6 +94,8 @@ impl Onboarding {
                 .placeholder("USD")
         });
         let config_string = cx.new(|cx| InputState::new(window, cx).placeholder("tresse://…"));
+        crate::ui::keyboard_for(&account_name, Purpose::Message, cx);
+        crate::ui::keyboard_for(&config_string, Purpose::Address, cx);
         let remote = RemoteFields::new(None, window, cx);
 
         // Enter in any field is the same as the step's button.
@@ -117,6 +122,7 @@ impl Onboarding {
             remote,
             connecting: None,
             error: None,
+            back: None,
             _subscriptions: subscriptions,
         }
     }
@@ -135,6 +141,18 @@ impl Onboarding {
         }
         self.step = step;
         self.error = None;
+        self.back = (step != Step::Choose).then(|| {
+            let this = cx.weak_entity();
+            gpui_android_glue::back::push(move |_, cx| {
+                // Not while the first sync runs: there is no going back then.
+                this.update(cx, |this, cx| {
+                    let back = !this.is_connecting();
+                    this.go_to(Step::Choose, cx);
+                    back
+                })
+                .unwrap_or(false)
+            })
+        });
         cx.notify();
     }
 

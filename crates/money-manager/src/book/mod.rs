@@ -97,8 +97,12 @@ impl Book {
                             money_core::csv::export(&store, &mut bytes)?;
                             #[cfg(target_os = "android")]
                             {
-                                gpui_android_glue::documents::save(&bytes, "text/csv", "transactions.csv")
-                                    .map(|saved| saved.then_some(0))
+                                gpui_android_glue::documents::save(
+                                    &bytes,
+                                    "text/csv",
+                                    "transactions.csv",
+                                )
+                                .map(|saved| saved.then_some(0))
                             }
                             #[cfg(not(target_os = "android"))]
                             {

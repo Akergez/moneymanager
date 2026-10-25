@@ -29,6 +29,8 @@ dependencyResolutionManagement {
 rootProject.name = "MoneyManager"
 include(":app")
 
-// The checkout beside this one stands in for the published library.
-// TODO: only with -PglueLocal once com.akergez.gpui:android-glue is published.
-includeBuild("../../gpui-android-glue/android")
+// `-PglueLocal`: a checkout of gpui-android-glue beside this repository
+// stands in for the published library, to work on the two together.
+if (providers.gradleProperty("glueLocal").isPresent) {
+    includeBuild("../../gpui-android-glue/android")
+}

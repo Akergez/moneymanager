@@ -8,6 +8,7 @@
 //! A transfer leg is not a record of its own. It can be looked at and its
 //! transfer deleted, both legs at once; there is nothing of it to edit here.
 
+use gpui_android_glue::keyboard::{self, Purpose};
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants};
 use gpui_kit::component::dialog::{DialogClose, DialogFooter};
 use gpui_kit::component::input::{Input, InputState};
@@ -84,6 +85,7 @@ impl EntryForm {
                 None => state,
             }
         });
+        ui::keyboard_for(&comment, Purpose::Message, cx);
         EntryForm {
             book,
             mode,
@@ -166,10 +168,13 @@ impl Render for EntryForm {
             ))
             .child(ui::field(
                 format!("Amount, {currency}"),
-                Input::new(&self.amount),
+                keyboard::on_tap(Input::new(&self.amount), &self.amount, cx),
             ))
             .child(ui::field("Date", self.date.clone()))
-            .child(ui::field("Comment", Input::new(&self.comment)))
+            .child(ui::field(
+                "Comment",
+                keyboard::on_tap(Input::new(&self.comment), &self.comment, cx),
+            ))
             .children(self.error.clone().map(|error| ui::form_error(error, cx)))
             // Deleting is on the object it deletes, apart from the footer's
             // commitment so the two are never pressed for each other.

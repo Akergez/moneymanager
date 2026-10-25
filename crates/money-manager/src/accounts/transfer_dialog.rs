@@ -5,6 +5,7 @@
 //! back as they are typed so a slipped digit is seen before it is saved.
 
 use crate::date_field::DateField;
+use gpui_android_glue::keyboard::{self, Purpose};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
@@ -64,6 +65,7 @@ impl TransferForm {
         let amount_to = cx.new(|cx| InputState::new(window, cx).placeholder("0.00"));
         let date = cx.new(|cx| DateField::new(crate::today(), window, cx));
         let comment = cx.new(|cx| InputState::new(window, cx).placeholder("Optional"));
+        ui::keyboard_for(&comment, Purpose::Message, cx);
 
         // The rate line and the two currency labels follow what is typed
         // and chosen.
@@ -166,13 +168,13 @@ impl Render for TransferForm {
             .child(ui::field("From", ui::choosing(Select::new(&self.from))))
             .child(ui::field(
                 format!("Amount sent, {from_currency}"),
-                Input::new(&self.amount_from),
+                keyboard::on_tap(Input::new(&self.amount_from), &self.amount_from, cx),
             ))
             .child(ui::field("To", ui::choosing(Select::new(&self.to))))
             .child(
                 ui::field(
                     format!("Amount received, {to_currency}"),
-                    Input::new(&self.amount_to),
+                    keyboard::on_tap(Input::new(&self.amount_to), &self.amount_to, cx),
                 )
                 .children(rate.map(|rate| {
                     div()
@@ -182,7 +184,10 @@ impl Render for TransferForm {
                 })),
             )
             .child(ui::field("Date", self.date.clone()))
-            .child(ui::field("Comment", Input::new(&self.comment)))
+            .child(ui::field(
+                "Comment",
+                keyboard::on_tap(Input::new(&self.comment), &self.comment, cx),
+            ))
             .children(self.error.clone().map(|error| ui::form_error(error, cx)))
     }
 }

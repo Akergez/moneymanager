@@ -1,5 +1,6 @@
 //! The category dialog: a name, a colour and an icon.
 
+use gpui_android_glue::keyboard::{self, Purpose};
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::color_picker::{ColorPicker, ColorPickerEvent, ColorPickerState};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
@@ -50,6 +51,7 @@ impl CategoryForm {
                 None => state,
             }
         });
+        ui::keyboard_for(&name, Purpose::Message, cx);
         // The picker holds a colour only once one was chosen: until then
         // the colour follows the name, and the preview beside it shows it.
         let chosen = style
@@ -164,12 +166,10 @@ impl Render for CategoryForm {
                 h_flex()
                     .gap_3()
                     .child(ui::category_tile(look, TileSize::Preview, cx))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(ui::field("Name", Input::new(&self.name))),
-                    ),
+                    .child(div().flex_1().min_w_0().child(ui::field(
+                        "Name",
+                        keyboard::on_tap(Input::new(&self.name), &self.name, cx),
+                    ))),
             )
             .child(ui::field(
                 "Color",

@@ -214,6 +214,24 @@ pub fn choosing(control: impl IntoElement) -> Div {
 }
 
 /// A labelled control, as every form here lays one out.
+/// Tells a phone's keyboard what `input` is for whenever it has the focus: a
+/// keyboard for prose, with capitals and corrections, for a comment; one for
+/// addresses for a URL; one that learns nothing for a secret. Nothing off
+/// Android. The subscription lasts as long as the input.
+pub fn keyboard_for(
+    input: &gpui_kit::Entity<gpui_kit::component::input::InputState>,
+    purpose: gpui_android_glue::keyboard::Purpose,
+    cx: &mut App,
+) {
+    cx.subscribe(
+        input,
+        move |input, event: &gpui_kit::component::input::InputEvent, _| {
+            gpui_android_glue::keyboard::follow(input.entity_id(), event, purpose)
+        },
+    )
+    .detach();
+}
+
 pub fn field(label: impl Into<SharedString>, control: impl IntoElement) -> Div {
     v_flex()
         .gap_1()

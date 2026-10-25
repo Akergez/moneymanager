@@ -1,5 +1,6 @@
 //! The account dialog: a name, a currency and what it held to begin with.
 
+use gpui_android_glue::keyboard::{self, Purpose};
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::{ActiveTheme, v_flex};
 use gpui_kit::prelude::*;
@@ -44,6 +45,7 @@ impl AccountForm {
                 .map(|a| format_amount(a.opening_balance).replace(' ', "")),
             "0.00",
         );
+        ui::keyboard_for(&name, Purpose::Message, cx);
         AccountForm {
             book,
             editing,
@@ -94,9 +96,16 @@ impl Render for AccountForm {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .gap_3()
-            .child(ui::field("Name", Input::new(&self.name)))
+            .child(ui::field(
+                "Name",
+                keyboard::on_tap(Input::new(&self.name), &self.name, cx),
+            ))
             .child(
-                ui::field("Currency", Input::new(&self.currency)).child(
+                ui::field(
+                    "Currency",
+                    keyboard::on_tap(Input::new(&self.currency), &self.currency, cx),
+                )
+                .child(
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
@@ -104,7 +113,11 @@ impl Render for AccountForm {
                 ),
             )
             .child(
-                ui::field("Opening balance", Input::new(&self.opening_balance)).child(
+                ui::field(
+                    "Opening balance",
+                    keyboard::on_tap(Input::new(&self.opening_balance), &self.opening_balance, cx),
+                )
+                .child(
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)

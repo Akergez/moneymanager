@@ -3,6 +3,7 @@
 //! Shared by the first-run form and the settings dialog, so the two cannot
 //! come to disagree about what a remote is made of.
 
+use gpui_android_glue::keyboard::{self, Purpose};
 use gpui_kit::component::button::{Button, ButtonGroup};
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::{Selectable, Sizable, Size, v_flex};
@@ -73,6 +74,16 @@ impl RemoteFields {
             "Required: 32-byte base64 key",
             true,
         );
+        for (input, purpose) in [
+            (&url, Purpose::Address),
+            (&token, Purpose::Password),
+            (&endpoint, Purpose::Address),
+            (&access_key_id, Purpose::Login),
+            (&secret_access_key, Purpose::Password),
+            (&encryption_key, Purpose::Password),
+        ] {
+            ui::keyboard_for(input, purpose, cx);
+        }
         let backend_watch = cx.observe(&backend, |_, _, cx| cx.notify());
         RemoteFields {
             backend,
@@ -155,7 +166,10 @@ impl RemoteFields {
         let is_http = self.backend.read(cx).value() == "http";
         let backend = self.backend.clone();
         let field = |label: &'static str, input: &Entity<InputState>| {
-            ui::field(label, Input::new(input).with_size(size))
+            ui::field(
+                label,
+                keyboard::on_tap(Input::new(input).with_size(size), input, cx),
+            )
         };
         v_flex()
             .gap_3()

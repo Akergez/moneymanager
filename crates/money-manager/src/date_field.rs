@@ -12,6 +12,7 @@
 //! is given its width in rems.
 
 use chrono::{Datelike, NaiveDate};
+use gpui_android_glue::keyboard;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::calendar::{Calendar, CalendarEvent, CalendarState, Date};
 use gpui_kit::component::h_flex;
@@ -135,7 +136,11 @@ impl Render for DateField {
         h_flex()
             .w_full()
             .gap_2()
-            .child(div().flex_1().min_w_0().child(Input::new(&self.input)))
+            .child(div().flex_1().min_w_0().child(keyboard::on_tap(
+                Input::new(&self.input),
+                &self.input,
+                cx,
+            )))
             .child(
                 Popover::new("calendar")
                     // From the button's trailing corner, so it opens back

@@ -8,9 +8,13 @@ document, the status bar, back — is
 [gpui-android-glue](https://github.com/Akergez/gpui-android-glue): the crate
 in `crates/money-manager/Cargo.toml`, its Java half as
 `com.akergez.gpui:android-glue` in `app/build.gradle.kts`, at the same
-version. Until it is published, both are taken from a checkout of it beside
-this repository (`../gpui-android-glue`). The Gradle project comes from
-gpui-mobile's example, under the same licence terms.
+version. The Java half is read from GitHub Packages, which asks for a token
+even for a public package: CI passes its own; at a desk, put a personal token
+with `read:packages` in `~/.gradle/gradle.properties` as `gpr.user` and
+`gpr.key`, or build against a checkout of gpui-android-glue beside this
+repository with `./gradlew -PglueLocal …` (and the path variant of the crate
+in `Cargo.toml`). The Gradle project comes from gpui-mobile's example, under
+the same licence terms.
 
 The ledger and the settings are kept in the application's private directory
 (`android_main` in `crates/money-manager/src/lib.rs` has gpui-android-glue point the XDG variables

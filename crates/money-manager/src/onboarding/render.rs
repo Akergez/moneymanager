@@ -1,3 +1,4 @@
+use gpui_android_glue::keyboard;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::Input;
 use gpui_kit::component::spinner::Spinner;
@@ -41,10 +42,18 @@ impl Onboarding {
             .gap_4()
             .child(ui::field(
                 "Account name",
-                Input::new(&self.account_name).large(),
+                keyboard::on_tap(
+                    Input::new(&self.account_name).large(),
+                    &self.account_name,
+                    cx,
+                ),
             ))
             .child(
-                ui::field("Currency", Input::new(&self.currency).large()).child(
+                ui::field(
+                    "Currency",
+                    keyboard::on_tap(Input::new(&self.currency).large(), &self.currency, cx),
+                )
+                .child(
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
@@ -80,17 +89,23 @@ impl Onboarding {
                     })),
             )
             .child(match by {
-                ConnectBy::ConfigString => {
-                    ui::field("Config string", Input::new(&self.config_string).large()).child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(
-                                "Exported by another device in Settings. It holds the keys, so \
+                ConnectBy::ConfigString => ui::field(
+                    "Config string",
+                    keyboard::on_tap(
+                        Input::new(&self.config_string).large(),
+                        &self.config_string,
+                        cx,
+                    ),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(
+                            "Exported by another device in Settings. It holds the keys, so \
                              treat it as a password.",
-                            ),
-                    )
-                }
+                        ),
+                ),
                 ConnectBy::Details => self.remote.render(Size::Large, cx),
             })
             .child(self.render_actions("Connect", cx))
