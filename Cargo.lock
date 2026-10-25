@@ -2392,6 +2392,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "gpui-android-glue"
+version = "0.1.0"
+dependencies = [
+ "android-activity",
+ "android_logger",
+ "async-channel",
+ "gpui-kit",
+ "gpui-pre-mobile",
+ "jni",
+ "log",
+ "tracing",
+]
+
+[[package]]
 name = "gpui-base"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4263,17 +4277,13 @@ dependencies = [
 name = "money-manager"
 version = "2.1.0"
 dependencies = [
- "android-activity",
- "android_logger",
  "chrono",
  "dirs 6.0.0",
  "embed-resource",
  "gpui-adaptive-colors",
+ "gpui-android-glue",
  "gpui-kit",
- "gpui-pre-mobile",
  "gpui-zed-themes",
- "jni",
- "log",
  "money-core",
  "serde",
  "serde_json",

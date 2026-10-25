@@ -45,13 +45,8 @@
         android:theme="@style/GpuiTheme"
     >
 
-        <!-- SAF grants access only to the document the user chooses. -->
-        <activity
-            android:name="dev.gpui.mobile.GpuiPathPicker"
-            android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
-            android:exported="false"
-            android:theme="@android:style/Theme.Translucent.NoTitleBar"
-        />
+        <!-- GpuiPathPicker (CSV import and export through SAF) and the other
+             helper activities come with gpui-android-glue's manifest. -->
 
         <!--
           `configChanges` keeps the activity across rotation and the keyboard

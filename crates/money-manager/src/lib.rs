@@ -19,8 +19,6 @@
 //! [`android_main`]. Everywhere else `main.rs` calls [`run`].
 
 mod accounts;
-#[cfg(target_os = "android")]
-mod android_csv;
 mod appearance;
 mod assets;
 mod book;
@@ -80,6 +78,9 @@ pub fn run() {
 /// What every platform does once the toolkit is running.
 fn start(cx: &mut gpui_kit::App) {
     gpui_kit::init(cx);
+    // On Android `launch::run` has done this already.
+    #[cfg(not(target_os = "android"))]
+    gpui_android_glue::init(cx);
     settings::Settings::install(cx);
     fonts::install(cx);
     appearance::init(cx);
@@ -90,61 +91,18 @@ fn start(cx: &mut gpui_kit::App) {
 }
 
 /// The Android entry point, called by `android-activity` on a thread of its
-/// own once the activity has loaded this library. It returns when the
-/// activity is destroyed.
+/// own once the activity has loaded this library. The ledger and the settings
+/// are kept in the application's private directory, which `launch::run`
+/// points the XDG variables at: no shared storage, so no permission to ask
+/// for.
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
-fn android_main(app: android_activity::AndroidApp) {
-    use gpui_mobile::android::jni;
-    use std::sync::atomic::{AtomicBool, Ordering};
-
-    // The system may create the activity again in a process it has kept, and
-    // that calls this again, on another thread. The toolkit belongs to the
-    // thread it first ran on and cannot be started twice, so one process is
-    // one run: a second call ends the process, and the system starts the
-    // activity over in a fresh one.
-    static STARTED: AtomicBool = AtomicBool::new(false);
-    if STARTED.swap(true, Ordering::SeqCst) {
-        std::process::exit(0);
-    }
-
-    // There is no terminal: `tracing` hands its events to `log` when nothing
-    // subscribes, and this sends `log` to logcat.
-    android_logger::init_once(
-        android_logger::Config::default()
-            .with_max_level(log::LevelFilter::Debug)
-            .with_tag("money-manager")
-            .with_filter(
-                android_logger::FilterBuilder::new()
-                    .parse("warn,money_manager=info")
-                    .build(),
-            ),
+fn android_main(app: gpui_android_glue::launch::AndroidApp) {
+    use gpui_android_glue::launch::{Config, run};
+    run(
+        app,
+        Config::new("money-manager").filter("warn,money_manager=info"),
+        assets::AppAssets,
+        start,
     );
-    jni::install_panic_hook();
-
-    // An application has no home directory here, only the private directory
-    // the system gives it, and that is the whole of where the ledger and the
-    // settings are kept: no shared storage, so no permission to ask for.
-    // `paths` reads these on first use, and nothing has used it yet.
-    if let Some(files) = app.internal_data_path() {
-        // SAFETY: no other thread of ours exists yet to read the environment.
-        unsafe {
-            std::env::set_var("XDG_CONFIG_HOME", files.join("config"));
-            std::env::set_var("XDG_DATA_HOME", files.join("data"));
-        }
-    }
-
-    jni::init_platform(&app);
-    let Some(platform) = jni::shared_platform() else {
-        tracing::error!("no Android platform to run on");
-        return;
-    };
-
-    gpui_kit::gpui::Application::with_platform(platform.into_rc())
-        .with_assets(assets::AppAssets)
-        .run(start);
-
-    // The activity is gone. Nothing of ours can be used by the next one (see
-    // above), so the process goes with it.
-    std::process::exit(0);
 }

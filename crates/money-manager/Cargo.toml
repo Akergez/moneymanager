@@ -35,14 +35,14 @@ serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+# The Android side shared with matterfast and aiddiction: android_main, the
+# status bar, the insets, saving a document, back. Every function of it also
+# exists off Android. Its Java half is `com.akergez.gpui:android-glue` in
+# android/app/build.gradle.kts, at the same version.
+# TODO: `{ git = "https://github.com/Akergez/gpui-android-glue", tag = "v0.1.0" }`
+# once that is published; until then the checkout beside this one.
+gpui-android-glue = { path = "../../../gpui-android-glue" }
 
-# The platform GPUI does not ship: the toolkit is handed one from this fork,
-# which tracks the same `gpui-pre` and is not on crates.io at this version.
 [target.'cfg(target_os = "android")'.dependencies]
-gpui-mobile = { package = "gpui-pre-mobile", git = "https://github.com/longbridge/gpui-mobile", rev = "9075e3aa3eea812127f2c60ed66f0cd5798ff245" }
-android-activity = { version = "0.6", features = ["native-activity"] }
-android_logger = "0.15"
-log = "0.4"
-jni = "0.22.4"
 # With no subscriber, events go to `log`, and from there to logcat.
 tracing = { workspace = true, features = ["log"] }
