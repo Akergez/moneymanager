@@ -1,0 +1,21 @@
+# mode: demo
+# size: 400x800
+#
+# On a phone a new record is two presses and the amount: the round button
+# opens the sheet with the amount focused, and pressing a category saves the
+# record in it and closes the sheet.
+wait:2500
+expect:records=44
+expect:balance=1 054 237.45 ₽
+click:355,683
+wait:900
+expect:sheet=open
+type:42
+wait:300
+# "Food & dining", the first category.
+click:86,405
+wait:900
+expect:sheet=closed
+expect:records=45
+expect:balance=1 054 195.45 ₽
+quit

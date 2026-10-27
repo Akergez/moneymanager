@@ -110,6 +110,30 @@ pub fn latest_date(entries: &[Entry]) -> Option<NaiveDate> {
         .max()
 }
 
+/// The category a new record starts on: that of the latest record a person
+/// entered, the way [`latest_date`] picks its day. Transfer legs do not count.
+pub fn latest_category(entries: &[Entry]) -> Option<&[u8]> {
+    entries
+        .iter()
+        .filter(|entry| !entry.is_transfer)
+        .max_by(|a, b| a.date.cmp(&b.date).then(a.id.cmp(&b.id)))
+        .map(|entry| entry.category_id.as_slice())
+}
+
+/// The order categories are offered in for a new record: the most used
+/// first, so the one wanted is usually in the first row. Ties keep the order
+/// they came in.
+pub fn order_by_use<C>(categories: &mut [C], id: impl Fn(&C) -> &[u8], entries: &[Entry]) {
+    let uses = |category: &C| {
+        let id = id(category);
+        entries
+            .iter()
+            .filter(|entry| entry.category_id == id)
+            .count()
+    };
+    categories.sort_by_cached_key(|category| std::cmp::Reverse(uses(category)));
+}
+
 impl From<&Expense> for Entry {
     fn from(expense: &Expense) -> Self {
         Entry {
@@ -165,6 +189,38 @@ mod tests {
         assert_eq!(latest_date(&entries), NaiveDate::from_ymd_opt(2026, 9, 12));
         assert_eq!(latest_date(&[on(20, true)]), None);
         assert_eq!(latest_date(&[]), None);
+    }
+
+    #[test]
+    fn a_new_record_starts_on_the_category_of_the_latest_one_entered() {
+        let on = |day: u32, category: u8, is_transfer: bool| Entry {
+            id: vec![day as u8],
+            category_id: vec![category],
+            amount: 1.0,
+            comment: None,
+            date: NaiveDate::from_ymd_opt(2026, 9, day).unwrap(),
+            is_transfer,
+        };
+        let entries = [on(3, 1, false), on(12, 2, false), on(20, 3, true)];
+        assert_eq!(latest_category(&entries), Some(&[2][..]));
+        assert_eq!(latest_category(&[on(20, 3, true)]), None);
+    }
+
+    #[test]
+    fn the_most_used_categories_come_first() {
+        let in_category = |category: u8| Entry {
+            id: Vec::new(),
+            category_id: vec![category],
+            amount: 1.0,
+            comment: None,
+            date: NaiveDate::from_ymd_opt(2026, 9, 1).unwrap(),
+            is_transfer: false,
+        };
+        let entries = [2, 3, 3, 2, 3, 4].map(in_category);
+        let mut categories = vec![vec![1u8], vec![2], vec![3], vec![4], vec![5]];
+        order_by_use(&mut categories, |c| c.as_slice(), &entries);
+        // Unused ones keep their order behind the used ones.
+        assert_eq!(categories, [vec![3], vec![2], vec![4], vec![1], vec![5]]);
     }
 
     #[test]

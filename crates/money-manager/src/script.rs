@@ -34,7 +34,8 @@
 //! - `balance=<amount>` — the current account's, as the top bar writes it
 //! - `bars-chosen=<n>`, `line-chosen=<n>` — how many categories the monthly
 //!   bars and the running total are each narrowed to; 0 is all of them
-//! - `dialog=open|closed`
+//! - `dialog=open|closed`, `sheet=open|closed` — a sheet is the form for a
+//!   record on a phone
 //! - `theme=light|dark`
 //! - `color=system|#rrggbb` — where the colours are set to come from
 //! - `seed=#rrggbb` — the colour the scheme in use was made from, which with
@@ -55,9 +56,9 @@ use std::time::{Duration, Instant};
 
 use gpui_kit::component::{ActiveTheme as _, ThemeMode, WindowExt as _};
 use gpui_kit::{
-    AnyWindowHandle, App, Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, Pixels, PlatformInput, Point, ScrollDelta, ScrollWheelEvent, TouchPhase, Window,
-    point,
+    AnyWindowHandle, App, KeyUpEvent, Keystroke, Modifiers, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, Pixels, PlatformInput, Point, ScrollDelta, ScrollWheelEvent,
+    TouchPhase, Window, point,
 };
 use money_core::format::format_money;
 
@@ -191,6 +192,10 @@ fn observe(what: &str, window: &mut Window, cx: &mut App) -> Option<String> {
             let open = window.has_active_dialog(cx);
             return Some(if open { "open" } else { "closed" }.to_string());
         }
+        "sheet" => {
+            let open = window.has_active_sheet(cx);
+            return Some(if open { "open" } else { "closed" }.to_string());
+        }
         "theme" => {
             let dark = cx.theme().mode.is_dark();
             return Some(if dark { "dark" } else { "light" }.to_string());
@@ -317,7 +322,10 @@ fn next(handle: AnyWindowHandle, mut steps: VecDeque<Step>, cx: &mut App) {
         }
         Step::Key(key) => match Keystroke::parse(key) {
             Ok(keystroke) => {
-                window.dispatch_keystroke(keystroke, cx);
+                window.dispatch_keystroke(keystroke.clone(), cx);
+                // And up again, as a real key goes: a focused button is
+                // pressed by Space or Enter as the key is let go.
+                window.dispatch_event(PlatformInput::KeyUp(KeyUpEvent { keystroke }), cx);
             }
             Err(error) => tracing::warn!(%error, key, "not a keystroke"),
         },

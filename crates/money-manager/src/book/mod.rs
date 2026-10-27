@@ -24,7 +24,9 @@ use money_core::ledger::{self, AccountLedger, AccountSummary};
 use money_core::models::{Account, Category, Expense, TopUp, TopUpCategory, Transfer};
 use money_core::store::{Store, hex_encode};
 
-pub use entry::{Entry, EntryDraft, Mode, TransferDraft, latest_date};
+pub use entry::{
+    Entry, EntryDraft, Mode, TransferDraft, latest_category, latest_date, order_by_use,
+};
 pub use money_core::models::CategoryStyle;
 pub use style::{CategoryLook, ICONS, PALETTE, color_of};
 

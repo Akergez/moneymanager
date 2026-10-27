@@ -41,7 +41,7 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 # android/app/build.gradle.kts, at the same version.
 # To work on it beside the application, swap this for the path variant below
 # and build the package with -PglueLocal (android/settings.gradle.kts).
-gpui-android-glue = { git = "https://github.com/Akergez/gpui-android-glue", tag = "v0.1.0" }
+gpui-android-glue = { git = "https://github.com/Akergez/gpui-android-glue", tag = "v0.2.0" }
 # gpui-android-glue = { path = "../../../gpui-android-glue" }
 
 [target.'cfg(target_os = "android")'.dependencies]

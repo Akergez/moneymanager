@@ -117,6 +117,16 @@ impl DateField {
         }
     }
 
+    /// Puts `date` in the field, as a day picked from the calendar would be.
+    pub fn set_date(&mut self, date: NaiveDate, window: &mut Window, cx: &mut Context<Self>) {
+        let text = date.format(FORMAT).to_string();
+        self.input
+            .update(cx, |input, cx| input.set_value(text, window, cx));
+        self.calendar
+            .update(cx, |calendar, cx| calendar.set_date(date, window, cx));
+        cx.notify();
+    }
+
     /// The date in the field, or nothing if what is typed there is not one.
     pub fn date(&self, cx: &gpui_kit::App) -> Option<NaiveDate> {
         parse_date(&self.input.read(cx).value(), self.near)

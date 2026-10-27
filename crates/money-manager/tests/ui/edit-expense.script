@@ -14,8 +14,6 @@ wait:500
 key:ctrl-e
 wait:900
 expect:dialog=open
-key:tab
-wait:300
 key:enter
 wait:900
 expect:dialog=closed

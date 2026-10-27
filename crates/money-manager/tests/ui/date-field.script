@@ -9,16 +9,16 @@ wait:2500
 key:ctrl-n
 wait:900
 # The calendar button, then the 13th.
-click:808,330
+click:808,492
 wait:900
-click:624,530
+click:624,688
 wait:700
 expect:dialog=open
 key:ctrl-a
 type:6.10
 wait:300
 # Back to the amount.
-key:shift-tab
+click:620,181
 wait:300
 type:77
 wait:200
@@ -30,10 +30,9 @@ expect:balance=1 054 160.45 ₽
 # Something that is not a date keeps the dialog up and saves nothing.
 key:ctrl-n
 wait:900
-key:tab
-wait:200
 type:5
-key:tab
+# The date field.
+click:698,492
 wait:200
 key:ctrl-a
 type:someday
