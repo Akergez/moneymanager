@@ -10,97 +10,35 @@ pub fn title_frame(content: impl IntoElement, cx: &App) -> AnyElement {
 }
 
 /// How much of the top and of the bottom of the screen the system draws its
-/// own bars over, which the window lies under edge to edge. These are the
-/// platform's insets in its own units, not layout of ours.
-#[cfg(target_os = "android")]
+/// own bars over, which the window lies under edge to edge. The keyboard is
+/// not in it: see [`keyboard_inset`]. These are the platform's insets in its
+/// own units, not layout of ours.
 pub(super) fn system_bars() -> (f32, f32) {
     let (top, bottom) = gpui_android_glue::insets::system_bars();
     (f32::from(top), f32::from(bottom))
 }
 
-/// A desktop has no bars of the system's over its windows.
-/// `MONEY_MANAGER_KEYBOARD=<height>` pretends an on-screen keyboard of that
-/// height is up, which is the only way to look at what the interface does
-/// about one without a phone.
-#[cfg(not(target_os = "android"))]
-pub(super) fn system_bars() -> (f32, f32) {
-    let keyboard = std::env::var("MONEY_MANAGER_KEYBOARD")
-        .ok()
-        .and_then(|height| height.parse().ok())
-        .unwrap_or(0.0);
-    (0.0, keyboard)
-}
-
-/// How tall the on-screen keyboard is over `window`, or nothing while it is
-/// down. See [`bottom_bar_room`]: the interface as a whole stays where it is
-/// under the keyboard, and only what is being typed into — a dialog — makes
-/// room for it.
+/// How tall the on-screen keyboard is over `window` as it is drawn now, or
+/// nothing while it is down: partway while it slides in or out, so what makes
+/// room for it moves with it. The interface as a whole stays where it is
+/// under the keyboard, and only what is being typed into — a dialog, a sheet
+/// — makes room for it.
+///
+/// A desktop has no keyboard of the system's. `MONEY_MANAGER_KEYBOARD=<height>`
+/// pretends one of that height is up, which is the only way to look at what
+/// the interface does about one without a phone.
 pub fn keyboard_inset(window: &gpui_kit::Window) -> gpui_kit::Pixels {
-    let (_, inset) = system_bars();
-    let height = f32::from(window.viewport_size().height);
-    gpui_kit::Pixels::from(keyboard_height(inset, height))
+    #[cfg(not(target_os = "android"))]
+    if let Some(height) = std::env::var("MONEY_MANAGER_KEYBOARD")
+        .ok()
+        .and_then(|height| height.parse::<f32>().ok())
+    {
+        return gpui_kit::Pixels::from(height);
+    }
+    gpui_android_glue::keyboard::keyboard_inset(window)
 }
 
 /// How tall the status bar at the top of `window` is.
 pub fn status_bar_inset() -> gpui_kit::Pixels {
     gpui_kit::Pixels::from(system_bars().0)
-}
-
-/// The part of the bottom inset that is a keyboard: all of it, once it is
-/// too tall to be the system's bar.
-fn keyboard_height(inset: f32, window_height: f32) -> f32 {
-    if inset > window_height * BAR_AT_MOST {
-        inset
-    } else {
-        0.0
-    }
-}
-
-/// How much of the window's height an inset at the bottom may take and still
-/// be the system's navigation bar. More than this is the on-screen keyboard.
-const BAR_AT_MOST: f32 = 0.2;
-
-/// The room to leave at the bottom for the system's own bar.
-///
-/// The platform reports one number for everything that covers the bottom of
-/// the window, and while the keyboard is up that number is the keyboard's
-/// height. Making room for it would lift the whole interface — the
-/// navigation with it — every time a field is typed in, and drop it again a
-/// moment after the keyboard has gone. The keyboard lies over the interface
-/// instead: an inset too tall to be a bar is passed over, and the room stays
-/// what it was (`resting`) before the keyboard came up.
-pub(super) fn bottom_bar_room(inset: f32, window_height: f32, resting: f32) -> f32 {
-    if inset > window_height * BAR_AT_MOST {
-        resting
-    } else {
-        inset
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_keyboard_does_not_move_what_the_navigation_bar_does() {
-        // The gesture bar, then a keyboard over it, then the bar again.
-        let mut room = bottom_bar_room(24.0, 800.0, 0.0);
-        assert_eq!(room, 24.0);
-        room = bottom_bar_room(310.0, 800.0, room);
-        assert_eq!(room, 24.0);
-        room = bottom_bar_room(24.0, 800.0, room);
-        assert_eq!(room, 24.0);
-        // Turning the phone changes the bar's own height, and that is taken.
-        assert_eq!(bottom_bar_room(48.0, 800.0, room), 48.0);
-        assert_eq!(bottom_bar_room(0.0, 800.0, room), 0.0);
-    }
-
-    #[test]
-    fn an_inset_is_the_keyboard_or_the_bar_never_both() {
-        // What the interface as a whole ignores is exactly what a dialog
-        // makes room for.
-        assert_eq!(keyboard_height(310.0, 800.0), 310.0);
-        assert_eq!(keyboard_height(24.0, 800.0), 0.0);
-        assert_eq!(keyboard_height(0.0, 800.0), 0.0);
-    }
 }

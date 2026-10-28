@@ -2393,8 +2393,8 @@ dependencies = [
 
 [[package]]
 name = "gpui-android-glue"
-version = "0.2.0"
-source = "git+https://github.com/Akergez/gpui-android-glue?tag=v0.2.0#80b02103b81250d865c34e3b44e49a6ee4801f79"
+version = "0.3.0"
+source = "git+https://github.com/Akergez/gpui-android-glue?tag=v0.3.0#305b1052e1ef10fa4a0a68eeb787d102383e82ea"
 dependencies = [
  "android-activity",
  "android_logger",
