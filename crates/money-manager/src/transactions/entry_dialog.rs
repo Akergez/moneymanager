@@ -1,12 +1,14 @@
 //! The record dialog: making an expense or an income, changing one, and the
 //! way to delete one.
 //!
-//! A new record is an amount and a category, in that order: the amount has
-//! the focus as the form opens, and pressing a category saves the record in
-//! it. Its day starts on that of the latest record and the comment stays
-//! folded until asked for, so neither costs a press when it is not wanted.
-//! On a phone the form is a sheet at the bottom of the window, over the
-//! keyboard and under the thumb; elsewhere it is a dialog.
+//! A new record is an amount and a category: the amount has the focus as the
+//! form opens, the category starts on that of the latest record and the
+//! categories are a grid of their tiles to change it with, and Add saves.
+//! Its day starts on that of the latest record and the comment stays folded
+//! until asked for, so neither costs a press when it is not wanted. On a
+//! phone the form is a [`bottom_sheet`](crate::bottom_sheet), over the
+//! keyboard and under the thumb, with Add across its foot; elsewhere it is
+//! a dialog.
 //!
 //! A record rewritten here is rewritten whole — category, amount, comment,
 //! date and account — because that is the only kind of update the ledger's
@@ -16,15 +18,17 @@
 //! transfer deleted, both legs at once; there is nothing of it to edit here.
 
 use gpui_android_glue::keyboard::{self, Purpose};
+use gpui_kit::component::button::ButtonGroup;
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants};
+use gpui_kit::component::calendar::{Calendar, CalendarEvent, CalendarState, Date};
 use gpui_kit::component::dialog::{DialogClose, DialogFooter};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::{ActiveTheme, Placement, Selectable, Sizable, WindowExt, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Selectable, Sizable, StyledExt, WindowExt, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    App, AppContext, Context, Entity, Focusable, Pixels, SharedString, Subscription, Window, div,
-    rems,
+    AnyElement, App, AppContext, Context, Entity, Focusable, SharedString, Subscription, Window,
+    div, rems,
 };
 use money_core::format::{format_amount, format_money, parse_amount};
 
@@ -54,7 +58,7 @@ impl Surface {
     fn close(self, window: &mut Window, cx: &mut App) {
         match self {
             Surface::Dialog => window.close_dialog(cx),
-            Surface::Sheet => window.close_sheet(cx),
+            Surface::Sheet => crate::bottom_sheet::close(window, cx),
         }
     }
 }
@@ -75,6 +79,10 @@ struct EntryForm {
     /// Whether the comment field is out. A record that has a comment shows
     /// it; a new one keeps it folded until asked for.
     commenting: bool,
+    /// On a phone, the month a day other than today or yesterday is picked
+    /// from, and whether it is showing.
+    calendar: Entity<CalendarState>,
+    picking_day: bool,
     error: Option<SharedString>,
     _subscriptions: Vec<Subscription>,
 }
@@ -131,7 +139,21 @@ impl EntryForm {
             .as_ref()
             .is_some_and(|entry| entry.comment.is_some());
 
-        let mut subscriptions = Vec::new();
+        let calendar = cx.new(|cx| {
+            let mut calendar = CalendarState::new(window, cx);
+            calendar.set_date(day, window, cx);
+            calendar
+        });
+        let mut subscriptions = vec![cx.subscribe_in(
+            &calendar,
+            window,
+            |this, _, event: &CalendarEvent, window, cx| {
+                if let CalendarEvent::Selected(Date::Single(Some(day))) = event {
+                    this.picking_day = false;
+                    this.set_date(*day, window, cx);
+                }
+            },
+        )];
         // A sheet has no commitment for Enter to make: Enter in the amount —
         // the keyboard's own key on a phone — saves in the chosen category.
         if surface == Surface::Sheet {
@@ -156,6 +178,8 @@ impl EntryForm {
             date,
             comment,
             commenting,
+            calendar,
+            picking_day: false,
             error: None,
             _subscriptions: subscriptions,
         }
@@ -172,13 +196,10 @@ impl EntryForm {
         }
     }
 
-    /// A category pressed: a new record is saved in it, an edited one only
-    /// moves to it and waits for Save.
-    fn choose(&mut self, id: Vec<u8>, window: &mut Window, cx: &mut Context<Self>) {
+    /// A category pressed: the record is to be in it, once Add or Save says
+    /// so.
+    fn choose(&mut self, id: Vec<u8>, cx: &mut Context<Self>) {
         self.category = Some(id);
-        if self.editing.is_none() {
-            self.commit(window, cx);
-        }
         cx.notify();
     }
 
@@ -270,7 +291,7 @@ impl EntryForm {
                 ui::category_tile(look, TileSize::Card, cx),
                 category.name.clone(),
             ))
-            .on_click(cx.listener(move |this, _, window, cx| this.choose(id.clone(), window, cx)))
+            .on_click(cx.listener(move |this, _, _, cx| this.choose(id.clone(), cx)))
         });
         let (book, mode, surface) = (self.book.clone(), self.mode, self.surface);
         let new_category = Button::new("new-category")
@@ -334,6 +355,192 @@ impl EntryForm {
             )
             .child(div().flex_1().min_w_0().child(self.date.clone()))
     }
+
+    /// On a phone: today, yesterday or another day, as one segmented
+    /// control; another day is picked from a month that opens under it.
+    fn render_day_choice(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let today = crate::today();
+        let yesterday = today.pred_opt().unwrap_or(today);
+        let chosen = self.date.read(cx).date(cx);
+        let other = chosen.filter(|day| *day != today && *day != yesterday);
+        let other_label = match other {
+            Some(day) => day.format("%b %-d").to_string(),
+            None => "Other day…".to_string(),
+        };
+        let this = cx.entity().downgrade();
+        let segments = ButtonGroup::new("day")
+            .outline()
+            .w_full()
+            .child(
+                Button::new("today")
+                    .label("Today")
+                    .flex_1()
+                    .selected(chosen == Some(today)),
+            )
+            .child(
+                Button::new("yesterday")
+                    .label("Yesterday")
+                    .flex_1()
+                    .selected(chosen == Some(yesterday)),
+            )
+            .child(
+                Button::new("other-day")
+                    .label(other_label)
+                    .flex_1()
+                    .selected(other.is_some() || self.picking_day),
+            )
+            .on_click(move |pressed: &Vec<usize>, window, cx| {
+                let Some(&segment) = pressed.first() else {
+                    return;
+                };
+                this.update(cx, |this, cx| match segment {
+                    0 => this.set_date(today, window, cx),
+                    1 => this.set_date(yesterday, window, cx),
+                    _ => {
+                        this.picking_day = !this.picking_day;
+                        cx.notify();
+                    }
+                })
+                .ok();
+            });
+        v_flex()
+            .gap_2()
+            .child(segments)
+            .when(self.picking_day, |column| {
+                column.child(
+                    h_flex()
+                        .justify_center()
+                        .child(Calendar::new(&self.calendar).border_0()),
+                )
+            })
+    }
+
+    /// On a phone: the form's title, and the comment's fold beside it.
+    fn render_sheet_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let title = match self.editing {
+            Some(_) => format!("Edit {}", self.mode.noun()),
+            None => format!("New {}", self.mode.noun()),
+        };
+        h_flex()
+            .px_4()
+            .pb_2()
+            .justify_between()
+            .items_center()
+            .child(div().text_lg().font_semibold().child(title))
+            .when(!self.commenting, |header| {
+                header.child(
+                    Button::new("add-comment")
+                        .label("Add comment")
+                        .ghost()
+                        .small()
+                        .on_click(cx.listener(|this, _, window, cx| this.open_comment(window, cx))),
+                )
+            })
+    }
+
+    /// On a phone: the amount, large, as the one thing being typed.
+    fn render_big_amount(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let currency = self.book.read(cx).currency().to_string();
+        let theme = cx.theme();
+        h_flex()
+            .items_center()
+            .gap_2()
+            .border_b_2()
+            .border_color(theme.primary)
+            .child(
+                div().flex_1().min_w_0().child(keyboard::on_tap(
+                    Input::new(&self.amount)
+                        .appearance(false)
+                        .large()
+                        .text_3xl()
+                        .font_semibold()
+                        .h_12()
+                        .px_0(),
+                    &self.amount,
+                    cx,
+                )),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .text_xl()
+                    .text_color(theme.muted_foreground)
+                    .child(currency),
+            )
+    }
+
+    /// On a phone: what the sheet commits with, across its foot, with Delete
+    /// beside it for a record that exists.
+    fn render_sheet_footer(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let commit = if self.editing.is_some() {
+            "Save"
+        } else {
+            "Add"
+        };
+        h_flex()
+            .flex_none()
+            .gap_2()
+            .px_4()
+            .pt_3()
+            .pb_4()
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .children(self.editing.clone().map(|entry| {
+                let (book, mode) = (self.book.clone(), self.mode);
+                Button::new("delete-record")
+                    .label("Delete…")
+                    .danger()
+                    .outline()
+                    .large()
+                    .on_click(move |_, window, cx| {
+                        crate::bottom_sheet::close(window, cx);
+                        confirm_delete(&book, mode, entry.clone(), window, cx);
+                    })
+            }))
+            .child(
+                Button::new("commit")
+                    .label(commit)
+                    .primary()
+                    .large()
+                    .flex_1()
+                    .on_click(cx.listener(|this, _, window, cx| this.commit(window, cx))),
+            )
+    }
+
+    /// The form on a phone: a title, the amount large, the day, the
+    /// categories, and Add across the foot, which stays in view while the
+    /// rest scrolls.
+    fn render_sheet(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        v_flex()
+            .min_h_0()
+            .child(self.render_sheet_header(cx))
+            .child(
+                div()
+                    .id("entry-body")
+                    .flex_shrink(1.)
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .child(
+                        v_flex()
+                            .px_4()
+                            .pb_4()
+                            .gap_4()
+                            .child(self.render_big_amount(cx))
+                            .children(self.error.clone().map(|error| ui::form_error(error, cx)))
+                            .child(self.render_day_choice(cx))
+                            .child(self.render_categories(cx))
+                            .when(self.commenting, |body| {
+                                body.child(keyboard::on_tap(
+                                    Input::new(&self.comment),
+                                    &self.comment,
+                                    cx,
+                                ))
+                            }),
+                    ),
+            )
+            .child(self.render_sheet_footer(cx))
+            .into_any_element()
+    }
 }
 
 /// What a category button holds: its tile over its name.
@@ -357,6 +564,9 @@ fn category_cell(tile: impl IntoElement, name: SharedString) -> impl IntoElement
 
 impl Render for EntryForm {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.surface == Surface::Sheet {
+            return self.render_sheet(cx);
+        }
         let currency = self.book.read(cx).currency().to_string();
         let muted = cx.theme().muted_foreground;
         v_flex()
@@ -407,6 +617,7 @@ impl Render for EntryForm {
                         }),
                 )
             }))
+            .into_any_element()
     }
 }
 
@@ -464,66 +675,10 @@ pub fn open_entry_dialog(
             )
         }
         Surface::Sheet => {
-            open_sheet(title.into(), form, editing, window, cx);
+            crate::bottom_sheet::open(form, window, cx);
             first.focus(window, cx);
         }
     }
-}
-
-/// Sheet height, in rems, for what is around the categories — the title,
-/// the amount, the date, the comment and the gaps — and for each row of
-/// categories; what an edited record adds — its comment out, Delete, and the
-/// footer with Save; and the least of the window it leaves above itself.
-const SHEET_CHROME: f32 = 18.0;
-const SHEET_EDITING: f32 = 9.0;
-const SHEET_ROW: f32 = 5.25;
-const SHEET_GAP: f32 = 2.0;
-
-/// The form as a sheet at the bottom of a phone's window. It is as tall as
-/// the form when there is room and scrolls inside when there is not; with
-/// the keyboard up it reaches under the keyboard and keeps the form above
-/// it.
-fn open_sheet(
-    title: SharedString,
-    form: Entity<EntryForm>,
-    editing: bool,
-    window: &mut Window,
-    cx: &mut App,
-) {
-    window.open_sheet_at(Placement::Bottom, cx, move |sheet, window, cx| {
-        let rem = window.rem_size();
-        let keyboard = crate::shell::keyboard_inset(window);
-        let tiles = form.read(cx).categories.len() + 1;
-        let rows = tiles.div_ceil(Surface::Sheet.columns()) as f32;
-        let extra = if editing { SHEET_EDITING } else { 0.0 };
-        let wanted = rem * (SHEET_CHROME + SHEET_ROW * rows + extra);
-        let room = window.viewport_size().height
-            - keyboard
-            - crate::shell::status_bar_inset()
-            - rem * SHEET_GAP;
-        let height = wanted.min(room).max(Pixels::ZERO) + keyboard;
-        let sheet = sheet
-            .title(title.clone())
-            .size(height)
-            .resizable(false)
-            .rounded_t(cx.theme().radius_lg)
-            .pb(keyboard)
-            .child(div().pb_4().child(form.clone()));
-        if !editing {
-            return sheet;
-        }
-        let form = form.clone();
-        sheet.footer(
-            h_flex().w_full().justify_end().child(
-                Button::new("save")
-                    .label("Save")
-                    .primary()
-                    .on_click(move |_, window, cx| {
-                        form.update(cx, |form, cx| form.commit(window, cx))
-                    }),
-            ),
-        )
-    });
 }
 
 /// What a transfer leg opens: what it is, and the one thing to do with it.

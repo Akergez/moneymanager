@@ -22,6 +22,7 @@ mod accounts;
 mod appearance;
 mod assets;
 mod book;
+mod bottom_sheet;
 mod categories;
 mod charts;
 mod date_field;

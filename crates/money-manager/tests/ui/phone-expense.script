@@ -1,9 +1,11 @@
 # mode: demo
 # size: 400x800
 #
-# On a phone a new record is two presses and the amount: the round button
-# opens the sheet with the amount focused, and pressing a category saves the
-# record in it and closes the sheet.
+# On a phone the record is a sheet at the bottom: the round button opens it
+# with the amount focused, a category is chosen by pressing it, and Add
+# across the foot saves. The sheet goes away by its handle dragged down —
+# a short drag springs back — by a press on the dimmed window above it, and
+# by Escape, which is a phone's back.
 wait:2500
 expect:records=44
 expect:balance=1 054 237.45 ₽
@@ -12,10 +14,49 @@ wait:900
 expect:sheet=open
 type:42
 wait:300
-# "Food & dining", the first category.
-click:86,405
+# "Food & dining": chosen, not saved.
+click:86,480
+wait:500
+expect:sheet=open
+expect:records=44
+# Add.
+click:200,764
 wait:900
 expect:sheet=closed
 expect:records=45
 expect:balance=1 054 195.45 ₽
+# The handle dragged a little springs back...
+click:355,683
+wait:900
+press:200,251
+wait:200
+move:200,280
+wait:200
+release:200,280
+wait:500
+expect:sheet=open
+# ...and dragged far enough, the sheet goes away with nothing saved.
+press:200,251
+wait:200
+move:200,330
+wait:200
+move:200,460
+wait:200
+release:200,460
+wait:700
+expect:sheet=closed
+expect:records=45
+# A press above the sheet puts it away too.
+click:355,683
+wait:900
+click:200,120
+wait:700
+expect:sheet=closed
+# And Escape.
+click:355,683
+wait:900
+key:escape
+wait:700
+expect:sheet=closed
+expect:records=45
 quit

@@ -8,6 +8,8 @@
 //! Steps:
 //! - `wait:<ms>`
 //! - `click:<x>,<y>`, `rclick:<x>,<y>`, `move:<x>,<y>`
+//! - `press:<x>,<y>`, `release:<x>,<y>` — the left button down and up
+//!   apart, with `move`s and `wait`s between them for a drag
 //! - `scroll:<x>,<y>,<dy>`
 //! - `key:<keystroke>` — `ctrl-n`, `escape`, `enter`
 //! - `type:<text>`
@@ -70,6 +72,8 @@ use crate::shell::Stage;
 enum Step {
     Wait(u64),
     Click(f32, f32, bool),
+    Press(f32, f32),
+    Release(f32, f32),
     Move(f32, f32),
     Scroll(f32, f32, f32),
     Key(String),
@@ -114,6 +118,14 @@ fn parse(script: &str) -> Vec<Step> {
                 "wait" => Step::Wait(rest.parse().ok()?),
                 "click" | "rclick" => match numbers(rest)?[..] {
                     [x, y] => Step::Click(x, y, verb == "rclick"),
+                    _ => return None,
+                },
+                "press" => match numbers(rest)?[..] {
+                    [x, y] => Step::Press(x, y),
+                    _ => return None,
+                },
+                "release" => match numbers(rest)?[..] {
+                    [x, y] => Step::Release(x, y),
                     _ => return None,
                 },
                 "move" => match numbers(rest)?[..] {
@@ -193,7 +205,7 @@ fn observe(what: &str, window: &mut Window, cx: &mut App) -> Option<String> {
             return Some(if open { "open" } else { "closed" }.to_string());
         }
         "sheet" => {
-            let open = window.has_active_sheet(cx);
+            let open = crate::bottom_sheet::is_open(cx);
             return Some(if open { "open" } else { "closed" }.to_string());
         }
         "theme" => {
@@ -280,6 +292,33 @@ fn next(handle: AnyWindowHandle, mut steps: VecDeque<Step>, cx: &mut App) {
     let _ = handle.update(cx, |_, window, cx| match &step {
         Step::Wait(ms) => pause = *ms,
         Step::Move(x, y) => pointer(window, at(*x, *y), cx),
+        Step::Press(x, y) => {
+            let position = at(*x, *y);
+            pointer(window, position, cx);
+            window.dispatch_event(
+                PlatformInput::MouseDown(MouseDownEvent {
+                    button: MouseButton::Left,
+                    position,
+                    modifiers: Modifiers::default(),
+                    click_count: 1,
+                    first_mouse: false,
+                }),
+                cx,
+            );
+        }
+        Step::Release(x, y) => {
+            let position = at(*x, *y);
+            pointer(window, position, cx);
+            window.dispatch_event(
+                PlatformInput::MouseUp(MouseUpEvent {
+                    button: MouseButton::Left,
+                    position,
+                    modifiers: Modifiers::default(),
+                    click_count: 1,
+                }),
+                cx,
+            );
+        }
         Step::Click(x, y, right) => {
             let position = at(*x, *y);
             let button = if *right {

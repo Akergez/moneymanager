@@ -7,6 +7,7 @@ use gpui_kit::{Context, Entity, Pixels, SharedString, Subscription, Window, div,
 
 use super::chrome::{bottom_bar_room, system_bars, title_frame};
 use crate::book::Book;
+use crate::bottom_sheet::Sheet;
 use crate::onboarding::{self, Onboarding, OnboardingEvent};
 use crate::settings::Settings;
 use crate::ui::{self, Lucide};
@@ -37,6 +38,9 @@ pub struct Shell {
     /// The room last left for the system's bar at the bottom; see
     /// [`bottom_bar_room`].
     bar_room: f32,
+    /// The sheet over the bottom of the window, if one is open; see
+    /// [`crate::bottom_sheet`].
+    sheet: Option<Sheet>,
 }
 
 impl Shell {
@@ -56,6 +60,7 @@ impl Shell {
             _activation: activation,
             _onboarding: None,
             bar_room: 0.0,
+            sheet: None,
         }
     }
 
@@ -239,6 +244,23 @@ impl Shell {
     }
 }
 
+impl Shell {
+    pub(crate) fn sheet(&self) -> Option<&Sheet> {
+        self.sheet.as_ref()
+    }
+
+    /// Puts `sheet` over the window, or takes the one there away. Answers
+    /// the one it replaced.
+    pub(crate) fn set_sheet(
+        &mut self,
+        sheet: Option<Sheet>,
+        cx: &mut Context<Self>,
+    ) -> Option<Sheet> {
+        cx.notify();
+        std::mem::replace(&mut self.sheet, sheet)
+    }
+}
+
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let (bars_top, inset_bottom) = system_bars();
@@ -294,8 +316,13 @@ impl Render for Shell {
                 .into_any_element(),
         };
 
+        if let Some(sheet) = &self.sheet {
+            let room = Pixels::from(bars_bottom);
+            sheet.update(cx, |sheet, _| sheet.set_bar_room(room));
+        }
         let theme = cx.theme();
         v_flex()
+            .relative()
             .size_full()
             .bg(theme.background)
             .text_color(theme.foreground)
@@ -310,5 +337,6 @@ impl Render for Shell {
             )
             .child(div().flex_1().min_h_0().w_full().child(body))
             .pb(Pixels::from(bars_bottom))
+            .children(self.sheet.clone())
     }
 }

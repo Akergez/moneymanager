@@ -2,9 +2,10 @@
 # size: 1240x800
 #
 # Ctrl+N opens the record dialog on the amount. Enter there saves the record
-# in the category it starts on, that of the latest record. A category pressed
-# saves at once: Tab from the amount reaches the first of them, the most
-# used, and Space presses it. The list and the balance show both.
+# in the category it starts on, that of the latest record. Tab from the
+# amount reaches the categories, the most used first, and Space chooses one
+# without saving; back in the amount, Enter saves. The list and the balance
+# show both.
 wait:2500
 expect:records=44
 expect:balance=1 054 237.45 ₽
@@ -26,6 +27,12 @@ wait:300
 key:tab
 wait:300
 key:space
+wait:500
+expect:dialog=open
+expect:records=45
+key:shift-tab
+wait:300
+key:enter
 wait:900
 expect:dialog=closed
 expect:records=46
