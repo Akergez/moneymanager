@@ -35,9 +35,10 @@ pub struct Shell {
     /// may have changed: nothing announces a new wallpaper.
     _activation: Subscription,
     _onboarding: Option<Subscription>,
-    /// The sheet over the bottom of the window, if one is open; see
-    /// [`crate::bottom_sheet`].
-    sheet: Option<Sheet>,
+    /// The sheets over the bottom of the window, the topmost last: a form
+    /// opened from a sheet opens over it, and closing it uncovers the one
+    /// under it as it was. See [`crate::bottom_sheet`].
+    sheets: Vec<Sheet>,
 }
 
 impl Shell {
@@ -56,7 +57,7 @@ impl Shell {
             _appearance: appearance,
             _activation: activation,
             _onboarding: None,
-            sheet: None,
+            sheets: Vec::new(),
         }
     }
 
@@ -241,19 +242,21 @@ impl Shell {
 }
 
 impl Shell {
+    /// The topmost sheet, if one is open.
     pub(crate) fn sheet(&self) -> Option<&Sheet> {
-        self.sheet.as_ref()
+        self.sheets.last()
     }
 
-    /// Puts `sheet` over the window, or takes the one there away. Answers
-    /// the one it replaced.
-    pub(crate) fn set_sheet(
-        &mut self,
-        sheet: Option<Sheet>,
-        cx: &mut Context<Self>,
-    ) -> Option<Sheet> {
+    /// Puts `sheet` over the window, over any sheet there already.
+    pub(crate) fn push_sheet(&mut self, sheet: Sheet, cx: &mut Context<Self>) {
+        self.sheets.push(sheet);
         cx.notify();
-        std::mem::replace(&mut self.sheet, sheet)
+    }
+
+    /// Takes the sheet `id` away, wherever it is in the stack.
+    pub(crate) fn remove_sheet(&mut self, id: gpui_kit::EntityId, cx: &mut Context<Self>) {
+        self.sheets.retain(|sheet| sheet.entity_id() != id);
+        cx.notify();
     }
 }
 
@@ -306,8 +309,8 @@ impl Render for Shell {
                 .into_any_element(),
         };
 
-        if let Some(sheet) = &self.sheet {
-            let room = Pixels::from(bars_bottom);
+        let room = Pixels::from(bars_bottom);
+        for sheet in &self.sheets {
             sheet.update(cx, |sheet, _| sheet.set_bar_room(room));
         }
         let theme = cx.theme();
@@ -327,6 +330,6 @@ impl Render for Shell {
             )
             .child(div().flex_1().min_h_0().w_full().child(body))
             .pb(Pixels::from(bars_bottom))
-            .children(self.sheet.clone())
+            .children(self.sheets.iter().cloned())
     }
 }

@@ -1,6 +1,7 @@
 # mode: demo
 # size: 400x800
-# Account management remains reachable through the phone's account menu.
+# Account management remains reachable through the phone's account menu,
+# in a sheet from the bottom, as every form on a phone is.
 wait:2500
 expect:layout=phone
 click:160,16
@@ -8,9 +9,9 @@ wait:500
 key:up
 key:enter
 wait:800
-expect:dialog=open
+expect:sheet=open
 shot:accounts-phone
 key:escape
 wait:400
-expect:dialog=closed
+expect:sheet=closed
 quit

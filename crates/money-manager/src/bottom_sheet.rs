@@ -8,8 +8,13 @@
 //! title and its own commitment. Escape, and a phone's back, close it too:
 //! it is a layer of [`gpui_android_glue::back`].
 //!
-//! The window keeps one at a time, in the shell, which draws it over
+//! The shell keeps them, a stack of them: a sheet opened from a sheet — a
+//! new category from the record being written — opens over it, and closing
+//! it uncovers the one under it as it was. The shell draws them over
 //! everything it draws and under the toolkit's dialogs and popups.
+//!
+//! [`open_form`] is a form in a sheet: its title, its fields, Cancel and the
+//! one commitment. On a phone every form opens so (`ui::open_form`).
 //!
 //! Where the sheet stands is one number, its height above the bottom of the
 //! window: the height of what it holds when it rests, all the room there is
@@ -23,12 +28,13 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use gpui_kit::component::{ActiveTheme, FocusTrapElement, v_flex};
+use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::{ActiveTheme, FocusTrapElement, Sizable, StyledExt, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
     AnyView, App, Bounds, Context, DispatchPhase, Entity, EntityId, FocusHandle, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, TouchDragEvent, TouchPhase, Window,
-    canvas, div, px,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, SharedString, TouchDragEvent,
+    TouchPhase, Window, canvas, div, px,
 };
 
 /// How far down, in rems, the handle has to be dragged for the sheet to go
@@ -104,7 +110,7 @@ impl Motion {
     }
 }
 
-/// Opens `content` in a sheet, in place of any sheet that is open.
+/// Opens `content` in a sheet, over any sheet that is open.
 pub fn open(content: impl Into<AnyView>, window: &mut Window, cx: &mut App) {
     let Some(shell) = crate::shell::current(cx) else {
         return;
@@ -128,11 +134,11 @@ pub fn open(content: impl Into<AnyView>, window: &mut Window, cx: &mut App) {
             open
         }),
     });
-    shell.update(cx, |shell, cx| shell.set_sheet(Some(sheet), cx));
+    shell.update(cx, |shell, cx| shell.push_sheet(sheet, cx));
 }
 
-/// Closes the sheet, if one is open: it slides down out of the window, and
-/// the focus goes back to what had it before at once.
+/// Closes the topmost sheet, if one is open: it slides down out of the
+/// window, and the focus goes back to what had it before at once.
 pub fn close(window: &mut Window, cx: &mut App) {
     let Some(sheet) = current(cx) else {
         return;
@@ -162,16 +168,11 @@ pub fn close(window: &mut Window, cx: &mut App) {
     .detach();
 }
 
-/// Takes the sheet `id` out of the shell, unless another has taken its place.
+/// Takes the sheet `id` out of the shell.
 fn take_away(id: EntityId, cx: &mut App) {
-    let Some(shell) = crate::shell::current(cx) else {
-        return;
-    };
-    shell.update(cx, |shell, cx| {
-        if shell.sheet().is_some_and(|sheet| sheet.entity_id() == id) {
-            shell.set_sheet(None, cx);
-        }
-    });
+    if let Some(shell) = crate::shell::current(cx) {
+        shell.update(cx, |shell, cx| shell.remove_sheet(id, cx));
+    }
 }
 
 fn current(cx: &App) -> Option<Sheet> {
@@ -460,6 +461,104 @@ impl Render for BottomSheet {
 
 /// The entity behind a sheet, for the shell to hold.
 pub type Sheet = Entity<BottomSheet>;
+
+/// Saves a form, answering whether it was acceptable.
+type Submit = Rc<dyn Fn(&mut App) -> bool>;
+
+/// A form in a sheet: its title at the top, its fields scrolling under it,
+/// and Cancel and its one commitment across the foot, in view while the
+/// fields scroll. Without a commitment, Done alone.
+struct FormSheet {
+    title: SharedString,
+    form: AnyView,
+    commit: Option<(SharedString, Submit)>,
+}
+
+/// Opens `form` in a sheet, over any sheet that is open: what `ui::open_form`
+/// does on a phone. `submit` answers whether the form was acceptable; the
+/// sheet goes away only if it was. `first` is focused once the sheet is up,
+/// so that closing gives the focus back to what had it before.
+pub fn open_form(
+    title: SharedString,
+    commit: SharedString,
+    form: AnyView,
+    first: Option<FocusHandle>,
+    submit: Submit,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let sheet = cx.new(|_| FormSheet { title, form, commit: Some((commit, submit)) });
+    open(sheet, window, cx);
+    if let Some(first) = first {
+        first.focus(window, cx);
+    }
+}
+
+/// Opens `view` under `title` in a sheet with Done across its foot: a list
+/// to look over and change in place, where a desktop has a dialog with Done.
+pub fn open_panel(title: SharedString, view: AnyView, window: &mut Window, cx: &mut App) {
+    let sheet = cx.new(|_| FormSheet { title, form: view, commit: None });
+    open(sheet, window, cx);
+}
+
+impl Render for FormSheet {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let commit = self.commit.clone().map(|(label, submit)| {
+            Button::new("ok")
+                .label(label)
+                .primary()
+                .large()
+                .flex_1()
+                .on_click(move |_, window, cx| {
+                    if submit(cx) {
+                        close(window, cx);
+                    }
+                })
+        });
+        let dismiss = if commit.is_some() { "Cancel" } else { "Done" };
+        v_flex()
+            .flex_grow(1.)
+            .min_h_0()
+            .child(
+                div()
+                    .flex_none()
+                    .px_4()
+                    .pt_1()
+                    .pb_3()
+                    .text_lg()
+                    .font_semibold()
+                    .child(self.title.clone()),
+            )
+            .child(
+                div()
+                    .id("form-body")
+                    .flex_grow(1.)
+                    .flex_shrink(1.)
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .child(div().px_4().pb_4().child(self.form.clone())),
+            )
+            .child(
+                h_flex()
+                    .flex_none()
+                    .gap_2()
+                    .px_4()
+                    .pt_3()
+                    .pb_4()
+                    .border_t_1()
+                    .border_color(cx.theme().border)
+                    .child(
+                        Button::new("cancel")
+                            .label(dismiss)
+                            .outline()
+                            .large()
+                            .flex_1()
+                            .on_click(|_, window, cx| close(window, cx)),
+                    )
+                    .children(commit),
+            )
+    }
+}
 
 #[cfg(test)]
 mod tests {

@@ -73,6 +73,9 @@ pub fn open_accounts(book: &Entity<Book>, window: &mut Window, cx: &mut App) {
         book: book.clone(),
         _watch: cx.observe(book, |_, _, cx| cx.notify()),
     });
+    if crate::shell::Layout::of(window).is_phone() {
+        return crate::bottom_sheet::open_panel("Accounts".into(), view.into(), window, cx);
+    }
     window.open_dialog(cx, move |dialog, _, _| {
         dialog.title("Accounts").child(view.clone()).footer(
             DialogFooter::new().child(DialogClose::new().child(Button::new("done").label("Done"))),

@@ -83,6 +83,9 @@ struct EntryForm {
     /// from, and whether it is showing.
     calendar: Entity<CalendarState>,
     picking_day: bool,
+    /// Whether New… has opened the form for a category, which is chosen
+    /// once it is made.
+    making_category: bool,
     error: Option<SharedString>,
     _subscriptions: Vec<Subscription>,
 }
@@ -171,6 +174,28 @@ impl EntryForm {
                 cx.notify();
             },
         ));
+        // A category made while the form is open is offered at once; one made
+        // from its own New… is chosen, which is what it was made for.
+        subscriptions.push(cx.observe(&book, |this: &mut Self, book, cx| {
+            let fresh = book.read(cx).categories(this.mode);
+            let made = fresh
+                .iter()
+                .find(|category| !this.categories.iter().any(|known| known.id == category.id))
+                .map(|category| category.id.clone());
+            // The order the form opened with stays; what is new goes last.
+            this.categories.retain(|known| fresh.iter().any(|c| c.id == known.id));
+            for category in fresh {
+                match this.categories.iter_mut().find(|known| known.id == category.id) {
+                    Some(known) => *known = category,
+                    None => this.categories.push(category),
+                }
+            }
+            if this.making_category && made.is_some() {
+                this.making_category = false;
+                this.category = made;
+            }
+            cx.notify();
+        }));
         // A sheet has no commitment for Enter to make: Enter in the amount —
         // the keyboard's own key on a phone — saves in the chosen category.
         if surface == Surface::Sheet {
@@ -197,6 +222,7 @@ impl EntryForm {
             commenting,
             calendar,
             picking_day: false,
+            making_category: false,
             error: None,
             _subscriptions: subscriptions,
         }
@@ -310,7 +336,6 @@ impl EntryForm {
             ))
             .on_click(cx.listener(move |this, _, _, cx| this.choose(id.clone(), cx)))
         });
-        let (book, mode, surface) = (self.book.clone(), self.mode, self.surface);
         let new_category = Button::new("new-category")
             .ghost()
             .w_full()
@@ -331,10 +356,15 @@ impl EntryForm {
                     .child(gpui_kit::component::Icon::new(Lucide::Plus)),
                 "New…".into(),
             ))
-            .on_click(move |_, window, cx| {
-                surface.close(window, cx);
-                crate::categories::open_category_dialog(&book, mode, None, window, cx);
-            });
+            .on_click(cx.listener(|this, _, window, cx| {
+                // A sheet stays under the category's, with what has been
+                // written in it; a dialog has to make way for the other.
+                if this.surface == Surface::Dialog {
+                    this.surface.close(window, cx);
+                }
+                this.making_category = true;
+                crate::categories::open_category_dialog(&this.book, this.mode, None, window, cx);
+            }));
         div()
             .grid()
             .grid_cols(self.surface.columns() as u16)
@@ -715,6 +745,10 @@ fn open_transfer_leg(
     cx: &mut App,
 ) {
     let currency = book.read(cx).currency().to_string();
+    if Layout::of(window).is_phone() {
+        let view = cx.new(|_| TransferLeg { book: book.clone(), mode, leg, currency });
+        return crate::bottom_sheet::open_panel("Transfer".into(), view.into(), window, cx);
+    }
     let book = book.clone();
     window.open_dialog(cx, move |dialog, _, cx| {
         let muted = cx.theme().muted_foreground;
@@ -755,6 +789,54 @@ fn open_transfer_leg(
                     .child(DialogClose::new().child(Button::new("close").label("Close"))),
             )
     });
+}
+
+/// On a phone, what a transfer leg opens, in a sheet: what it is, and
+/// Delete beside it.
+struct TransferLeg {
+    book: Entity<Book>,
+    mode: Mode,
+    leg: Entry,
+    currency: String,
+}
+
+impl Render for TransferLeg {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let muted = cx.theme().muted_foreground;
+        let (book, mode, leg) = (self.book.clone(), self.mode, self.leg.clone());
+        v_flex()
+            .gap_3()
+            .child(
+                div().text_xl().font_semibold().child(format!(
+                    "{}{} on {}",
+                    self.mode.sign(),
+                    format_money(self.leg.amount, &self.currency),
+                    self.leg.date.format("%Y-%m-%d")
+                )),
+            )
+            .children(
+                self.leg
+                    .comment
+                    .clone()
+                    .map(|comment| div().text_sm().text_color(muted).child(comment)),
+            )
+            .child(div().text_sm().text_color(muted).child(
+                "This is one side of a transfer between two accounts. \
+                 Deleting it removes both sides.",
+            ))
+            .child(
+                Button::new("delete-transfer")
+                    .label("Delete transfer…")
+                    .danger()
+                    .outline()
+                    .large()
+                    .w_full()
+                    .on_click(move |_, window, cx| {
+                        crate::bottom_sheet::close(window, cx);
+                        confirm_delete(&book, mode, leg.clone(), window, cx);
+                    }),
+            )
+    }
 }
 
 /// Asks before deleting: there is no undo, and on a synced ledger the

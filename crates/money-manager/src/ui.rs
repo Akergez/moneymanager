@@ -145,7 +145,7 @@ const DIALOG_CHROME: f32 = 9.5;
 const DIALOG_BODY_AT_LEAST: f32 = 6.0;
 
 /// Opens a dialog around a form: its fields, Cancel, and the one commitment
-/// Enter makes. `submit` answers whether the form was acceptable; `false`
+/// Enter makes. On a phone, a sheet from the bottom with the same. `submit` answers whether the form was acceptable; `false`
 /// keeps the dialog up so the person can fix what it says is wrong.
 ///
 /// `first` is the field typing should land in. It is focused *after* the
@@ -162,6 +162,14 @@ pub fn open_form<F: Render>(
     cx: &mut App,
 ) {
     let (title, commit): (SharedString, SharedString) = (title.into(), commit.into());
+    // A phone's form is a sheet from the bottom, as a record's is.
+    if crate::shell::Layout::of(window).is_phone() {
+        let submit: Rc<dyn Fn(&mut App) -> bool> = {
+            let form = form.clone();
+            Rc::new(move |cx: &mut App| form.update(cx, |form, cx| submit(form, cx)))
+        };
+        return crate::bottom_sheet::open_form(title, commit, form.into(), first, submit, window, cx);
+    }
     let submit = Rc::new(submit);
     window.open_dialog(cx, move |dialog, window, _| {
         let (form, submit) = (form.clone(), submit.clone());
