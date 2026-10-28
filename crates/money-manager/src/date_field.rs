@@ -127,6 +127,12 @@ impl DateField {
         cx.notify();
     }
 
+    /// The box the date is typed into, for a form that lays it out apart
+    /// from the calendar's button.
+    pub fn input(&self) -> &Entity<InputState> {
+        &self.input
+    }
+
     /// The date in the field, or nothing if what is typed there is not one.
     pub fn date(&self, cx: &gpui_kit::App) -> Option<NaiveDate> {
         parse_date(&self.input.read(cx).value(), self.near)

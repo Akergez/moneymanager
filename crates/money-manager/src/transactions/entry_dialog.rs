@@ -154,6 +154,23 @@ impl EntryForm {
                 }
             },
         )];
+        // A date typed whole moves the month under the day choice to it, and
+        // the choice with it.
+        let typed = date.read(cx).input().clone();
+        subscriptions.push(cx.subscribe_in(
+            &typed,
+            window,
+            |this, _, event: &InputEvent, window, cx| {
+                if !matches!(event, InputEvent::Change) {
+                    return;
+                }
+                if let Some(day) = this.date.read(cx).date(cx) {
+                    this.calendar
+                        .update(cx, |calendar, cx| calendar.set_date(day, window, cx));
+                }
+                cx.notify();
+            },
+        ));
         // A sheet has no commitment for Enter to make: Enter in the amount —
         // the keyboard's own key on a phone — saves in the chosen category.
         if surface == Surface::Sheet {
@@ -357,7 +374,8 @@ impl EntryForm {
     }
 
     /// On a phone: today, yesterday or another day, as one segmented
-    /// control; another day is picked from a month that opens under it.
+    /// control; another day is typed, or picked from a month, both of which
+    /// open under it.
     fn render_day_choice(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let today = crate::today();
         let yesterday = today.pred_opt().unwrap_or(today);
@@ -407,11 +425,14 @@ impl EntryForm {
             .gap_2()
             .child(segments)
             .when(self.picking_day, |column| {
-                column.child(
-                    h_flex()
-                        .justify_center()
-                        .child(Calendar::new(&self.calendar).border_0()),
-                )
+                let typed = self.date.read(cx).input().clone();
+                column
+                    .child(keyboard::on_tap(Input::new(&typed), &typed, cx))
+                    .child(
+                        h_flex()
+                            .justify_center()
+                            .child(Calendar::new(&self.calendar).border_0()),
+                    )
             })
     }
 
@@ -511,12 +532,16 @@ impl EntryForm {
     /// categories, and Add across the foot, which stays in view while the
     /// rest scrolls.
     fn render_sheet(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        // Pulled up taller than it needs, the sheet's room goes to the body,
+        // and Add stays across its foot.
         v_flex()
+            .flex_grow(1.)
             .min_h_0()
             .child(self.render_sheet_header(cx))
             .child(
                 div()
                     .id("entry-body")
+                    .flex_grow(1.)
                     .flex_shrink(1.)
                     .min_h_0()
                     .overflow_y_scroll()

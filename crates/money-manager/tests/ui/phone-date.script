@@ -1,0 +1,48 @@
+# mode: demo
+# size: 400x800
+#
+# In the sheet another day is typed as well as picked: "Other day…" opens
+# the box for it over the month, and what is typed there is the record's
+# date. The handle pulls the sheet up to all the room there is, and down
+# out of the way.
+wait:2500
+click:355,683
+wait:900
+type:42
+click:320,400
+wait:500
+click:200,243
+wait:300
+key:ctrl-a
+type:2026-10-01
+wait:300
+shot:pd-typed
+click:200,764
+wait:900
+expect:sheet=closed
+expect:records=45
+shot:pd-saved
+# Pulled up past halfway, the sheet stays up; dragged far down, it goes.
+click:355,683
+wait:900
+press:200,251
+wait:200
+move:200,160
+wait:200
+move:200,90
+wait:200
+release:200,90
+wait:500
+expect:sheet=open
+shot:pd-expanded
+press:200,51
+wait:200
+move:200,300
+wait:200
+move:200,600
+wait:200
+release:200,600
+wait:700
+expect:sheet=closed
+expect:records=45
+quit
