@@ -422,7 +422,11 @@ impl ChartsView {
         let currency = self.book.read(cx).currency().to_string();
         let total: f64 = shares.iter().map(|share| share.amount).sum();
         let view = cx.entity().downgrade();
+        // Beside the card's title the group hugs its two segments: a full
+        // width would leave the title none (a touch Segments fills by
+        // default, for a switch that spans its page).
         let scope = Segments::new("pie-scope", if self.all_time { "all-time" } else { "month" })
+            .fill(false)
             .segment("month", "Month")
             .segment("all-time", "All time")
             .on_change(move |key, _, cx| {

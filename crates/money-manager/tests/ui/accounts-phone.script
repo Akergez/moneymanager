@@ -6,7 +6,7 @@
 # is a sheet too.
 wait:2500
 expect:layout=compact
-click:178,213
+click:178,141
 wait:900
 expect:sheet=open
 # "Accounts…", the last row of the menu's sheet.
