@@ -1,4 +1,4 @@
-use gpui_kit::component::TitleBar;
+use gpui_adaptive::AppFrame;
 use gpui_kit::{App, AppContext, Bounds, WindowBounds, WindowOptions};
 
 use super::Session;
@@ -14,7 +14,7 @@ pub fn open_window(cx: &mut App) {
         ))),
         window_min_size: Some(minimum_size(cx)),
         app_id: Some(crate::APP_ID.to_string()),
-        ..TitleBar::window_options()
+        ..AppFrame::window_options()
     };
     match gpui_kit::open_window(options, cx, |window, cx| {
         cx.new(|cx| Shell::new(window, cx))

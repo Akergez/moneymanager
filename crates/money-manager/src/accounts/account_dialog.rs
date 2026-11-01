@@ -1,23 +1,20 @@
-//! The account dialog: a name, a currency and what it held to begin with.
+//! The account form: a name, a currency and what it held to begin with.
 
-use gpui_android_glue::keyboard::{self, Purpose};
-use gpui_kit::component::input::{Input, InputState};
-use gpui_kit::component::{ActiveTheme, v_flex};
+use gpui_adaptive::{Fields, Form, Note, Purpose, TextField, TextFieldState, Tone};
 use gpui_kit::prelude::*;
-use gpui_kit::{App, AppContext, Context, Entity, SharedString, Window, div};
+use gpui_kit::{App, AppContext, Context, Entity, Focusable, SharedString, Window};
 use money_core::format::{format_amount, parse_amount};
 use money_core::models::Account;
 
 use crate::book::Book;
-use crate::ui;
 
 struct AccountForm {
     book: Entity<Book>,
     /// The account being changed, or nothing for a new one.
     editing: Option<Account>,
-    name: Entity<InputState>,
-    currency: Entity<InputState>,
-    opening_balance: Entity<InputState>,
+    name: Entity<TextFieldState>,
+    currency: Entity<TextFieldState>,
+    opening_balance: Entity<TextFieldState>,
     error: Option<SharedString>,
 }
 
@@ -28,24 +25,25 @@ impl AccountForm {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let mut input = |value: Option<String>, placeholder: &'static str| {
+        let mut input = |purpose: Purpose, value: Option<String>, placeholder: &'static str| {
             cx.new(|cx| {
-                let state = InputState::new(window, cx).placeholder(placeholder);
-                match value {
-                    Some(value) => state.default_value(value),
-                    None => state,
+                let mut state = TextFieldState::new(purpose, window, cx);
+                state.set_placeholder(placeholder, window, cx);
+                if let Some(value) = value {
+                    state.set_value(value, window, cx);
                 }
+                state
             })
         };
-        let name = input(editing.as_ref().map(|a| a.name.clone()), "Savings");
-        let currency = input(editing.as_ref().map(|a| a.currency.clone()), "USD");
+        let name = input(Purpose::Message, editing.as_ref().map(|a| a.name.clone()), "Savings");
+        let currency = input(Purpose::Plain, editing.as_ref().map(|a| a.currency.clone()), "USD");
         let opening_balance = input(
+            Purpose::Number,
             editing
                 .as_ref()
                 .map(|a| format_amount(a.opening_balance).replace(' ', "")),
             "0.00",
         );
-        ui::keyboard_for(&name, Purpose::Message, cx);
         AccountForm {
             book,
             editing,
@@ -59,9 +57,9 @@ impl AccountForm {
     /// Saves the account, and makes a new one the current one: it was made
     /// to be used. Answers whether it saved.
     fn submit(&mut self, cx: &mut Context<Self>) -> bool {
-        let name = self.name.read(cx).value().to_string();
-        let currency = self.currency.read(cx).value().to_string();
-        let balance_text = self.opening_balance.read(cx).value();
+        let name = self.name.read(cx).value(cx).to_string();
+        let currency = self.currency.read(cx).value(cx).to_string();
+        let balance_text = self.opening_balance.read(cx).value(cx);
         let opening_balance = if balance_text.trim().is_empty() {
             Some(0.0)
         } else {
@@ -93,42 +91,28 @@ impl AccountForm {
 }
 
 impl Render for AccountForm {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        v_flex()
-            .gap_3()
-            .child(ui::field(
-                "Name",
-                keyboard::on_tap(Input::new(&self.name), &self.name, cx),
-            ))
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        Fields::new()
+            .child(TextField::new(&self.name).label("Name"))
             .child(
-                ui::field(
-                    "Currency",
-                    keyboard::on_tap(Input::new(&self.currency), &self.currency, cx),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("A three-letter code, like USD or EUR."),
-                ),
+                TextField::new(&self.currency)
+                    .label("Currency")
+                    .help("A three-letter code, like USD or EUR."),
             )
             .child(
-                ui::field(
-                    "Opening balance",
-                    keyboard::on_tap(Input::new(&self.opening_balance), &self.opening_balance, cx),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("What the account held before its first record."),
-                ),
+                TextField::new(&self.opening_balance)
+                    .label("Opening balance")
+                    .help("What the account held before its first record."),
             )
-            .children(self.error.clone().map(|error| ui::form_error(error, cx)))
+            .children(
+                self.error
+                    .clone()
+                    .map(|error| Note::new(error).tone(Tone::Danger)),
+            )
     }
 }
 
-/// Opens the dialog for a new account, or for `account`.
+/// Opens the form for a new account, or for `account`.
 pub fn open_account_dialog(
     book: &Entity<Book>,
     account: Option<Account>,
@@ -140,14 +124,10 @@ pub fn open_account_dialog(
         None => ("New account", "Add"),
     };
     let form = cx.new(|cx| AccountForm::new(book.clone(), account, window, cx));
-    let name = gpui_kit::Focusable::focus_handle(&form.read(cx).name, cx);
-    ui::open_form(
-        title,
-        commit,
-        form,
-        Some(name),
-        AccountForm::submit,
-        window,
-        cx,
-    );
+    let name = form.read(cx).name.focus_handle(cx);
+    let saving = form.clone();
+    Form::new(title, form)
+        .commit(commit, move |_, cx| saving.update(cx, |form, cx| form.submit(cx)))
+        .focus(name)
+        .open(window, cx);
 }

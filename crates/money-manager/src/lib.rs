@@ -2,7 +2,8 @@
 //!
 //! The ledger itself — the records, the RDX store they are kept in and the
 //! sync — is the `money-core` crate, which knows nothing of an interface.
-//! This crate is the interface, drawn with GPUI through `gpui-kit`, with one
+//! This crate is the interface, drawn with the `gpui-adaptive` design system
+//! (gpui-kit underneath), once for a pointer and a finger alike, with one
 //! module per thing a person does:
 //!
 //! - [`onboarding`] — the first-run question: a new ledger, or a synced one;
@@ -20,12 +21,9 @@
 
 mod accounts;
 mod appearance;
-mod assets;
 mod book;
-mod bottom_sheet;
 mod categories;
 mod charts;
-mod date_field;
 mod fonts;
 mod onboarding;
 mod paths;
@@ -72,7 +70,7 @@ pub fn run() {
         .init();
 
     gpui_kit::application()
-        .with_assets(assets::AppAssets)
+        .with_assets(gpui_adaptive::AllAssets)
         .run(start);
 }
 
@@ -82,6 +80,7 @@ fn start(cx: &mut gpui_kit::App) {
     // On Android `launch::run` has done this already.
     #[cfg(not(target_os = "android"))]
     gpui_android_glue::init(cx);
+    gpui_adaptive::init(input_mode(), cx);
     settings::Settings::install(cx);
     fonts::install(cx);
     appearance::init(cx);
@@ -89,6 +88,17 @@ fn start(cx: &mut gpui_kit::App) {
     appearance::apply(None, cx);
     shell::init(cx);
     shell::open_window(cx);
+}
+
+/// A finger on Android; a pointer everywhere else, unless
+/// `MONEY_MANAGER_INPUT=touch` asks for a desktop window drawn for a finger,
+/// which is how the phone's skin is looked at and scripted without a phone.
+fn input_mode() -> gpui_adaptive::InputMode {
+    if cfg!(target_os = "android") || std::env::var("MONEY_MANAGER_INPUT").as_deref() == Ok("touch") {
+        gpui_adaptive::InputMode::Touch
+    } else {
+        gpui_adaptive::InputMode::Pointer
+    }
 }
 
 /// The Android entry point, called by `android-activity` on a thread of its
@@ -103,7 +113,7 @@ fn android_main(app: gpui_android_glue::launch::AndroidApp) {
     run(
         app,
         Config::new("money-manager").filter("warn,money_manager=info"),
-        assets::AppAssets,
+        gpui_adaptive::AllAssets,
         start,
     );
 }

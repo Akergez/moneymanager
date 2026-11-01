@@ -1,48 +1,49 @@
 # mode: demo
 # size: 400x800
+# input: touch
 #
-# In the sheet another day is typed as well as picked: "Other day…" opens
-# the box for it over the month, and what is typed there is the record's
+# In the sheet another day is typed as well as picked: the field under
+# Today and Yesterday takes it, and what is typed there is the record's
 # date. The handle pulls the sheet up to all the room there is, and down
 # out of the way.
 wait:2500
-click:355,683
-wait:900
+click:350,660
+wait:1000
 type:42
-click:320,400
-wait:500
-click:200,243
+# The date field.
+click:180,703
 wait:300
 key:ctrl-a
 type:2026-10-01
 wait:300
 shot:pd-typed
-click:200,764
-wait:900
+click:351,125
+wait:1000
 expect:sheet=closed
 expect:records=45
 shot:pd-saved
-# Pulled up past halfway, the sheet stays up; dragged far down, it goes.
-click:355,683
-wait:900
-press:200,251
+# Pulled up, the sheet stays up; dragged far down, it goes.
+click:350,660
+wait:1000
+press:200,88
 wait:200
-move:200,160
+move:200,60
 wait:200
-move:200,90
+move:200,30
 wait:200
-release:200,90
-wait:500
+release:200,30
+wait:600
 expect:sheet=open
 shot:pd-expanded
-press:200,51
+# The handle is at the top now.
+press:200,52
 wait:200
 move:200,300
 wait:200
 move:200,600
 wait:200
 release:200,600
-wait:700
+wait:800
 expect:sheet=closed
 expect:records=45
 quit

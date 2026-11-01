@@ -37,21 +37,6 @@ impl Mode {
             Mode::Income => "+",
         }
     }
-
-    pub fn index(self) -> usize {
-        match self {
-            Mode::Expense => 0,
-            Mode::Income => 1,
-        }
-    }
-
-    pub fn from_index(index: usize) -> Self {
-        if index == 1 {
-            Mode::Income
-        } else {
-            Mode::Expense
-        }
-    }
 }
 
 /// An expense or an income, or the leg of a transfer standing in for one.
@@ -165,12 +150,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_mode_survives_its_tab_index() {
-        for mode in Mode::ALL {
-            assert_eq!(Mode::from_index(mode.index()), mode);
-        }
-        // A tab that is not there is the first one.
-        assert_eq!(Mode::from_index(9), Mode::Expense);
+    fn each_mode_has_a_noun_of_its_own_for_the_switch_to_go_by() {
+        let nouns: Vec<_> = Mode::ALL.iter().map(|mode| mode.noun()).collect();
+        assert_eq!(nouns, ["expense", "income"]);
     }
 
     #[test]

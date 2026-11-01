@@ -6,7 +6,7 @@ wait:2500
 expect:stage=workspace
 expect:screen=transactions
 expect:mode=expense
-expect:layout=desktop
+expect:layout=expanded
 expect:account=Основной
 expect:accounts=2
 expect:records=44

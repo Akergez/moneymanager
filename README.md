@@ -3,6 +3,9 @@
 Expenses, income and transfers across accounts in different currencies, in one
 adaptive window: a table and a sidebar on a desktop, a list and a bottom bar
 on a phone. Written in Rust and drawn with [GPUI](https://www.gpui.rs/) through
+[gpui-mobile-components](https://github.com/Akergez/gpui-mobile-components),
+the design system it shares with aiddiction and matterfast: one set of screens,
+drawn for a pointer on a desktop and for a finger on a phone, on top of
 [GPUI Kit](https://gpui-kit.com).
 
 The ledger is a CRDT document (RDX, from [tresse](https://gitlab.com/ragusseven/tresse)).
@@ -25,19 +28,20 @@ are not compatible with the new repository protocol.
   icon.
 - **Charts** — one screen with all three: a pie by category (for the month or
   for all time), bars by month, and the running total through the chosen month.
-- **Accounts** — chosen at the top of the window, with the balance beside the
+- **Accounts** — chosen at the top of every screen, with the balance beside the
   name. Each has a currency and an opening balance.
 - **Transfers** — between two accounts, with the two amounts entered
   separately and the exchange rate derived from them. A transfer shows as an
   expense on one account and an income on the other; deleting either side
   deletes both.
 - **Sync** — on demand, through Tresse, with S3 or an HTTP server.
-- **CSV** — import and export all accounts through the **More** menu (`…`) at
-  the top of the window. Shortcuts: `Ctrl+Shift+I` and `Ctrl+Shift+E`.
+- **CSV** — import and export all accounts through the **More** menu (`⋯` on a
+  desktop, `⋮` on a phone) in the screen's bar. Shortcuts: `Ctrl+Shift+I` and
+  `Ctrl+Shift+E`.
 
 ## CSV import and export
 
-Open **More** (`…`) at the top of the window and choose **Import CSV…** or
+Open **More** (`⋯`, or `⋮` on a phone) in the screen's bar and choose **Import CSV…** or
 **Export CSV…**. The keyboard shortcuts are `Ctrl+Shift+I` and `Ctrl+Shift+E`.
 On Android, import opens the system document picker and export opens the system
 save dialog. Choosing a document grants access to that document; no storage
@@ -254,7 +258,8 @@ that shows both orders.
 | `Ctrl+1` / `Ctrl+2` / `Ctrl+3` | Transactions / Categories / Charts |
 | `Ctrl+M` | Switch between expenses and income |
 | `Ctrl+N` | New record (a new category on the Categories screen) |
-| `Ctrl+E` | Edit the selected record |
+| `Up` / `Down` | Select the previous / next record |
+| `Enter`, `Ctrl+E` | Open the selected record |
 | `Ctrl+T` | New transfer |
 | `Ctrl+S` | Sync |
 | `Ctrl+,` | Settings |
@@ -285,7 +290,11 @@ cargo test --workspace
 `MONEY_MANAGER_DEMO=1 cargo run -p money-manager` skips the first-run question
 and fills an *empty* installation with sample records. Point `XDG_DATA_HOME`
 and `XDG_CONFIG_HOME` somewhere disposable to try it without touching your own
-ledger.
+ledger. `MONEY_MANAGER_INPUT=touch MONEY_MANAGER_SIZE=400x800` draws the window
+the way a phone does: for a finger, with sheets, a navigation bar and a FAB.
+
+The window is drawn with the design system alone: `tests/design_system.rs`
+fails on any direct use of GPUI Kit's components in the application's sources.
 
 ## Packages
 

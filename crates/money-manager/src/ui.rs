@@ -1,27 +1,20 @@
 //! Small pieces every screen draws with.
 //!
-//! Nothing here holds state or knows what the ledger is. These exist so that
-//! the same thing looks the same in the list, the category grid and the
-//! charts without three copies of how.
+//! The window is drawn with the design system (`gpui-adaptive`): its intents
+//! for what a person does, its primitives for the parts of this application
+//! no intent is. What is here holds no state and knows nothing of the ledger
+//! beyond how a category looks.
 
-use std::rc::Rc;
 use std::sync::{Arc, OnceLock};
 
-use gpui_kit::base::actions::Confirm;
-use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::dialog::{DialogAction, DialogClose, DialogFooter};
-use gpui_kit::component::{ActiveTheme, Icon, Sizable, StyledExt, WindowExt, h_flex, v_flex};
-use gpui_kit::prelude::*;
-use gpui_kit::{
-    AnyElement, App, Context, Div, Entity, FocusHandle, Image, ImageFormat, Pixels, SharedString,
-    Window, div,
-};
+use gpui_adaptive::{Tile, TileSize};
+use gpui_kit::{Image, ImageFormat};
 
 use crate::book::CategoryLook;
 
-/// The full icon catalogue. The component library's own enum only carries the
-/// hundred icons its own widgets use.
-pub use gpui_kit::assets::IconName as Lucide;
+/// The full icon catalogue: what a category can wear goes well past the
+/// system's set.
+pub use gpui_adaptive::Lucide;
 
 /// The application's own icon — the same file the desktop shows in its
 /// launcher.
@@ -39,243 +32,8 @@ pub fn app_icon() -> Arc<Image> {
     .clone()
 }
 
-/// One option of a select that stands for a record: an account or a category,
-/// chosen by name and identified by id.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Choice {
-    pub id: Vec<u8>,
-    pub title: SharedString,
-}
-
-impl Choice {
-    pub fn new(id: Vec<u8>, title: impl Into<SharedString>) -> Self {
-        Choice {
-            id,
-            title: title.into(),
-        }
-    }
-}
-
-impl gpui_kit::component::select::SelectItem for Choice {
-    type Value = Vec<u8>;
-
-    fn title(&self) -> SharedString {
-        self.title.clone()
-    }
-
-    fn value(&self) -> &Self::Value {
-        &self.id
-    }
-}
-
-/// How large a category's tile is drawn.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TileSize {
-    /// Beside a name in a table row.
-    Row,
-    /// Leading a list row or a card.
-    Card,
-    /// The preview at the top of the category editor.
-    Preview,
-}
-
 /// A category's icon on a tint of its colour: what identifies it wherever it
 /// appears.
-pub fn category_tile(look: CategoryLook, size: TileSize, cx: &App) -> Div {
-    let tile = div()
-        .flex_none()
-        .flex()
-        .items_center()
-        .justify_center()
-        .bg(look.color.opacity(0.16))
-        .text_color(look.color);
-    match size {
-        TileSize::Row => tile
-            .size_6()
-            .rounded(cx.theme().radius / 2.)
-            .child(Icon::new(look.icon).xsmall()),
-        TileSize::Card => tile
-            .size_10()
-            .rounded(cx.theme().radius)
-            .child(Icon::new(look.icon)),
-        TileSize::Preview => tile
-            .size_12()
-            .rounded(cx.theme().radius_lg)
-            .child(Icon::new(look.icon).large()),
-    }
-}
-
-/// What a screen says when there is nothing to show: what is missing and what
-/// to do about it. `action` is the button that does it, when there is one.
-pub fn empty_state(
-    icon: Lucide,
-    title: impl Into<SharedString>,
-    hint: impl Into<SharedString>,
-    action: Option<AnyElement>,
-    cx: &App,
-) -> AnyElement {
-    v_flex()
-        .size_full()
-        .items_center()
-        .justify_center()
-        .gap_2()
-        .p_8()
-        .child(
-            Icon::new(icon)
-                .large()
-                .text_color(cx.theme().muted_foreground),
-        )
-        .child(div().font_semibold().child(title.into()))
-        .child(
-            div()
-                .text_sm()
-                .text_center()
-                .text_color(cx.theme().muted_foreground)
-                .child(hint.into()),
-        )
-        .children(action.map(|action| div().pt_2().child(action)))
-        .into_any_element()
-}
-
-/// Over an on-screen keyboard, in rems: the gap a dialog keeps from the top
-/// of the window, what its title and footer take of its height, and the
-/// least its fields are given however little is left.
-const DIALOG_GAP: f32 = 0.5;
-const DIALOG_CHROME: f32 = 9.5;
-const DIALOG_BODY_AT_LEAST: f32 = 6.0;
-
-/// Opens a dialog around a form: its fields, Cancel, and the one commitment
-/// Enter makes. On a phone, a sheet from the bottom with the same. `submit` answers whether the form was acceptable; `false`
-/// keeps the dialog up so the person can fix what it says is wrong.
-///
-/// `first` is the field typing should land in. It is focused *after* the
-/// dialog opens: the dialog remembers what had the focus before it and gives
-/// it back on closing, and that has to be the window behind it, not a field
-/// of its own that no longer exists.
-pub fn open_form<F: Render>(
-    title: impl Into<SharedString>,
-    commit: impl Into<SharedString>,
-    form: Entity<F>,
-    first: Option<FocusHandle>,
-    submit: impl Fn(&mut F, &mut Context<F>) -> bool + 'static,
-    window: &mut Window,
-    cx: &mut App,
-) {
-    let (title, commit): (SharedString, SharedString) = (title.into(), commit.into());
-    // A phone's form is a sheet from the bottom, as a record's is.
-    if crate::shell::Layout::of(window).is_phone() {
-        let submit: Rc<dyn Fn(&mut App) -> bool> = {
-            let form = form.clone();
-            Rc::new(move |cx: &mut App| form.update(cx, |form, cx| submit(form, cx)))
-        };
-        return crate::bottom_sheet::open_form(title, commit, form.into(), first, submit, window, cx);
-    }
-    let submit = Rc::new(submit);
-    window.open_dialog(cx, move |dialog, window, _| {
-        let (form, submit) = (form.clone(), submit.clone());
-        // With the on-screen keyboard up, the dialog moves to the top of
-        // what is left of the window and its fields scroll inside that:
-        // nothing being typed into is ever under the keyboard. Everything
-        // behind the dialog stays where it was.
-        let keyboard = crate::shell::keyboard_inset(window);
-        let (dialog, body) = if keyboard > Pixels::ZERO {
-            let rem = window.rem_size();
-            let top = crate::shell::status_bar_inset() + rem * DIALOG_GAP;
-            let room = window.viewport_size().height - keyboard - top - rem * DIALOG_CHROME;
-            let body = div()
-                .id("form-body")
-                .max_h(room.max(rem * DIALOG_BODY_AT_LEAST))
-                .overflow_y_scroll()
-                .child(form.clone());
-            (dialog.margin_top(top), body.into_any_element())
-        } else {
-            (dialog, form.clone().into_any_element())
-        };
-        dialog
-            .title(title.clone())
-            .child(body)
-            .footer(
-                DialogFooter::new()
-                    .child(DialogClose::new().child(Button::new("cancel").label("Cancel")))
-                    .child(
-                        DialogAction::new()
-                            .child(Button::new("ok").label(commit.clone()).primary()),
-                    ),
-            )
-            .on_ok(move |_, _, cx| form.update(cx, |form, cx| submit(form, cx)))
-    });
-    if let Some(first) = first {
-        first.focus(window, cx);
-    }
-}
-
-/// Wraps a control that Enter opens or chooses in — a select, a date picker —
-/// so that the Enter stops there. The library's select opens its list on
-/// Enter and then lets the key go on, and a dialog takes an Enter that
-/// reaches it as its commitment: without this, opening the list of
-/// categories would also try to save the form.
-pub fn choosing(control: impl IntoElement) -> Div {
-    div()
-        .w_full()
-        .on_action(|_: &Confirm, _, _| {})
-        .child(control)
-}
-
-/// A labelled control, as every form here lays one out.
-/// Tells a phone's keyboard what `input` is for whenever it has the focus: a
-/// keyboard for prose, with capitals and corrections, for a comment; one for
-/// addresses for a URL; one that learns nothing for a secret. Nothing off
-/// Android. The subscription lasts as long as the input.
-pub fn keyboard_for(
-    input: &gpui_kit::Entity<gpui_kit::component::input::InputState>,
-    purpose: gpui_android_glue::keyboard::Purpose,
-    cx: &mut App,
-) {
-    cx.subscribe(
-        input,
-        move |input, event: &gpui_kit::component::input::InputEvent, _| {
-            gpui_android_glue::keyboard::follow(input.entity_id(), event, purpose)
-        },
-    )
-    .detach();
-}
-
-pub fn field(label: impl Into<SharedString>, control: impl IntoElement) -> Div {
-    v_flex()
-        .gap_1()
-        .child(div().text_sm().font_medium().child(label.into()))
-        .child(control)
-}
-
-/// What went wrong with a form, said under it.
-pub fn form_error(message: impl Into<SharedString>, cx: &App) -> Div {
-    div()
-        .text_sm()
-        .text_color(cx.theme().danger)
-        .child(message.into())
-}
-
-/// A screen's heading row: what it is, how much of it there is, and whatever
-/// the screen puts at its trailing edge.
-pub fn heading(
-    title: impl Into<SharedString>,
-    detail: impl Into<SharedString>,
-    trailing: Option<AnyElement>,
-    cx: &App,
-) -> Div {
-    h_flex()
-        .flex_none()
-        .w_full()
-        .gap_3()
-        .child(div().text_xl().font_semibold().child(title.into()))
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .truncate()
-                .text_sm()
-                .text_color(cx.theme().muted_foreground)
-                .child(detail.into()),
-        )
-        .children(trailing)
+pub fn category_tile(look: CategoryLook, size: TileSize) -> Tile {
+    Tile::new(look.icon, look.color).size(size)
 }

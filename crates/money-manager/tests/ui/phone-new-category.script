@@ -1,28 +1,29 @@
 # mode: demo
 # size: 400x800
+# input: touch
 #
 # On a phone a category is made in a sheet, as a record is, and New… among a
 # record's categories opens it over the record's sheet: what has been typed
 # there stays, and the category made is the one chosen when it comes back.
 wait:2500
 expect:categories=6
-click:355,683
-wait:900
+click:350,660
+wait:1000
 type:42
-click:77,665
-wait:900
+click:77,518
+wait:1000
 expect:sheet=open
 type:Coffee
 wait:300
 # Add, and the record's sheet is back with its 42 and Coffee chosen.
-click:293,764
-wait:900
+click:351,90
+wait:1000
 expect:categories=7
 expect:sheet=open
 expect:records=44
 shot:pnc-back
-click:200,764
-wait:900
+click:351,125
+wait:1000
 expect:sheet=closed
 expect:records=45
 expect:balance=1 054 195.45 ₽

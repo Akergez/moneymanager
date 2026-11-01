@@ -49,7 +49,7 @@ mod tests {
 
     #[test]
     fn the_window_a_desktop_opens_has_room_for_the_widest_layout() {
-        assert!(INITIAL.0 >= crate::shell::layout::DESKTOP_FROM);
-        assert!(MINIMUM.0 < crate::shell::layout::PHONE_BELOW);
+        assert!(INITIAL.0 >= gpui_adaptive::env::EXPANDED_FROM);
+        assert!(MINIMUM.0 < gpui_adaptive::env::COMPACT_BELOW);
     }
 }

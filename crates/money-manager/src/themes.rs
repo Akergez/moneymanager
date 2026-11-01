@@ -17,7 +17,7 @@
 use std::collections::HashSet;
 use std::rc::Rc;
 
-use gpui_kit::component::{ThemeConfig, ThemeMode};
+use gpui_adaptive::theme::{ThemeConfig, ThemeMode};
 use gpui_kit::{App, Global, SharedString};
 use gpui_zed_themes::{Registry, Store};
 

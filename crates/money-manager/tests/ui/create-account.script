@@ -3,13 +3,13 @@
 # restart: wait:2000;expect:stage=workspace;expect:account=Cash;expect:main-account=Cash;expect:balance=0.00 €;quit
 # The name and currency entered at creation survive reopening.
 wait:2000
-click:620,428
+click:620,195
 wait:600
 expect:onboarding=create
-click:530,432
+click:620,221
 key:ctrl-a
 type:Cash
-click:530,528
+click:620,287
 key:ctrl-a
 type:EUR
 key:enter

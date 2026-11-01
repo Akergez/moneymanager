@@ -14,23 +14,23 @@ key:ctrl-,
 wait:900
 expect:dialog=open
 # The violet swatch, fourth in the row under "Color".
-click:619,340
+click:447,293
 wait:500
 expect:color=#6750a4
 expect:seed=#6750a4
 shot:colors-violet
 # Dark, in the row above.
-click:789,212
+click:968,188
 wait:500
 expect:theme=dark
 expect:seed=#6750a4
 shot:colors-violet-dark
 # The red one, then back to the system's.
-click:691,340
+click:519,293
 wait:500
 expect:color=#d93025
 expect:seed=#d93025
-click:450,340
+click:279,293
 wait:500
 expect:color=system
 key:escape

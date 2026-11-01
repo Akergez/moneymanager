@@ -1,139 +1,126 @@
-use gpui_android_glue::keyboard;
-use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::input::Input;
-use gpui_kit::component::spinner::Spinner;
-use gpui_kit::component::tab::{Tab, TabBar};
-use gpui_kit::component::{ActiveTheme, Disableable, Sizable, Size, StyledExt, h_flex, v_flex};
+use gpui_adaptive::prim::{column, row};
+use gpui_adaptive::{
+    ActiveScale as _, Busy, Command, Fields, Note, Screen, Segments, Stack, TextField, Tone,
+};
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, Context, Window, div, img};
+use gpui_kit::{AnyElement, Context, Window, img, rems};
+use money_core::remote::StorageType;
 
 use super::{ConnectBy, Onboarding, Step};
 use crate::ui;
 
 impl Onboarding {
+    /// A command of the page, as a button across the column.
+    fn button(command: Command) -> AnyElement {
+        command.as_button().full_width().into_any_element()
+    }
+
     /// The two answers, each a button that says what it leads to.
     fn render_choice(&self, cx: &mut Context<Self>) -> AnyElement {
-        let muted = cx.theme().muted_foreground;
-        let option = |hint: &'static str, button: Button| {
-            v_flex()
-                .gap_2()
-                .child(button.large().w_full())
-                .child(div().text_sm().text_center().text_color(muted).child(hint))
+        let (create, connect) = (cx.entity().downgrade(), cx.entity().downgrade());
+        let option = |hint: &'static str, command: Command| {
+            column()
+                .gap(cx.scale().space_s)
+                .child(Self::button(command))
+                .child(Note::new(hint))
         };
-        v_flex()
-            .gap_6()
+        column()
+            .gap(cx.scale().space_xl)
             .child(option(
                 "Starts empty on this device. You can add sync storage later.",
-                Button::new("create-ledger")
-                    .label("Create a new ledger…")
-                    .on_click(cx.listener(|this, _, _, cx| this.go_to(Step::Create, cx))),
+                Command::new("create-ledger", "Create a new ledger…").on_trigger(move |_, cx| {
+                    create.update(cx, |this, cx| this.go_to(Step::Create, cx)).ok();
+                }),
             ))
             .child(option(
                 "Brings in a ledger from a Tresse repository.",
-                Button::new("connect-ledger")
-                    .label("Connect to sync storage…")
-                    .on_click(cx.listener(|this, _, _, cx| this.go_to(Step::Connect, cx))),
+                Command::new("connect-ledger", "Connect to sync storage…").on_trigger(move |_, cx| {
+                    connect.update(cx, |this, cx| this.go_to(Step::Connect, cx)).ok();
+                }),
             ))
             .into_any_element()
     }
 
     fn render_create(&self, cx: &mut Context<Self>) -> AnyElement {
-        v_flex()
-            .gap_4()
-            .child(ui::field(
-                "Account name",
-                keyboard::on_tap(
-                    Input::new(&self.account_name).large(),
-                    &self.account_name,
-                    cx,
-                ),
-            ))
+        Fields::new()
+            .child(TextField::new(&self.account_name).label("Account name"))
             .child(
-                ui::field(
-                    "Currency",
-                    keyboard::on_tap(Input::new(&self.currency).large(), &self.currency, cx),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("A three-letter code. It is the currency of your first account."),
-                ),
+                TextField::new(&self.currency)
+                    .label("Currency")
+                    .help("A three-letter code. It is the currency of your first account."),
             )
-            .child(self.render_actions("Create", cx))
+            .child(self.render_commit("Create", cx))
             .into_any_element()
     }
 
     fn render_connect(&self, cx: &mut Context<Self>) -> AnyElement {
         let by = self.connect_by;
-        v_flex()
-            .gap_4()
-            .child(
-                TabBar::new("connect-by")
-                    .segmented()
-                    .w_full()
-                    .selected_index(match by {
-                        ConnectBy::ConfigString => 0,
-                        ConnectBy::Details => 1,
-                    })
-                    .child(Tab::new().label("Config string"))
-                    .child(Tab::new().label("Details"))
-                    .on_click(cx.listener(|this, index: &usize, _, cx| {
-                        this.connect_by = if *index == 0 {
-                            ConnectBy::ConfigString
-                        } else {
-                            ConnectBy::Details
-                        };
-                        this.error = None;
-                        cx.notify();
-                    })),
-            )
-            .child(match by {
-                ConnectBy::ConfigString => ui::field(
-                    "Config string",
-                    keyboard::on_tap(
-                        Input::new(&self.config_string).large(),
-                        &self.config_string,
-                        cx,
+        let (choose, backend) = (cx.entity().downgrade(), cx.entity().downgrade());
+        let way = Segments::new(
+            "connect-by",
+            match by {
+                ConnectBy::ConfigString => "string",
+                ConnectBy::Details => "details",
+            },
+        )
+        .segment("string", "Config string")
+        .segment("details", "Details")
+        .on_change(move |key, _, cx| {
+            let by = if key.as_ref() == "string" {
+                ConnectBy::ConfigString
+            } else {
+                ConnectBy::Details
+            };
+            choose
+                .update(cx, |this, cx| {
+                    this.connect_by = by;
+                    this.error = None;
+                    cx.notify();
+                })
+                .ok();
+        });
+        let fields = match by {
+            ConnectBy::ConfigString => Fields::new().child(
+                TextField::new(&self.config_string)
+                    .label("Config string")
+                    .help(
+                        "Exported by another device in Settings. It holds the keys, so \
+                         treat it as a password.",
                     ),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(
-                            "Exported by another device in Settings. It holds the keys, so \
-                             treat it as a password.",
-                        ),
-                ),
-                ConnectBy::Details => self.remote.render(Size::Large, cx),
-            })
-            .child(self.render_actions("Connect", cx))
+            ),
+            ConnectBy::Details => self.remote.render(move |kind: StorageType, _, cx| {
+                backend
+                    .update(cx, |this, cx| {
+                        this.remote.set_backend(kind);
+                        cx.notify();
+                    })
+                    .ok();
+            }),
+        };
+        Fields::new()
+            .child(way)
+            .child(fields)
+            .child(self.render_commit("Connect", cx))
             .into_any_element()
     }
 
-    /// Back, and the step's own commitment — the one Enter makes.
-    fn render_actions(&self, commit: &'static str, cx: &mut Context<Self>) -> impl IntoElement {
+    /// The step's own commitment — the one Enter makes — and, while the
+    /// first sync runs, that it does.
+    fn render_commit(&self, commit: &'static str, cx: &mut Context<Self>) -> AnyElement {
         let busy = self.is_connecting();
-        h_flex()
-            .gap_2()
-            .child(
-                Button::new("back")
-                    .label("Back")
-                    .large()
-                    .disabled(busy)
-                    .on_click(cx.listener(|this, _, _, cx| this.go_to(Step::Choose, cx))),
-            )
-            .child(div().flex_1())
-            .when(busy, |row| row.child(Spinner::new()))
-            .child(
-                Button::new("commit")
-                    .label(commit)
+        let this = cx.entity().downgrade();
+        column()
+            .gap(cx.scale().space_m)
+            .child(Self::button(
+                Command::new("commit", commit)
                     .primary()
-                    .large()
                     .disabled(busy)
-                    .on_click(cx.listener(|this, _, _, cx| this.submit(cx))),
-            )
+                    .on_trigger(move |_, cx| {
+                        this.update(cx, |this, cx| this.submit(cx)).ok();
+                    }),
+            ))
+            .children(busy.then(|| Busy::new("connecting").label("Downloading the ledger…")))
+            .into_any_element()
     }
 }
 
@@ -155,46 +142,33 @@ impl Render for Onboarding {
             Step::Create => self.render_create(cx),
             Step::Connect => self.render_connect(cx),
         };
-
-        let form = v_flex()
-            .w_96()
-            .max_w_full()
-            .gap_6()
-            .child(
-                v_flex()
-                    .items_center()
-                    .gap_2()
-                    .child(img(ui::app_icon()).size_16())
-                    .child(div().text_xl().font_semibold().child(title))
+        // Back, past the first step: to the first step, but not while the
+        // first sync runs.
+        let up = (self.step != Step::Choose && !self.is_connecting()).then(|| {
+            let this = cx.entity().downgrade();
+            let up: gpui_adaptive::Handler = std::rc::Rc::new(move |_, cx| {
+                this.update(cx, |this, cx| this.go_to(Step::Choose, cx)).ok();
+            });
+            up
+        });
+        Screen::new("onboarding", title)
+            .root(true)
+            .up(up)
+            .content(
+                Stack::new()
+                    .width(rems(26.))
                     .child(
-                        div()
-                            .text_sm()
-                            .text_center()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(lead),
+                        row()
+                            .gap(cx.scale().space_m)
+                            .child(img(ui::app_icon()).flex_none().size(rems(3.)))
+                            .child(Note::new(lead)),
+                    )
+                    .child(body)
+                    .children(
+                        self.error
+                            .clone()
+                            .map(|error| Note::new(error).tone(Tone::Danger)),
                     ),
-            )
-            .child(body)
-            .children(
-                self.error
-                    .clone()
-                    .map(|error| ui::form_error(error, cx).text_center()),
-            );
-
-        // The page scrolls as a whole: on a phone the details form is taller
-        // than the screen, and the keyboard takes half of that.
-        div()
-            .id("onboarding")
-            .size_full()
-            .overflow_y_scroll()
-            .child(
-                div()
-                    .min_h_full()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .p_6()
-                    .child(form),
             )
     }
 }

@@ -1,16 +1,11 @@
-use gpui_kit::component::WindowExt;
-use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::notification::Notification;
-use gpui_kit::component::{ActiveTheme, StyledExt, h_flex, v_flex};
+use gpui_adaptive::{AppFrame, Command, Empty, Notice, Tone};
 use gpui_kit::prelude::*;
-use gpui_kit::{Context, Entity, Pixels, SharedString, Subscription, Window, div, img};
+use gpui_kit::{Context, Entity, SharedString, Subscription, Window};
 
-use super::chrome::{system_bars, title_frame};
 use crate::book::Book;
-use crate::bottom_sheet::Sheet;
 use crate::onboarding::{self, Onboarding, OnboardingEvent};
 use crate::settings::Settings;
-use crate::ui::{self, Lucide};
+use crate::ui::Lucide;
 use crate::workspace::Workspace;
 
 /// What the window is showing.
@@ -35,10 +30,6 @@ pub struct Shell {
     /// may have changed: nothing announces a new wallpaper.
     _activation: Subscription,
     _onboarding: Option<Subscription>,
-    /// The sheets over the bottom of the window, the topmost last: a form
-    /// opened from a sheet opens over it, and closing it uncovers the one
-    /// under it as it was. See [`crate::bottom_sheet`].
-    sheets: Vec<Sheet>,
 }
 
 impl Shell {
@@ -57,7 +48,6 @@ impl Shell {
             _appearance: appearance,
             _activation: activation,
             _onboarding: None,
-            sheets: Vec::new(),
         }
     }
 
@@ -201,12 +191,9 @@ impl Shell {
                             let book = cx.new(|_| book);
                             book.update(cx, |book, cx| book.adopt_legacy_styles(cx));
                             shell.show_workspace(book, window, cx);
-                            window.push_notification(
-                                Notification::success(
-                                    "Data converted to Tresse. Sync settings were reset.",
-                                ),
-                                cx,
-                            );
+                            Notice::new("Data converted to Tresse. Sync settings were reset.")
+                                .tone(Tone::Success)
+                                .push(window, cx);
                             crate::settings_dialog::open(window, cx);
                         }
                         Err(error) => {
@@ -227,109 +214,40 @@ impl Shell {
         self.stage = Stage::Workspace(workspace);
         cx.notify();
     }
-
-    /// The bar a stage with nothing of its own to put in it gets: the name of
-    /// the application, and the window's buttons.
-    fn plain_bar(cx: &mut Context<Self>) -> impl IntoElement {
-        title_frame(
-            h_flex()
-                .gap_2()
-                .child(img(ui::app_icon()).flex_none().size_5())
-                .child(div().text_sm().font_semibold().child("Money Manager")),
-            cx,
-        )
-    }
-}
-
-impl Shell {
-    /// The topmost sheet, if one is open.
-    pub(crate) fn sheet(&self) -> Option<&Sheet> {
-        self.sheets.last()
-    }
-
-    /// Puts `sheet` over the window, over any sheet there already.
-    pub(crate) fn push_sheet(&mut self, sheet: Sheet, cx: &mut Context<Self>) {
-        self.sheets.push(sheet);
-        cx.notify();
-    }
-
-    /// Takes the sheet `id` away, wherever it is in the stack.
-    pub(crate) fn remove_sheet(&mut self, id: gpui_kit::EntityId, cx: &mut Context<Self>) {
-        self.sheets.retain(|sheet| sheet.entity_id() != id);
-        cx.notify();
-    }
 }
 
 impl Render for Shell {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let (bars_top, bars_bottom) = system_bars();
-        let body = match &self.stage {
-            Stage::Starting => v_flex()
-                .size_full()
-                .child(Self::plain_bar(cx))
-                .into_any_element(),
-            Stage::Upgrade => v_flex()
-                .size_full()
-                .child(Self::plain_bar(cx))
-                .child(div().flex_1().min_h_0().child(ui::empty_state(
-                    Lucide::RefreshCw,
-                    "Convert your ledger to Tresse",
-                    "Your data will be converted to the new format. Sync settings will be reset. Set up Tresse sync in Settings afterwards. The original data will be kept as a backup.",
-                    Some(Button::new("convert-ledger").primary().label("Convert and reset sync")
-                        .on_click(cx.listener(|shell, _, window, cx| shell.convert(window, cx))).into_any_element()),
-                    cx,
-                )))
-                .into_any_element(),
-            Stage::Converting => v_flex()
-                .size_full()
-                .child(Self::plain_bar(cx))
-                .child(div().flex_1().min_h_0().child(ui::empty_state(
-                    Lucide::RefreshCw, "Converting your ledger", "Saving your data in Tresse and resetting sync settings…", None, cx,
-                )))
-                .into_any_element(),
-            Stage::Welcome(onboarding) => v_flex()
-                .size_full()
-                .child(Self::plain_bar(cx))
-                .child(div().flex_1().min_h_0().child(onboarding.clone()))
-                .into_any_element(),
-            Stage::Workspace(workspace) => workspace.clone().into_any_element(),
-            Stage::Failed(error) => v_flex()
-                .size_full()
-                .child(Self::plain_bar(cx))
-                .child(div().flex_1().min_h_0().child(ui::empty_state(
-                    Lucide::TriangleAlert,
-                    "Couldn’t open the ledger",
-                    format!(
-                        "The ledger and original backup are kept in {}. ({error})",
-                        crate::paths::ledger_dir().display()
-                    ),
-                    None,
-                    cx,
-                )))
-                .into_any_element(),
-        };
-
-        let room = Pixels::from(bars_bottom);
-        for sheet in &self.sheets {
-            sheet.update(cx, |sheet, _| sheet.set_bar_room(room));
+        let frame = AppFrame::new("Money Manager");
+        match &self.stage {
+            Stage::Starting => frame,
+            Stage::Upgrade => frame.child(
+                Empty::new(Lucide::RefreshCw, "Convert your ledger to Tresse")
+                    .body(
+                        "Your data will be converted to the new format. Sync settings will be reset. \
+                         Set up Tresse sync in Settings afterwards. The original data will be kept as a backup.",
+                    )
+                    .action(Command::new("convert-ledger", "Convert and reset sync").primary().on_trigger({
+                        let shell = cx.entity().downgrade();
+                        move |window, cx| {
+                            shell.update(cx, |shell, cx| shell.convert(window, cx)).ok();
+                        }
+                    })),
+            ),
+            Stage::Converting => frame.child(
+                Empty::new(Lucide::RefreshCw, "Converting your ledger")
+                    .body("Saving your data in Tresse and resetting sync settings…"),
+            ),
+            Stage::Welcome(onboarding) => frame.child(onboarding.clone()),
+            // The sections keep clear of the system's bars and the keyboard
+            // themselves.
+            Stage::Workspace(workspace) => frame.edge_to_edge(true).child(workspace.clone()),
+            Stage::Failed(error) => frame.child(
+                Empty::new(Lucide::TriangleAlert, "Couldn’t open the ledger").body(format!(
+                    "The ledger and original backup are kept in {}. ({error})",
+                    crate::paths::ledger_dir().display()
+                )),
+            ),
         }
-        let theme = cx.theme();
-        v_flex()
-            .relative()
-            .size_full()
-            .bg(theme.background)
-            .text_color(theme.foreground)
-            // Under the status bar, in the title bar's colour so that the two
-            // read as one. The insets are the platform's own measurements.
-            .child(
-                div()
-                    .flex_none()
-                    .h(Pixels::from(bars_top))
-                    .w_full()
-                    .bg(theme.title_bar),
-            )
-            .child(div().flex_1().min_h_0().w_full().child(body))
-            .pb(Pixels::from(bars_bottom))
-            .children(self.sheets.iter().cloned())
     }
 }

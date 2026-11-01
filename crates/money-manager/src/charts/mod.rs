@@ -18,26 +18,26 @@
 
 mod data;
 
-use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::chart::{BarChart, LineChart, PieChart};
-use gpui_kit::component::switch::Switch;
-use gpui_kit::component::tab::{Tab, TabBar};
-use gpui_kit::component::{ActiveTheme, Selectable, StyledExt, h_flex, v_flex};
-use gpui_kit::prelude::*;
 use std::rc::Rc;
 
+use gpui_adaptive::chart::{BarChart, LineChart, PieChart};
+use gpui_adaptive::prim::{Scrolls as _, Surface, column, row, surface};
+use gpui_adaptive::{
+    ActiveColors as _, ActiveScale as _, Chips, Command, Env, Segments, Text, TileSize, Toggle,
+};
+use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, Context, Entity, Hsla, Pixels, ScrollHandle, SharedString, Subscription, Window,
-    div, point, relative, rems,
+    AnyElement, App, Context, Entity, Hsla, Pixels, ScrollHandle, SharedString, Subscription,
+    Window, div, point, relative, rems,
 };
 use money_core::format::{format_amount_short, format_money};
+use money_core::store::hex_encode;
 
 use data::{Chosen, DayTotal, Month, MonthTotal};
 
 use crate::book::{Book, CategoryLook, Entry, Mode};
 use crate::settings::Settings;
-use crate::shell::Layout;
-use crate::ui::{self, Lucide, TileSize};
+use crate::ui::{self, Lucide};
 
 /// The fewest months the bars show, so a young ledger still has a row of
 /// them. An older one has every month since its first record, and scrolls.
@@ -179,7 +179,7 @@ impl ChartsView {
     /// The categories' shares of one month, or of everything for `None`.
     fn shares(&self, entries: &[Entry], period: Option<Month>, cx: &Context<Self>) -> Vec<Share> {
         let book = self.book.read(cx);
-        let muted = cx.theme().muted_foreground;
+        let muted = cx.colors().muted;
         data::by_category(entries, period)
             .into_iter()
             .map(|slice| {
@@ -198,7 +198,7 @@ impl ChartsView {
 
     /// The figures for what is asked now: the ones kept, if that is what
     /// they are of, and otherwise worked out and kept.
-    fn figures(&mut self, layout: Layout, cx: &Context<Self>) -> Rc<Figures> {
+    fn figures(&mut self, compact: bool, cx: &Context<Self>) -> Rc<Figures> {
         let asked = Asked {
             ledger: self.ledger,
             mode: self.mode,
@@ -208,12 +208,12 @@ impl ChartsView {
             chosen_in_line: self.chosen_in_line.clone(),
             hide_transfers: Settings::global(cx).hides_transfers(),
             today: crate::today(),
-            months_at_least: if layout.is_phone() {
+            months_at_least: if compact {
                 MONTHS_AT_LEAST_ON_PHONE
             } else {
                 MONTHS_AT_LEAST
             },
-            muted: cx.theme().muted_foreground,
+            muted: cx.colors().muted,
         };
         if let Some((kept, figures)) = &self.figures
             && *kept == asked
@@ -287,90 +287,74 @@ impl ChartsView {
         cx.notify();
     }
 
-    /// Which categories a chart is of: "All", and one toggle for each
-    /// category there is. Pressing a category from "All" leaves that one
-    /// alone, so looking at a single category is one press, not one for
-    /// every other.
-    fn render_filters(
-        &self,
-        chart: Filtered,
-        shares: &[Share],
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    /// "Expenses · Card": what the page's subtitle says.
+    pub fn detail(&self, cx: &App) -> String {
+        let book = self.book.read(cx);
+        let account = book
+            .current_account()
+            .map_or(String::new(), |account| account.name.clone());
+        format!("{} · {account}", self.mode.title())
+    }
+
+    /// Which categories a chart is of: "All", and one chip for each category
+    /// there is. Pressing a category from "All" leaves that one alone, so
+    /// looking at a single category is one press, not one for every other.
+    fn render_filters(&self, chart: Filtered, shares: &[Share], cx: &mut Context<Self>) -> Chips {
         let chosen = self.chosen(chart);
         let offered = shares.len();
-        let all = Button::new(SharedString::from(format!("{}-all", chart.key())))
-            .label("All")
-            .outline()
-            .selected(chosen.is_empty())
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.chosen_mut(chart).clear();
-                cx.notify();
-            }));
-        h_flex()
-            .flex_wrap()
-            .gap_2()
-            .child(all)
-            .children(shares.iter().map(|share| {
-                let category_id = share.category_id.clone();
-                let selected = chosen.contains(&category_id);
-                // While everything is shown, every colour is at full
-                // strength; once some are chosen, the others fade.
-                let strength = if selected || chosen.is_empty() {
-                    1.0
-                } else {
-                    0.35
-                };
-                Button::new(SharedString::from(format!(
-                    "{}-category-{}",
-                    chart.key(),
-                    money_core::store::hex_encode(&category_id)
-                )))
-                .child(
-                    div()
-                        .flex_none()
-                        .size_2p5()
-                        .rounded_full()
-                        .bg(share.look.color.opacity(strength)),
-                )
-                .child(share.name.clone())
-                .outline()
-                .selected(selected)
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    data::toggle(this.chosen_mut(chart), &category_id, offered);
+        let view = cx.entity().downgrade();
+        let keys: Vec<(SharedString, Vec<u8>)> = shares
+            .iter()
+            .map(|share| (hex_encode(&share.category_id).into(), share.category_id.clone()))
+            .collect();
+        shares
+            .iter()
+            .fold(Chips::new(chart.key()).all("All"), |chips, share| {
+                chips
+                    .chip(
+                        hex_encode(&share.category_id),
+                        share.name.clone(),
+                        chosen.contains(&share.category_id),
+                    )
+                    .dot(share.look.color)
+            })
+            .on_toggle(move |key, _, cx| {
+                let category = key.and_then(|key| keys.iter().find(|(k, _)| k == key));
+                view.update(cx, |this, cx| {
+                    match category {
+                        Some((_, id)) => data::toggle(this.chosen_mut(chart), id, offered),
+                        None => this.chosen_mut(chart).clear(),
+                    }
                     cx.notify();
-                }))
-            }))
-            .into_any_element()
+                })
+                .ok();
+            })
     }
 
     /// The month every chart is anchored to, and the way to another.
     fn render_month_stepper(&self, cx: &mut Context<Self>) -> AnyElement {
-        h_flex()
+        let (back, on) = (cx.entity().downgrade(), cx.entity().downgrade());
+        row()
             .flex_none()
-            .gap_1()
+            .gap(cx.scale().space_xs)
             .child(
-                Button::new("previous-month")
+                Command::new("previous-month", "Previous month")
                     .icon(Lucide::ChevronLeft)
-                    .ghost()
-                    .accessibility_label("Previous month")
-                    .on_click(cx.listener(|this, _, _, cx| this.step_month(false, cx))),
+                    .on_trigger(move |_, cx| {
+                        back.update(cx, |this, cx| this.step_month(false, cx)).ok();
+                    })
+                    .as_icon_button(),
             )
             // A fixed lane, so the arrows stay where they are from one month
             // to the next and can be pressed again without looking.
+            .child(div().w(rems(10.)).child(Text::body(self.month.title()).strong().center()))
             .child(
-                div()
-                    .w_40()
-                    .text_center()
-                    .font_medium()
-                    .child(self.month.title()),
-            )
-            .child(
-                Button::new("next-month")
+                Command::new("next-month", "Next month")
                     .icon(Lucide::ChevronRight)
-                    .ghost()
-                    .accessibility_label("Next month")
-                    .on_click(cx.listener(|this, _, _, cx| this.step_month(true, cx))),
+                    .on_trigger(move |_, cx| {
+                        on.update(cx, |this, cx| this.step_month(true, cx)).ok();
+                    })
+                    .as_icon_button(),
             )
             .into_any_element()
     }
@@ -378,46 +362,34 @@ impl ChartsView {
     /// One category's share, written out: what the ring shows as an arc is
     /// here an icon, a name, an amount, a percentage and a bar, so that it
     /// can be read without telling two colours apart or pointing at one.
-    fn render_share(&self, share: &Share, largest: f64, cx: &Context<Self>) -> AnyElement {
-        let muted = cx.theme().muted_foreground;
+    fn render_share(&self, share: &Share, largest: f64, cx: &App) -> AnyElement {
+        let (colors, scale) = (cx.colors(), cx.scale());
         let of_largest = if largest > 0.0 {
             (share.amount / largest) as f32
         } else {
             0.0
         };
-        h_flex()
-            .gap_3()
-            .child(ui::category_tile(share.look, TileSize::Card, cx))
+        row()
+            .gap(scale.space_m)
+            .child(ui::category_tile(share.look, TileSize::Medium))
             .child(
-                v_flex()
+                column()
                     .flex_1()
                     .min_w_0()
-                    .gap_1p5()
+                    .gap(scale.space_xs)
                     .child(
-                        h_flex()
-                            .gap_3()
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .truncate()
-                                    .child(share.name.clone()),
-                            )
-                            .child(
-                                div()
-                                    .flex_none()
-                                    .font_medium()
-                                    .child(format_amount_short(share.amount)),
-                            )
+                        row()
+                            .gap(scale.space_m)
+                            .child(Text::body(share.name.clone()).truncate().grow())
+                            .child(Text::body(format_amount_short(share.amount)).strong())
                             // A fixed lane, so the amounts before it line up.
                             .child(
                                 div()
                                     .flex_none()
-                                    .w_16()
-                                    .text_right()
-                                    .text_sm()
-                                    .text_color(muted)
-                                    .child(format!("{:.1}%", share.share * 100.0)),
+                                    .w(rems(4.))
+                                    .flex()
+                                    .justify_end()
+                                    .child(Text::small(format!("{:.1}%", share.share * 100.0)).muted()),
                             ),
                     )
                     // Against the largest share, so the first bar is full
@@ -425,9 +397,9 @@ impl ChartsView {
                     .child(
                         div()
                             .w_full()
-                            .h_1p5()
+                            .h(rems(0.375))
                             .rounded_full()
-                            .bg(cx.theme().muted)
+                            .bg(colors.sunken)
                             .child(
                                 div()
                                     .h_full()
@@ -443,34 +415,36 @@ impl ChartsView {
     fn render_shares(
         &self,
         shares: &[Share],
-        layout: Layout,
+        compact: bool,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let currency = self.book.read(cx).currency().to_string();
         let total: f64 = shares.iter().map(|share| share.amount).sum();
-        let scope = TabBar::new("pie-scope")
-            .segmented()
-            .selected_index(usize::from(self.all_time))
-            .child(Tab::new().label("Month"))
-            .child(Tab::new().label("All time"))
-            .on_click(cx.listener(|this, index: &usize, _, cx| {
-                this.all_time = *index == 1;
-                cx.notify();
-            }));
+        let view = cx.entity().downgrade();
+        let scope = Segments::new("pie-scope", if self.all_time { "all-time" } else { "month" })
+            .segment("month", "Month")
+            .segment("all-time", "All time")
+            .on_change(move |key, _, cx| {
+                let all_time = key.as_ref() == "all-time";
+                view.update(cx, |this, cx| {
+                    this.all_time = all_time;
+                    cx.notify();
+                })
+                .ok();
+            });
 
         let body = if shares.is_empty() {
-            chart_empty("Nothing recorded in this period", cx)
+            chart_empty("Nothing recorded in this period")
         } else {
             // The ring's radii are chart geometry the component takes as
             // numbers; they are counted in rems so they scale with the rest.
             let rem = f32::from(window.rem_size());
             let currency_for_tooltip = currency.clone();
-            let muted = cx.theme().muted_foreground;
             let ring = div()
                 .flex_none()
                 .relative()
-                .size_56()
+                .size(rems(14.))
                 .child(
                     PieChart::new(shares.to_vec())
                         .value(|share| share.amount as f32)
@@ -485,36 +459,31 @@ impl ChartsView {
                 )
                 // The total, in the hole: the one number the ring is of.
                 .child(
-                    v_flex()
+                    column()
                         .absolute()
                         .inset_0()
                         .items_center()
                         .justify_center()
-                        .child(div().text_sm().text_color(muted).child("Total"))
-                        .child(
-                            div()
-                                .text_lg()
-                                .font_semibold()
-                                .child(format_amount_short(total)),
-                        )
-                        .child(div().text_sm().text_color(muted).child(currency.clone())),
+                        .child(Text::small("Total").muted())
+                        .child(Text::title(format_amount_short(total)))
+                        .child(Text::small(currency.clone()).muted()),
                 );
             let largest = shares.first().map_or(0.0, |share| share.amount);
-            let list = v_flex().flex_1().min_w_0().gap_3().children(
+            let list = column().flex_1().min_w_0().gap(cx.scale().space_m).children(
                 shares
                     .iter()
                     .map(|share| self.render_share(share, largest, cx)),
             );
-            if layout.is_phone() {
-                v_flex()
-                    .gap_4()
+            if compact {
+                column()
+                    .gap(cx.scale().space_l)
                     .items_center()
                     .child(ring)
                     .child(list.w_full())
                     .into_any_element()
             } else {
-                h_flex()
-                    .gap_6()
+                row()
+                    .gap(cx.scale().space_xl)
                     .items_start()
                     .child(ring)
                     .child(list)
@@ -526,16 +495,14 @@ impl ChartsView {
         chart_card(
             "By category",
             Some(scope.into_any_element()),
-            v_flex()
-                .gap_4()
+            column()
+                .gap(cx.scale().space_l)
                 .child(body)
                 .child(
-                    Switch::new("include-transfers")
-                        .label("Include transfers")
-                        .checked(!hide_transfers)
-                        .on_click(|included, _, cx| {
-                            let hidden = !*included;
-                            Settings::update(cx, |settings| settings.set_hides_transfers(hidden));
+                    Toggle::new("include-transfers", "Include transfers", !hide_transfers)
+                        .immediate(true)
+                        .on_change(|included, _, cx| {
+                            Settings::update(cx, |settings| settings.set_hides_transfers(!included));
                         }),
                 )
                 .into_any_element(),
@@ -547,31 +514,26 @@ impl ChartsView {
         &self,
         totals: Vec<MonthTotal>,
         shares: &[Share],
-        layout: Layout,
+        compact: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let filters = self.render_filters(Filtered::Bars, shares, cx);
         // The same height with bars and without, so choosing a category or
         // a month never makes the card jump.
-        let area = if layout.is_phone() {
-            div().h_64()
-        } else {
-            div().h_80()
-        };
+        let area = div().h(rems(if compact { 16. } else { 20. }));
         let body = if totals.iter().all(|total| total.amount == 0.0) {
-            area.child(chart_empty("Nothing recorded in these months", cx))
+            area.child(chart_empty("Nothing recorded in these months"))
                 .into_any_element()
         } else {
             let chosen = self.month;
-            let (strong, quiet) = (cx.theme().chart_2, cx.theme().chart_2.opacity(0.35));
+            let series = cx.colors().chart[1];
+            let (strong, quiet) = (series, series.opacity(0.35));
             let months = totals.len() as f32;
             area.id("bars")
                 .w_full()
-                .overflow_x_scroll()
-                // Sideways movement only. Left alone, a container that
-                // scrolls on one axis takes movement on the other for its
-                // own, and the page under the pointer would not scroll.
-                .restrict_scroll_to_axis()
+                // Sideways only, so that a swipe up the page over the bars
+                // still moves the page.
+                .scrolls_x()
                 .track_scroll(&self.bars_scroll)
                 .child(
                     // As wide as the card, or as its months need: whichever
@@ -605,8 +567,8 @@ impl ChartsView {
         chart_card(
             "By month",
             None,
-            v_flex()
-                .gap_4()
+            column()
+                .gap(cx.scale().space_l)
                 .child(filters)
                 .child(body)
                 .into_any_element(),
@@ -622,16 +584,16 @@ impl ChartsView {
     ) -> AnyElement {
         let filters = self.render_filters(Filtered::Line, shares, cx);
 
-        let area = div().h_64();
+        let area = div().h(rems(16.));
         let body = if points.last().is_none_or(|last| last.total == 0.0) {
-            area.child(chart_empty("Nothing to add up in this month", cx))
+            area.child(chart_empty("Nothing to add up in this month"))
         } else {
             let tick_margin = (points.len() / 6).max(1);
             area.child(
                 LineChart::new(points)
                     .x(|point: &DayTotal| point.day.to_string())
                     .y(|point: &DayTotal| point.total)
-                    .stroke(cx.theme().chart_2)
+                    .stroke(cx.colors().chart[1])
                     .linear()
                     .tick_margin(tick_margin)
                     .y_axis(true)
@@ -641,8 +603,8 @@ impl ChartsView {
         chart_card(
             "Running total by day",
             None,
-            v_flex()
-                .gap_4()
+            column()
+                .gap(cx.scale().space_l)
                 .child(filters)
                 .child(body)
                 .into_any_element(),
@@ -651,32 +613,17 @@ impl ChartsView {
     }
 }
 
-/// A chart with its title: one bordered region, no shadow — the charts are
-/// the page, not something lifted off it.
-fn chart_card(
-    title: &'static str,
-    trailing: Option<AnyElement>,
-    body: AnyElement,
-    cx: &gpui_kit::App,
-) -> AnyElement {
-    v_flex()
+/// A chart with its title: one card on the page.
+fn chart_card(title: &'static str, trailing: Option<AnyElement>, body: AnyElement, cx: &App) -> AnyElement {
+    let scale = cx.scale();
+    surface(Surface::Card, cx)
         .min_w_0()
-        .p_4()
-        .gap_4()
-        .border_1()
-        .border_color(cx.theme().border)
-        .rounded(cx.theme().radius_lg)
+        .p(scale.space_l)
+        .gap(scale.space_l)
         .child(
-            h_flex()
-                .gap_3()
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .text_lg()
-                        .font_semibold()
-                        .child(title),
-                )
+            row()
+                .gap(scale.space_m)
+                .child(Text::title(title).grow())
                 .children(trailing),
         )
         .child(body)
@@ -685,22 +632,21 @@ fn chart_card(
 
 /// What a chart's area says when there is nothing to draw. It fills the
 /// area it is put in, so an empty chart is as tall as a drawn one.
-fn chart_empty(message: &'static str, cx: &gpui_kit::App) -> AnyElement {
+fn chart_empty(message: &'static str) -> AnyElement {
     div()
         .size_full()
-        .min_h_32()
+        .min_h(rems(8.))
         .flex()
         .items_center()
         .justify_center()
-        .text_color(cx.theme().muted_foreground)
-        .child(message)
+        .child(Text::body(message).muted())
         .into_any_element()
 }
 
 impl Render for ChartsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let layout = Layout::of(window);
-        let figures = self.figures(layout, cx);
+        let compact = Env::of(window, cx).is_compact();
+        let figures = self.figures(compact, cx);
         let Figures {
             shares,
             every_share,
@@ -721,46 +667,22 @@ impl Render for ChartsView {
             });
         }
 
-        let by_category = self.render_shares(shares, layout, window, cx);
-        let bars = self.render_bars(totals, every_share, layout, cx);
+        let by_category = self.render_shares(shares, compact, window, cx);
+        let bars = self.render_bars(totals, every_share, compact, cx);
         let line = self.render_line(points, every_share, cx);
 
         // Each chart has the full width, in every layout. Side by side,
         // none of the three has room to be read: the bars lose their
         // months, the shares their names, the line its days.
-        let charts = v_flex()
-            .gap_4()
-            .pb_4()
+        let scale = cx.scale();
+        column()
+            .w_full()
+            .px(scale.space_m)
+            .pb(scale.space_l)
+            .gap(scale.space_l)
+            .child(row().justify_center().child(self.render_month_stepper(cx)))
             .child(bars)
             .child(by_category)
-            .child(line);
-
-        let detail = format!("{} · {}", self.mode.title(), {
-            let book = self.book.read(cx);
-            book.current_account()
-                .map_or(String::new(), |account| account.name.clone())
-        });
-        v_flex()
-            .size_full()
-            .gap_3()
-            .when(layout.is_phone(), |screen| screen.px_3().pt_1())
-            .when(!layout.is_phone(), |screen| screen.p_4())
-            .child(ui::heading(
-                "Charts",
-                detail,
-                Some(self.render_month_stepper(cx)),
-                cx,
-            ))
-            .child(
-                // The charts scroll together, under a heading that stays.
-                div()
-                    .id("charts")
-                    .flex_1()
-                    .min_h_0()
-                    .w_full()
-                    .overflow_y_scroll()
-                    .restrict_scroll_to_axis()
-                    .child(charts),
-            )
+            .child(line)
     }
 }

@@ -11,64 +11,62 @@
 
 mod render;
 
-use gpui_kit::component::WindowExt;
-use gpui_kit::component::notification::Notification;
+use gpui_adaptive::{Notice, Tone, WidthClass};
 use gpui_kit::{AppContext, Context, Entity, FocusHandle, Subscription, Window};
 
 use crate::book::{Book, Mode, SyncState};
 use crate::categories::CategoriesView;
 use crate::charts::ChartsView;
 use crate::settings::Settings;
-use crate::shell::Layout;
 use crate::transactions::TransactionsView;
 use crate::ui::Lucide;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Screen {
+pub enum Section {
     Transactions,
     Categories,
     Charts,
 }
 
-impl Screen {
-    pub const ALL: [Screen; 3] = [Screen::Transactions, Screen::Categories, Screen::Charts];
+impl Section {
+    pub const ALL: [Section; 3] = [Section::Transactions, Section::Categories, Section::Charts];
 
     pub fn title(self) -> &'static str {
         match self {
-            Screen::Transactions => "Transactions",
-            Screen::Categories => "Categories",
-            Screen::Charts => "Charts",
+            Section::Transactions => "Transactions",
+            Section::Categories => "Categories",
+            Section::Charts => "Charts",
         }
     }
 
     pub fn icon(self) -> Lucide {
         match self {
-            Screen::Transactions => Lucide::List,
-            Screen::Categories => Lucide::LayoutGrid,
-            Screen::Charts => Lucide::ChartColumn,
+            Section::Transactions => Lucide::List,
+            Section::Categories => Lucide::LayoutGrid,
+            Section::Charts => Lucide::ChartColumn,
         }
     }
 
     /// What a UI scenario calls it.
     pub fn name(self) -> &'static str {
         match self {
-            Screen::Transactions => "transactions",
-            Screen::Categories => "categories",
-            Screen::Charts => "charts",
+            Section::Transactions => "transactions",
+            Section::Categories => "categories",
+            Section::Charts => "charts",
         }
     }
 }
 
 pub struct Workspace {
     book: Entity<Book>,
-    screen: Screen,
+    screen: Section,
     mode: Mode,
     transactions: Entity<TransactionsView>,
     categories: Entity<CategoriesView>,
     charts: Entity<ChartsView>,
     focus: FocusHandle,
-    /// The layout the last frame was drawn in, for a UI scenario to ask about.
-    layout: Layout,
+    /// The width the last frame was drawn at, for a UI scenario to ask about.
+    width: WidthClass,
     /// The sync state last reported, so each outcome is announced once.
     announced: SyncState,
     _book: Subscription,
@@ -77,10 +75,7 @@ pub struct Workspace {
 impl Workspace {
     fn csv_file(&mut self, export: bool, window: &mut Window, cx: &mut Context<Self>) {
         if self.book.read(cx).is_busy() {
-            window.push_notification(
-                Notification::error("The ledger is busy. Try again when it finishes."),
-                cx,
-            );
+            Notice::error("The ledger is busy. Try again when it finishes.").push(window, cx);
             return;
         }
         let book = self.book.clone();
@@ -132,16 +127,15 @@ impl Workspace {
             }
             .await;
             this.update_in(cx, |_, window, cx| match result {
-                Ok(Some(count)) => window.push_notification(
-                    Notification::success(if export {
-                        "CSV exported".to_string()
-                    } else {
-                        format!("Imported {count} transactions")
-                    }),
-                    cx,
-                ),
+                Ok(Some(count)) => Notice::new(if export {
+                    "CSV exported".to_string()
+                } else {
+                    format!("Imported {count} transactions")
+                })
+                .tone(Tone::Success)
+                .push(window, cx),
                 Ok(None) => {}
-                Err(error) => window.push_notification(Notification::error(error), cx),
+                Err(error) => Notice::error(error).push(window, cx),
             })
             .ok();
         })
@@ -150,7 +144,7 @@ impl Workspace {
 
     pub fn new(book: Entity<Book>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mode = Mode::default();
-        let transactions = cx.new(|cx| TransactionsView::new(book.clone(), mode, window, cx));
+        let transactions = cx.new(|cx| TransactionsView::new(book.clone(), mode, cx));
         let categories = cx.new(|cx| CategoriesView::new(book.clone(), mode, cx));
         let charts = cx.new(|cx| ChartsView::new(book.clone(), mode, cx));
         // Selecting a row is what makes Edit available, and Edit is drawn
@@ -163,13 +157,13 @@ impl Workspace {
         });
         Workspace {
             book,
-            screen: Screen::Transactions,
+            screen: Section::Transactions,
             mode,
             transactions,
             categories,
             charts,
             focus: cx.focus_handle(),
-            layout: Layout::Desktop,
+            width: WidthClass::Expanded,
             announced,
             _book: watch,
         }
@@ -179,7 +173,7 @@ impl Workspace {
         &self.book
     }
 
-    pub fn screen(&self) -> Screen {
+    pub fn screen(&self) -> Section {
         self.screen
     }
 
@@ -187,8 +181,8 @@ impl Workspace {
         self.mode
     }
 
-    pub fn layout(&self) -> Layout {
-        self.layout
+    pub fn width(&self) -> WidthClass {
+        self.width
     }
 
     pub fn charts(&self) -> &Entity<ChartsView> {
@@ -201,7 +195,7 @@ impl Workspace {
         self.focus.focus(window, cx);
     }
 
-    pub fn show(&mut self, screen: Screen, cx: &mut Context<Self>) {
+    pub fn show(&mut self, screen: Section, cx: &mut Context<Self>) {
         if self.screen != screen {
             self.screen = screen;
             cx.notify();
@@ -233,10 +227,10 @@ impl Workspace {
     /// categories screen, a record everywhere else.
     fn new_record(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.screen {
-            Screen::Categories => {
+            Section::Categories => {
                 crate::categories::open_category_dialog(&self.book, self.mode, None, window, cx)
             }
-            Screen::Transactions | Screen::Charts => {
+            Section::Transactions | Section::Charts => {
                 crate::transactions::open_entry_dialog(&self.book, self.mode, None, window, cx)
             }
         }
@@ -245,13 +239,22 @@ impl Workspace {
     /// Whether there is something for Edit to open: a selected row of the
     /// table. The other screens open what is pressed, and have no selection.
     fn can_edit(&self, cx: &gpui_kit::App) -> bool {
-        self.screen == Screen::Transactions && self.transactions.read(cx).has_selection(cx)
+        self.screen == Section::Transactions && self.transactions.read(cx).has_selection(cx)
     }
 
     fn edit_record(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.can_edit(cx) {
             self.transactions
                 .update(cx, |view, cx| view.open_selected(window, cx));
+        }
+    }
+
+    /// Moves the table's selection a row up or down: the keyboard's way
+    /// through the records, Enter opening the one it is on.
+    fn step_selection(&mut self, forward: bool, cx: &mut Context<Self>) {
+        if self.screen == Section::Transactions {
+            self.transactions
+                .update(cx, |view, cx| view.step_selection(forward, cx));
         }
     }
 
@@ -273,7 +276,7 @@ impl Workspace {
         match remote {
             Ok(Some(_)) => self.book.update(cx, |book, cx| book.sync(currency, cx)),
             Ok(None) => self.open_settings(window, cx),
-            Err(error) => window.push_notification(Notification::error(error), cx),
+            Err(error) => Notice::error(error).push(window, cx),
         }
     }
 
@@ -286,13 +289,12 @@ impl Workspace {
         self.announced = state.clone();
         match state {
             SyncState::Idle | SyncState::Running => {}
-            SyncState::Done { pulled, pushed } => window.push_notification(
-                Notification::success(format!("Synced: {pulled} received, {pushed} sent")),
-                cx,
-            ),
-            SyncState::Failed(message) => {
-                window.push_notification(Notification::error(message), cx)
+            SyncState::Done { pulled, pushed } => {
+                Notice::new(format!("Synced: {pulled} received, {pushed} sent"))
+                    .tone(Tone::Success)
+                    .push(window, cx)
             }
+            SyncState::Failed(message) => Notice::error(message).push(window, cx),
         }
     }
 }

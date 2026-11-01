@@ -9,16 +9,19 @@ wait:2500
 key:ctrl-n
 wait:900
 # The calendar button, then the 13th.
-click:808,492
+click:813,496
 wait:900
-click:624,688
+click:648,670
 wait:700
 expect:dialog=open
+# The field, and a short date typed over the one picked.
+click:600,496
+wait:200
 key:ctrl-a
 type:6.10
 wait:300
 # Back to the amount.
-click:620,181
+click:620,167
 wait:300
 type:77
 wait:200
@@ -32,7 +35,7 @@ key:ctrl-n
 wait:900
 type:5
 # The date field.
-click:698,492
+click:600,496
 wait:200
 key:ctrl-a
 type:someday

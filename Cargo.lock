@@ -2381,6 +2381,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "gpui-adaptive"
+version = "0.4.0"
+source = "git+https://github.com/Akergez/gpui-mobile-components?tag=v0.4.0#d0f4f580b1e397bdfb163930803cc12befaabd68"
+dependencies = [
+ "chrono",
+ "gpui-adaptive-colors",
+ "gpui-android-glue",
+ "gpui-kit",
+]
+
+[[package]]
 name = "gpui-adaptive-colors"
 version = "0.1.0"
 source = "git+https://github.com/Akergez/gpui-adaptive-colors?branch=main#55e9997f9bf9858f7a9242bcf75a92cf15732596"
@@ -2393,8 +2404,8 @@ dependencies = [
 
 [[package]]
 name = "gpui-android-glue"
-version = "0.3.0"
-source = "git+https://github.com/Akergez/gpui-android-glue?tag=v0.3.0#305b1052e1ef10fa4a0a68eeb787d102383e82ea"
+version = "0.4.0"
+source = "git+https://github.com/Akergez/gpui-android-glue?tag=v0.4.0#a45958b730a9250a0ed7cd0c4e798c846a403429"
 dependencies = [
  "android-activity",
  "android_logger",
@@ -4281,6 +4292,7 @@ dependencies = [
  "chrono",
  "dirs 6.0.0",
  "embed-resource",
+ "gpui-adaptive",
  "gpui-adaptive-colors",
  "gpui-android-glue",
  "gpui-kit",

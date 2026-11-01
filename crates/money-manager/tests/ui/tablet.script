@@ -3,7 +3,7 @@
 #
 # Between the two breakpoints the sidebar is a rail of icons.
 wait:2500
-expect:layout=tablet
+expect:layout=medium
 key:ctrl-3
 wait:900
 expect:screen=charts

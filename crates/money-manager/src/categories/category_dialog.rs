@@ -1,23 +1,24 @@
-//! The category dialog: a name, a colour and an icon.
+//! The category form: a name, a colour and an icon.
 
-use gpui_android_glue::keyboard::{self, Purpose};
-use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::color_picker::{ColorPicker, ColorPickerEvent, ColorPickerState};
-use gpui_kit::component::input::{Input, InputEvent, InputState};
-use gpui_kit::component::{ActiveTheme, Colorize, Selectable, StyledExt, h_flex, v_flex};
+use gpui_adaptive::color_field::{parse_hex, to_hex};
+use gpui_adaptive::prim::{key_pressable, row, testable};
+use gpui_adaptive::{
+    ActiveColors as _, ActiveScale as _, ColorField, ColorFieldEvent, ColorFieldState, FieldEvent,
+    Fields, Form, Icon, Labelled, Note, Purpose, TextField, TextFieldState, TileSize, Tone,
+};
 use gpui_kit::prelude::*;
-use gpui_kit::{App, AppContext, Context, Entity, Hsla, SharedString, Subscription, Window, div};
+use gpui_kit::{App, AppContext, Context, Entity, Focusable, SharedString, Subscription, Window, div};
 
 use crate::book::{self, Book, CategoryInfo, CategoryLook, CategoryStyle, ICONS, Mode, PALETTE};
-use crate::ui::{self, Lucide, TileSize};
+use crate::ui::{self, Lucide};
 
 struct CategoryForm {
     book: Entity<Book>,
     mode: Mode,
     /// The category being changed, or nothing for a new one.
     editing: Option<CategoryInfo>,
-    name: Entity<InputState>,
-    color: Entity<ColorPickerState>,
+    name: Entity<TextFieldState>,
+    color: Entity<ColorFieldState>,
     /// The colour as it will be stored, or nothing to keep deriving it from
     /// the name.
     chosen_color: Option<String>,
@@ -25,11 +26,6 @@ struct CategoryForm {
     chosen_icon: Option<String>,
     error: Option<SharedString>,
     _subscriptions: Vec<Subscription>,
-}
-
-/// `#rrggbb` of an opaque colour, which is the only form that is stored.
-fn stored_color(color: Hsla) -> String {
-    Hsla { a: 1.0, ..color }.to_hex().to_lowercase()
 }
 
 impl CategoryForm {
@@ -45,35 +41,26 @@ impl CategoryForm {
             .map(|category| category.style.clone())
             .unwrap_or_default();
         let name = cx.new(|cx| {
-            let state = InputState::new(window, cx).placeholder("Groceries");
-            match &editing {
-                Some(category) => state.default_value(category.name.clone()),
-                None => state,
+            let mut state = TextFieldState::new(Purpose::Message, window, cx);
+            state.set_placeholder("Groceries", window, cx);
+            if let Some(category) = &editing {
+                state.set_value(category.name.clone(), window, cx);
             }
+            state
         });
-        ui::keyboard_for(&name, Purpose::Message, cx);
-        // The picker holds a colour only once one was chosen: until then
-        // the colour follows the name, and the preview beside it shows it.
-        let chosen = style
-            .color
-            .as_deref()
-            .and_then(|stored| Hsla::parse_hex(stored).ok());
-        let color = cx.new(|cx| {
-            let state = ColorPickerState::new(window, cx);
-            match chosen {
-                Some(chosen) => state.default_value(chosen),
-                None => state,
-            }
-        });
+        // The field holds a colour only once one was chosen: until then the
+        // colour follows the name, and the preview beside it shows it.
+        let chosen = style.color.as_deref().and_then(parse_hex);
+        let color = cx.new(|cx| ColorFieldState::new(chosen, window, cx));
         let subscriptions = vec![
-            cx.subscribe(&color, |this, _, event: &ColorPickerEvent, cx| {
-                let ColorPickerEvent::Change(picked) = event;
-                this.chosen_color = picked.map(stored_color);
+            cx.subscribe(&color, |this, _, event: &ColorFieldEvent, cx| {
+                let ColorFieldEvent::Change(picked) = event;
+                this.chosen_color = picked.map(to_hex);
                 cx.notify();
             }),
             // The preview is drawn from the name while no colour is chosen.
-            cx.subscribe(&name, |_, _, event: &InputEvent, cx| {
-                if matches!(event, InputEvent::Change) {
+            cx.subscribe(&name, |_, _, event: &FieldEvent, cx| {
+                if matches!(event, FieldEvent::Change) {
                     cx.notify();
                 }
             }),
@@ -93,20 +80,15 @@ impl CategoryForm {
 
     /// How the category will be drawn if saved as the form stands.
     fn look(&self, cx: &App) -> CategoryLook {
-        let name = self.name.read(cx).value();
+        let name = self.name.read(cx).value(cx);
         let color = self
             .chosen_color
             .as_deref()
-            .and_then(|stored| Hsla::parse_hex(stored).ok())
+            .and_then(parse_hex)
             .unwrap_or_else(|| {
                 // No id yet for a new category: an empty one derives from
                 // the name, exactly as the saved category will.
-                book::color_of(
-                    &CategoryStyle::default(),
-                    &[],
-                    &name,
-                    cx.theme().muted_foreground,
-                )
+                book::color_of(&CategoryStyle::default(), &[], &name, cx.colors().muted)
             });
         let icon = self
             .chosen_icon
@@ -119,7 +101,7 @@ impl CategoryForm {
     /// Saves the category — name, colour and icon in one record. Answers
     /// whether it did.
     fn submit(&mut self, cx: &mut Context<Self>) -> bool {
-        let name = self.name.read(cx).value().to_string();
+        let name = self.name.read(cx).value(cx).to_string();
         let (mode, id) = (self.mode, self.editing.as_ref().map(|c| c.id.clone()));
         let style = CategoryStyle {
             color: self.chosen_color.clone(),
@@ -149,83 +131,72 @@ impl CategoryForm {
             }
         }
     }
-}
 
-impl Render for CategoryForm {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let look = self.look(cx);
-        let featured: Vec<Hsla> = PALETTE
-            .iter()
-            .filter_map(|(stored, _)| Hsla::parse_hex(stored).ok())
-            .collect();
+    /// The icons a category can wear, eight to a row; the one worn marked.
+    fn render_icons(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let (colors, scale) = (cx.colors(), cx.scale());
         let chosen_icon = self.chosen_icon.clone();
-
-        v_flex()
-            .gap_4()
-            .child(
-                h_flex()
-                    .gap_3()
-                    .child(ui::category_tile(look, TileSize::Preview, cx))
-                    .child(div().flex_1().min_w_0().child(ui::field(
-                        "Name",
-                        keyboard::on_tap(Input::new(&self.name), &self.name, cx),
-                    ))),
-            )
-            .child(ui::field(
-                "Color",
-                h_flex()
-                    .gap_3()
-                    .child(
-                        ColorPicker::new(&self.color)
-                            .featured_colors(featured)
-                            .accessibility_label("Category color"),
-                    )
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(match &self.chosen_color {
-                                Some(_) => "Chosen",
-                                None => "Follows the name until you choose one",
-                            }),
-                    ),
-            ))
-            .child(ui::field(
-                "Icon",
-                div()
-                    .grid()
-                    .grid_cols(8)
-                    .gap_1()
-                    .children(ICONS.iter().map(|(key, icon)| {
-                        // The default icon is selected by having chosen none.
-                        let selected = match &chosen_icon {
-                            Some(chosen) => chosen == key,
-                            None => *key == "tag",
-                        };
-                        let key = key.to_string();
-                        Button::new(SharedString::from(format!("icon-{key}")))
-                            .icon(*icon)
-                            .ghost()
-                            .selected(selected)
-                            .accessibility_label(key.replace('-', " "))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.chosen_icon = Some(key.clone());
-                                cx.notify();
-                            }))
-                    })),
-            ))
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .font_normal()
-                    .child("Name, color and icon sync with the ledger."),
-            )
-            .children(self.error.clone().map(|error| ui::form_error(error, cx)))
+        div()
+            .grid()
+            .grid_cols(8)
+            .gap_1()
+            .children(ICONS.iter().map(|(key, icon)| {
+                // The default icon is chosen by having chosen none.
+                let selected = match &chosen_icon {
+                    Some(chosen) => chosen == key,
+                    None => *key == "tag",
+                };
+                let key = key.to_string();
+                testable(
+                    key_pressable(SharedString::from(format!("icon-{key}")), window, cx)
+                        .justify_center()
+                        .h(scale.target)
+                        .rounded(scale.radius_container)
+                        .when(selected, |cell| cell.bg(colors.mine).text_color(colors.on_mine))
+                        .child(Icon::new(*icon))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.chosen_icon = Some(key.clone());
+                            cx.notify();
+                        })),
+                )
+            }))
     }
 }
 
-/// Opens the dialog for a new category of `mode`, or for `category`.
+impl Render for CategoryForm {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let look = self.look(cx);
+        let featured = PALETTE.iter().filter_map(|(stored, _)| parse_hex(stored));
+        let space = cx.scale().space_m;
+        Fields::new()
+            .child(
+                row()
+                    .gap(space)
+                    .items_end()
+                    .child(ui::category_tile(look, TileSize::Large))
+                    .child(div().flex_1().min_w_0().child(TextField::new(&self.name).label("Name"))),
+            )
+            .child(
+                row()
+                    .gap(space)
+                    .items_end()
+                    .child(ColorField::new("category-color", &self.color).label("Color").featured(featured))
+                    .child(Note::new(match &self.chosen_color {
+                        Some(_) => "Chosen",
+                        None => "Follows the name until you choose one",
+                    })),
+            )
+            .child(Labelled::new("Icon", self.render_icons(window, cx)))
+            .child(Note::new("Name, color and icon sync with the ledger."))
+            .children(
+                self.error
+                    .clone()
+                    .map(|error| Note::new(error).tone(Tone::Danger)),
+            )
+    }
+}
+
+/// Opens the form for a new category of `mode`, or for `category`.
 pub fn open_category_dialog(
     book: &Entity<Book>,
     mode: Mode,
@@ -242,14 +213,10 @@ pub fn open_category_dialog(
         None => (format!("New {kind} category"), "Add"),
     };
     let form = cx.new(|cx| CategoryForm::new(book.clone(), mode, category, window, cx));
-    let name = gpui_kit::Focusable::focus_handle(&form.read(cx).name, cx);
-    ui::open_form(
-        title,
-        commit,
-        form,
-        Some(name),
-        CategoryForm::submit,
-        window,
-        cx,
-    );
+    let name = form.read(cx).name.focus_handle(cx);
+    let saving = form.clone();
+    Form::new(title, form)
+        .commit(commit, move |_, cx| saving.update(cx, |form, cx| form.submit(cx)))
+        .focus(name)
+        .open(window, cx);
 }

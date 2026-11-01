@@ -5,20 +5,17 @@
 //! ([`crate::workspace`]); and when the ledger on disk cannot be opened it
 //! says so rather than offering to make a new one over it.
 //!
-//! [`Shell`] is the one view the window holds. It owns the stage and the
-//! parts of the frame every stage shares: the strip under the system's status
-//! bar on a phone, and the window's own title bar everywhere else.
+//! [`Shell`] is the one view the window holds. It owns the stage, and draws
+//! it in the window's [`gpui_adaptive::AppFrame`]: the title bar on a
+//! desktop, the room under the status bar on a phone, and the sheets and
+//! notices over everything.
 
 mod actions;
-mod chrome;
-mod layout;
 mod open_window;
 mod shell_view;
 mod window_size;
 
 pub use actions::*;
-pub use chrome::{keyboard_inset, status_bar_inset, title_frame};
-pub use layout::Layout;
 pub use open_window::open_window;
 pub use shell_view::{Shell, Stage};
 
@@ -45,6 +42,9 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("ctrl-m", ToggleMode, Some(CONTEXT)),
         KeyBinding::new("ctrl-n", NewRecord, Some(CONTEXT)),
         KeyBinding::new("ctrl-e", EditRecord, Some(CONTEXT)),
+        KeyBinding::new("enter", EditRecord, Some(CONTEXT)),
+        KeyBinding::new("up", SelectPrevious, Some(CONTEXT)),
+        KeyBinding::new("down", SelectNext, Some(CONTEXT)),
         KeyBinding::new("ctrl-t", NewTransfer, Some(CONTEXT)),
         KeyBinding::new("ctrl-shift-i", ImportCsv, Some(CONTEXT)),
         KeyBinding::new("ctrl-shift-e", ExportCsv, Some(CONTEXT)),

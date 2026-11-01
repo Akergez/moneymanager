@@ -2,7 +2,7 @@
 # size: 1240x800
 #
 # The monthly bars and the running total are each of the categories their own
-# toggles say, and neither's choice touches the other's. From "All", one press
+# chips say, and neither's choice touches the other's. From "All", one press
 # on a category leaves that category alone; a second press on it is "All"
 # again. Switching to income forgets both: the categories chosen were of the
 # other kind.
@@ -12,31 +12,31 @@ wait:1200
 expect:screen=charts
 expect:bars-chosen=0
 expect:line-chosen=0
-# "Transfer", in the bars' row of toggles.
-click:655,190
+# "Transfer", in the bars' row of chips.
+click:595,253
 wait:500
 expect:bars-chosen=1
 expect:line-chosen=0
 # "Utilities" beside it: now two.
-click:400,190
+click:380,253
 wait:500
 expect:bars-chosen=2
 # "All" puts everything back.
-click:314,190
+click:304,253
 wait:500
 expect:bars-chosen=0
-click:655,190
+click:595,253
 wait:500
 expect:bars-chosen=1
 # Down to the running total, and "Utilities" in its row.
 scroll:700,500,-520
 wait:700
-click:400,633
+click:380,639
 wait:500
 expect:bars-chosen=1
 expect:line-chosen=1
-# The same toggle again is "All" again.
-click:400,633
+# The same chip again is "All" again.
+click:380,639
 wait:500
 expect:line-chosen=0
 key:ctrl-m

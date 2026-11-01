@@ -9,7 +9,7 @@
 use std::borrow::Cow;
 
 use gpui_kit::App;
-use gpui_kit::component::Theme;
+use gpui_adaptive::theme::Theme;
 
 /// The family the bundled UI faces belong to.
 const UI_FAMILY: &str = "Inter";

@@ -9,23 +9,19 @@
 //! for the next device. Saving writes `.tresse/remotes.toml`; the Sync command
 //! reads that file again to contact the configured origin.
 
-use gpui_adaptive_colors::Color;
-use gpui_android_glue::keyboard::{self, Purpose};
-use gpui_kit::component::button::{Button, ButtonGroup};
-use gpui_kit::component::input::{Input, InputState};
-use gpui_kit::component::notification::Notification;
-use gpui_kit::component::tooltip::Tooltip;
-use gpui_kit::component::{
-    ActiveTheme, Selectable, Sizable, Size, StyledExt, WindowExt, h_flex, v_flex,
+use gpui_adaptive::prim::row;
+use gpui_adaptive::{
+    ActiveScale as _, Command, Fields, Form, Note, Notice, Purpose, Segments, Setting,
+    Swatches, Text, TextField, TextFieldState, Tone,
 };
+use gpui_adaptive_colors::Color;
 use gpui_kit::prelude::*;
-use gpui_kit::{App, AppContext, ClipboardItem, Context, Entity, SharedString, Window, div};
+use gpui_kit::{App, AppContext, ClipboardItem, Context, Entity, SharedString, Window, rems};
 use money_core::remote::{self, RemoteConfig};
 
 use crate::appearance::{self, ColorChoice, InterfaceSize, SEEDS, ThemeChoice};
 use crate::onboarding::RemoteFields;
 use crate::settings::Settings;
-use crate::ui;
 
 mod theme_rows;
 
@@ -33,7 +29,7 @@ use theme_rows::ThemeRows;
 
 struct SettingsForm {
     themes: ThemeRows,
-    config_string: Entity<InputState>,
+    config_string: Entity<TextFieldState>,
     remote: RemoteFields,
     /// Whether a storage was set up when the dialog opened, which is what
     /// decides whether there is one to remove.
@@ -48,11 +44,11 @@ impl SettingsForm {
         let stored = loaded.unwrap_or_default();
         SettingsForm {
             themes: ThemeRows::new(window, cx),
-            config_string: {
-                let input = cx.new(|cx| InputState::new(window, cx).placeholder("tresse://…"));
-                ui::keyboard_for(&input, Purpose::Address, cx);
-                input
-            },
+            config_string: cx.new(|cx| {
+                let mut state = TextFieldState::new(Purpose::Address, window, cx);
+                state.set_placeholder("tresse://…", window, cx);
+                state
+            }),
             remote: RemoteFields::new(stored.as_ref(), window, cx),
             had_remote: stored.is_some(),
             error,
@@ -74,12 +70,12 @@ impl SettingsForm {
 
     /// Fills the fields from the pasted string.
     fn apply_string(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let text = self.config_string.read(cx).value();
+        let text = self.config_string.read(cx).value(cx);
         match RemoteConfig::from_share_string(&text) {
             Ok(remote) => {
                 self.remote.fill(&remote, window, cx);
                 self.config_string
-                    .update(cx, |input, cx| input.set_value("", window, cx));
+                    .update(cx, |field, cx| field.set_value("", window, cx));
                 self.error = None;
             }
             Err(_) => {
@@ -103,10 +99,7 @@ impl SettingsForm {
             Ok(()) => {
                 cx.write_to_clipboard(ClipboardItem::new_string(remote.to_share_string()));
                 self.error = None;
-                window.push_notification(
-                    Notification::info("Config string copied. It holds the keys."),
-                    cx,
-                );
+                Notice::new("Config string copied. It holds the keys.").push(window, cx);
             }
             Err(error) => self.error = Some(error.into()),
         }
@@ -170,232 +163,180 @@ impl SettingsForm {
     }
 }
 
-impl Render for SettingsForm {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let muted = cx.theme().muted_foreground;
+impl SettingsForm {
+    /// A command of the form that works on the form itself.
+    fn command(
+        &self,
+        id: &'static str,
+        label: &'static str,
+        cx: &mut Context<Self>,
+        run: impl Fn(&mut Self, &mut Window, &mut Context<Self>) + 'static,
+    ) -> Command {
+        let this = cx.entity().downgrade();
+        Command::new(id, label).on_trigger(move |window, cx| {
+            this.update(cx, |this, cx| run(this, window, cx)).ok();
+        })
+    }
+
+    fn render_appearance(&self, cx: &mut Context<Self>) -> Fields {
         let current = appearance::theme_choice(cx);
-        let current_size = appearance::interface_size(cx);
+        let size = appearance::interface_size(cx);
+        let themes = ThemeChoice::ALL
+            .iter()
+            .fold(Segments::new("theme", current.label()), |segments, choice| {
+                segments.segment(choice.label(), choice.label())
+            })
+            .on_change(|key, window, cx| {
+                if let Some(choice) = ThemeChoice::ALL.iter().find(|c| c.label() == key.as_ref()) {
+                    appearance::set_theme_choice(*choice, window, cx);
+                }
+            });
+        let sizes = InterfaceSize::ALL
+            .iter()
+            .fold(Segments::new("interface-size", size.label()), |segments, size| {
+                segments.segment(size.label(), size.label())
+            })
+            .on_change(|key, _, cx| {
+                if let Some(size) = InterfaceSize::ALL.iter().find(|s| s.label() == key.as_ref()) {
+                    appearance::set_interface_size(*size, cx);
+                }
+            });
+        Fields::new()
+            .child(Text::title("Appearance"))
+            .child(
+                Setting::new("Theme")
+                    .detail("System follows the desktop as it changes")
+                    .control(themes),
+            )
+            .child(
+                Setting::new("Color")
+                    .detail("System follows the desktop's accent color")
+                    .below(color_choices(appearance::color_choice(cx))),
+            )
+            .children(self.themes.render(cx))
+            .child(
+                Setting::new("Size")
+                    .detail("Text, controls and charts together")
+                    .control(sizes),
+            )
+    }
+
+    fn render_sync(&self, cx: &mut Context<Self>) -> Fields {
         let has_key = self
             .remote
             .read(cx)
             .is_ok_and(|remote| !remote.encryption_key.is_empty());
-
-        let section = |title: &'static str| div().font_semibold().child(title);
-        // The dialog is as tall as a small window already, so its body is
-        // what scrolls and the footer stays where it is.
-        div()
-            .id("settings-body")
-            .max_h_96()
-            .overflow_y_scroll()
+        let gap = cx.scale().space_s;
+        let fill = self.command("apply-string", "Fill in", cx, |this, window, cx| {
+            this.apply_string(window, cx)
+        });
+        let copy = self.command("copy-string", "Copy config string", cx, |this, window, cx| {
+            this.copy_string(window, cx)
+        });
+        let clear = self.command("clear-sync", "Clear sync fields", cx, |this, window, cx| {
+            this.remote.fill(&RemoteConfig::default(), window, cx);
+            this.error = None;
+            cx.notify();
+        });
+        let generate = (!has_key).then(|| {
+            self.command("generate-key", "Generate encryption key", cx, |this, window, cx| {
+                this.generate_key(window, cx)
+            })
+        });
+        let this = cx.entity().downgrade();
+        Fields::new()
+            .child(Text::title("Sync storage"))
+            .child(Note::new(
+                "A Tresse repository on S3 or an HTTP server. \
+                 Leave every field empty to keep the ledger on this device only.",
+            ))
             .child(
-                v_flex()
-                    .gap_4()
-                    .pr_2()
-                    .child(section("Appearance"))
+                row()
+                    .gap(gap)
+                    .items_end()
                     .child(
-                        h_flex()
-                            .gap_3()
-                            .child(
-                                v_flex().flex_1().min_w_0().child("Theme").child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(muted)
-                                        .child("System follows the desktop as it changes"),
-                                ),
-                            )
-                            .child(
-                                ButtonGroup::new("theme")
-                                    .outline()
-                                    .small()
-                                    .children(ThemeChoice::ALL.map(|choice| {
-                                        Button::new(choice.label())
-                                            .label(choice.label())
-                                            .selected(choice == current)
-                                    }))
-                                    .on_click(|picked, window, cx| {
-                                        if let Some(choice) = picked
-                                            .first()
-                                            .and_then(|index| ThemeChoice::ALL.get(*index))
-                                        {
-                                            appearance::set_theme_choice(*choice, window, cx);
-                                        }
-                                    }),
-                            ),
+                        gpui_kit::div().flex_1().min_w_0().child(
+                            TextField::new(&self.config_string)
+                                .label("Config string")
+                                .help("Paste the string another device copied to fill in the fields below."),
+                        ),
                     )
-                    // Eight choices do not fit beside their label the way
-                    // three do, so they go under it.
-                    .child(
-                        v_flex()
-                            .gap_2()
-                            .child(
-                                v_flex().child("Color").child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(muted)
-                                        .child("System follows the desktop's accent color"),
-                                ),
-                            )
-                            .child(color_choices(appearance::color_choice(cx), cx)),
-                    )
-                    .child(self.themes.render(cx))
-                    .child(
-                        h_flex()
-                            .gap_3()
-                            .child(
-                                v_flex().flex_1().min_w_0().child("Size").child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(muted)
-                                        .child("Text, controls and charts together"),
-                                ),
-                            )
-                            .child(
-                                ButtonGroup::new("interface-size")
-                                    .outline()
-                                    .small()
-                                    .children(InterfaceSize::ALL.map(|size| {
-                                        Button::new(size.label())
-                                            .label(size.label())
-                                            .selected(size == current_size)
-                                    }))
-                                    .on_click(|picked, _, cx| {
-                                        if let Some(size) = picked
-                                            .first()
-                                            .and_then(|index| InterfaceSize::ALL.get(*index))
-                                        {
-                                            appearance::set_interface_size(*size, cx);
-                                        }
-                                    }),
-                            ),
-                    )
-                    .child(section("Sync storage"))
-                    .child(div().text_sm().text_color(muted).child(
-                        "A Tresse repository on S3 or an HTTP server. \
-                         Leave every field empty to keep the ledger on this device only.",
-                    ))
-                    .child(
-                        ui::field(
-                            "Config string",
-                            h_flex()
-                                .gap_2()
-                                .child(div().flex_1().min_w_0().child(keyboard::on_tap(
-                                    Input::new(&self.config_string),
-                                    &self.config_string,
-                                    cx,
-                                )))
-                                .child(Button::new("apply-string").label("Fill in").on_click(
-                                    cx.listener(|this, _, window, cx| {
-                                        this.apply_string(window, cx)
-                                    }),
-                                )),
-                        )
-                        .child(div().text_xs().text_color(muted).child(
-                            "Paste the string another device copied to fill in the fields below.",
-                        )),
-                    )
-                    .child(self.remote.render(Size::Medium, cx))
-                    .child(
-                        h_flex()
-                            .flex_wrap()
-                            .gap_2()
-                            .child(
-                                Button::new("copy-string")
-                                    .label("Copy config string")
-                                    .small()
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.copy_string(window, cx)
-                                    })),
-                            )
-                            .child(
-                                Button::new("clear-sync")
-                                    .label("Clear sync fields")
-                                    .small()
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.remote.fill(&RemoteConfig::default(), window, cx);
-                                        this.error = None;
-                                        cx.notify();
-                                    })),
-                            )
-                            .when(!has_key, |row| {
-                                row.child(
-                                    Button::new("generate-key")
-                                        .label("Generate encryption key")
-                                        .small()
-                                        .on_click(cx.listener(|this, _, window, cx| {
-                                            this.generate_key(window, cx)
-                                        })),
-                                )
-                            }),
-                    )
-                    .when(self.had_remote, |column| {
-                        column.child(div().text_xs().text_color(muted).child(
-                            "Emptying the fields stops syncing. \
-                             The ledger on this device and in the bucket both stay.",
-                        ))
-                    })
-                    .children(self.error.clone().map(|error| ui::form_error(error, cx))),
+                    .child(fill.as_button()),
+            )
+            .child(self.remote.render(move |kind, _, cx| {
+                this.update(cx, |this, cx| {
+                    this.remote.set_backend(kind);
+                    cx.notify();
+                })
+                .ok();
+            }))
+            .child(
+                row()
+                    .flex_wrap()
+                    .gap(gap)
+                    .child(copy.as_button())
+                    .child(clear.as_button())
+                    .children(generate.map(Command::as_button)),
+            )
+            .children(self.had_remote.then(|| {
+                Note::new(
+                    "Emptying the fields stops syncing. \
+                     The ledger on this device and in the bucket both stay.",
+                )
+            }))
+            .children(
+                self.error
+                    .clone()
+                    .map(|error| Note::new(error).tone(Tone::Danger)),
             )
     }
 }
 
-/// The system's colour as a button, then ours as swatches. A swatch shows
-/// the seed itself rather than what a scheme makes of it, since that is what
-/// tells them apart; the one chosen is ringed, and the interface around it
-/// has already taken its colour.
-fn color_choices(current: ColorChoice, cx: &App) -> impl IntoElement {
-    let (ring, gap) = (cx.theme().foreground, cx.theme().background);
-    h_flex()
-        .flex_wrap()
-        .gap_2()
-        .child(
-            Button::new("color-system")
-                .label("System")
-                .outline()
-                .small()
-                .selected(current == ColorChoice::System)
-                .on_click(|_, _, cx| appearance::set_color_choice(ColorChoice::System, cx)),
-        )
-        .children(SEEDS.into_iter().filter_map(|(stored, name)| {
-            let color = Color::parse_hex(stored)?;
-            let choice = ColorChoice::Seed(color);
-            Some(
-                div()
-                    .id(stored)
-                    .flex_none()
-                    .size_6()
-                    .rounded_full()
-                    .cursor_pointer()
-                    // The ring is a border in the text colour around a
-                    // border in the background's, so it stands off the
-                    // swatch whatever colour that is.
-                    .when(current == choice, |swatch| {
-                        swatch.border_2().border_color(ring)
-                    })
-                    .child(
-                        div()
-                            .size_full()
-                            .rounded_full()
-                            .border_2()
-                            .border_color(gap)
-                            .bg(gpui_adaptive_colors::hsla(color)),
-                    )
-                    .tooltip(move |window, cx| Tooltip::new(name).build(window, cx))
-                    .on_click(move |_, _, cx| appearance::set_color_choice(choice, cx)),
-            )
-        }))
+impl Render for SettingsForm {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let space = cx.scale().space_xl;
+        gpui_adaptive::prim::column()
+            .gap(space)
+            .child(self.render_appearance(cx))
+            .child(self.render_sync(cx))
+    }
 }
 
-/// Opens the settings dialog. Nothing in it reads or writes the ledger: the
-/// storage it records is used by the Sync command, not from here.
+/// The system's colour, then ours as swatches. A swatch shows the seed
+/// itself rather than what a scheme makes of it, since that is what tells
+/// them apart.
+fn color_choices(current: ColorChoice) -> Swatches {
+    let picked = match current {
+        ColorChoice::System => None,
+        ColorChoice::Seed(color) => SEEDS
+            .into_iter()
+            .find(|(stored, _)| Color::parse_hex(stored) == Some(color))
+            .map(|(stored, _)| stored),
+    };
+    SEEDS
+        .into_iter()
+        .filter_map(|(stored, name)| Some((stored, name, Color::parse_hex(stored)?)))
+        .fold(
+            Swatches::new("colors", picked).unset("System"),
+            |swatches, (stored, name, color)| {
+                swatches.swatch(stored, name, gpui_adaptive_colors::hsla(color))
+            },
+        )
+        .on_pick(|key, _, cx| {
+            let choice = key
+                .and_then(|key| Color::parse_hex(key))
+                .map_or(ColorChoice::System, ColorChoice::Seed);
+            appearance::set_color_choice(choice, cx);
+        })
+}
+
+/// Opens the settings. Nothing in them reads or writes the ledger: the
+/// storage they record is used by the Sync command, not from here.
 pub fn open(window: &mut Window, cx: &mut App) {
     let form = cx.new(|cx| SettingsForm::new(window, cx));
-    ui::open_form(
-        "Settings",
-        "Save",
-        form,
-        None,
-        SettingsForm::submit,
-        window,
-        cx,
-    );
+    let saving = form.clone();
+    Form::new("Settings", form)
+        .commit("Save", move |_, cx| saving.update(cx, |form, cx| form.submit(cx)))
+        .width(rems(44.))
+        .open(window, cx);
 }

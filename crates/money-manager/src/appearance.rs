@@ -11,7 +11,7 @@
 //! goes on being a matter of `Theme::change`.
 
 use gpui_adaptive_colors::{AdaptiveColors, Color, Options, Seed, Source};
-use gpui_kit::component::{Theme, ThemeMode};
+use gpui_adaptive::theme::{Theme, ThemeMode};
 use gpui_kit::{App, Pixels, Window};
 
 use crate::settings::Settings;

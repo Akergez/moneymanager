@@ -8,8 +8,7 @@
 mod connect_form;
 mod render;
 
-use gpui_android_glue::keyboard::Purpose;
-use gpui_kit::component::input::{InputEvent, InputState};
+use gpui_adaptive::{FieldEvent, Purpose, TextFieldState};
 use gpui_kit::{
     App, AppContext, Context, Entity, EventEmitter, SharedString, Subscription, Window,
 };
@@ -48,9 +47,9 @@ struct Connecting {
 pub struct Onboarding {
     step: Step,
     connect_by: ConnectBy,
-    currency: Entity<InputState>,
-    account_name: Entity<InputState>,
-    config_string: Entity<InputState>,
+    currency: Entity<TextFieldState>,
+    account_name: Entity<TextFieldState>,
+    config_string: Entity<TextFieldState>,
     remote: RemoteFields,
     connecting: Option<Connecting>,
     error: Option<SharedString>,
@@ -83,29 +82,28 @@ pub fn create_ledger(name: &str, currency: &str, cx: &mut App) -> Result<Entity<
 impl Onboarding {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let default_currency = Settings::global(cx).default_currency();
-        let account_name = cx.new(|cx| {
-            InputState::new(window, cx)
-                .default_value("Основной")
-                .placeholder("Account name")
-        });
-        let currency = cx.new(|cx| {
-            InputState::new(window, cx)
-                .default_value(default_currency)
-                .placeholder("USD")
-        });
-        let config_string = cx.new(|cx| InputState::new(window, cx).placeholder("tresse://…"));
-        crate::ui::keyboard_for(&account_name, Purpose::Message, cx);
-        crate::ui::keyboard_for(&config_string, Purpose::Address, cx);
+        let mut field = |purpose: Purpose, value: &str, placeholder: &'static str| {
+            let value = value.to_string();
+            cx.new(|cx| {
+                let mut state = TextFieldState::new(purpose, window, cx);
+                state.set_placeholder(placeholder, window, cx);
+                state.set_value(value, window, cx);
+                state
+            })
+        };
+        let account_name = field(Purpose::Message, "Основной", "Account name");
+        let currency = field(Purpose::Plain, &default_currency, "USD");
+        let config_string = field(Purpose::Address, "", "tresse://…");
         let remote = RemoteFields::new(None, window, cx);
 
         // Enter in any field is the same as the step's button.
         let mut subscriptions: Vec<Subscription> = remote
-            .inputs()
+            .fields()
             .into_iter()
             .chain([&account_name, &currency, &config_string])
-            .map(|input| {
-                cx.subscribe_in(input, window, |this, _, event: &InputEvent, _, cx| {
-                    if matches!(event, InputEvent::PressEnter { .. }) {
+            .map(|field| {
+                cx.subscribe(field, |this, _, event: &FieldEvent, cx| {
+                    if matches!(event, FieldEvent::Submit) {
                         this.submit(cx);
                     }
                 })
@@ -166,8 +164,8 @@ impl Onboarding {
     }
 
     fn create(&mut self, cx: &mut Context<Self>) {
-        let currency = self.currency.read(cx).value().to_string();
-        let name = self.account_name.read(cx).value().to_string();
+        let currency = self.currency.read(cx).value(cx).to_string();
+        let name = self.account_name.read(cx).value(cx).to_string();
         match create_ledger(&name, &currency, cx) {
             Ok(book) => cx.emit(OnboardingEvent::Ready(book)),
             Err(error) => {
@@ -181,7 +179,7 @@ impl Onboarding {
     fn remote_from_form(&self, cx: &App) -> Result<RemoteConfig, String> {
         let remote = match self.connect_by {
             ConnectBy::ConfigString => {
-                let text = self.config_string.read(cx).value();
+                let text = self.config_string.read(cx).value(cx);
                 if text.trim().is_empty() {
                     return Err("Paste the config string first.".to_string());
                 }

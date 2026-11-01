@@ -13,37 +13,40 @@ key:ctrl-,
 wait:900
 expect:dialog=open
 # Down to "More themes", scrolling over the dialog's own rows, and Browse.
-scroll:620,200,-200
+scroll:620,400,-200
 wait:500
-click:772,335
+click:953,260
 wait:1500
+shot:th-browse
 # The search box has the keyboard; one extension is left, and its Install.
 type:samp
 wait:500
-click:775,468
+shot:th-search
+click:956,382
 wait:2000
 expect:themes=2
 expect:dark-theme=Color scheme
 shot:themes-installed
 # The Dark theme list, and "Sample Dark" in it under the scheme.
-click:709,265
+click:872,201
 wait:700
-click:662,360
+shot:th-list
+click:808,296
 wait:700
 expect:dark-theme=Sample Dark
 expect:light-theme=Color scheme
 # Back up to Theme, and Dark: the window wears it.
-scroll:620,200,300
+scroll:620,400,600
 wait:500
-click:789,212
+click:968,188
 wait:700
 expect:theme=dark
 expect:wearing=Sample Dark
 shot:themes-worn
 # Down again and Remove, a line lower now that the install has been reported.
-scroll:620,200,-200
+scroll:620,400,-200
 wait:500
-click:767,499
+click:948,413
 wait:1500
 expect:themes=0
 expect:dark-theme=Color scheme

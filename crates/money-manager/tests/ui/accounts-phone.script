@@ -1,14 +1,17 @@
 # mode: demo
 # size: 400x800
-# Account management remains reachable through the phone's account menu,
-# in a sheet from the bottom, as every form on a phone is.
+# input: touch
+# Account management is reachable through the account switcher under the
+# page's title, whose menu is a sheet on a phone, and the list of accounts
+# is a sheet too.
 wait:2500
-expect:layout=phone
-click:160,16
-wait:500
-key:up
-key:enter
-wait:800
+expect:layout=compact
+click:178,213
+wait:900
+expect:sheet=open
+# "Accounts…", the last row of the menu's sheet.
+click:100,759
+wait:1200
 expect:sheet=open
 shot:accounts-phone
 key:escape

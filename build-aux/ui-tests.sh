@@ -12,6 +12,7 @@
 #
 #   # mode: demo | fresh | legacy      the sample ledger, or an installation with none
 #   # size: 1240x800          the window it was written against
+#   # input: touch            optional: drawn for a finger, as on a phone
 #   # restart: wait:2000;expect:account=Cash;quit   optional second launch
 #
 # It passes when the application reaches the script's `quit` and exits with
@@ -139,6 +140,7 @@ for file in "${files[@]}"; do
     MONEY_MANAGER_SIZE="${size:-1240x800}" MONEY_MANAGER_SCRIPT="$script"
     MONEY_MANAGER_THEMES_API="http://127.0.0.1:$registry_port"
   )
+  [[ $(header "$file" input) == touch ]] && env+=(MONEY_MANAGER_INPUT=touch)
   case $mode in
     demo) env+=(MONEY_MANAGER_DEMO=1) ;;
     fresh) ;;

@@ -13,6 +13,8 @@ gpui_kit::actions!(
         ToggleMode,
         NewRecord,
         EditRecord,
+        SelectPrevious,
+        SelectNext,
         NewTransfer,
         ImportCsv,
         ExportCsv,

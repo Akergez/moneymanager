@@ -6,7 +6,7 @@
 wait:2000
 expect:stage=upgrade
 shot:migration-notice
-click:620,475
+click:620,495
 wait:2000
 expect:stage=workspace
 expect:accounts=1

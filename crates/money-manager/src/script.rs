@@ -28,7 +28,8 @@
 //! - `onboarding=choose|create|connect` — which step the first-run form is on
 //! - `screen=transactions|categories|charts`
 //! - `mode=expense|income`
-//! - `layout=phone|tablet|desktop`
+//! - `layout=compact|medium|expanded` — the width class the last frame was
+//!   drawn at
 //! - `account=<name>` — the account every screen is about
 //! - `main-account=<name>`, `visible-accounts=<n>` — synced account preferences
 //! - `accounts=<n>`, `records=<n>`, `categories=<n>` — how many there are, the
@@ -36,8 +37,9 @@
 //! - `balance=<amount>` — the current account's, as the top bar writes it
 //! - `bars-chosen=<n>`, `line-chosen=<n>` — how many categories the monthly
 //!   bars and the running total are each narrowed to; 0 is all of them
-//! - `dialog=open|closed`, `sheet=open|closed` — a sheet is the form for a
-//!   record on a phone
+//! - `dialog=open|closed`, `sheet=open|closed` — the same: whether a form or
+//!   a panel is over the page, a dialog for a pointer and a sheet for a
+//!   finger (`MONEY_MANAGER_INPUT=touch`)
 //! - `theme=light|dark`
 //! - `color=system|#rrggbb` — where the colours are set to come from
 //! - `seed=#rrggbb` — the colour the scheme in use was made from, which with
@@ -56,7 +58,8 @@
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
-use gpui_kit::component::{ActiveTheme as _, ThemeMode, WindowExt as _};
+use gpui_adaptive::theme::ThemeMode;
+use gpui_adaptive::{ActiveColors as _, Sheet};
 use gpui_kit::{
     AnyWindowHandle, App, KeyUpEvent, Keystroke, Modifiers, MouseButton, MouseDownEvent,
     MouseMoveEvent, MouseUpEvent, Pixels, PlatformInput, Point, ScrollDelta, ScrollWheelEvent,
@@ -200,16 +203,14 @@ fn observe(what: &str, window: &mut Window, cx: &mut App) -> Option<String> {
     // The ones that are about the window rather than about a ledger.
     match what {
         "stage" => return Some(stage.to_string()),
-        "dialog" => {
-            let open = window.has_active_dialog(cx);
-            return Some(if open { "open" } else { "closed" }.to_string());
-        }
-        "sheet" => {
-            let open = crate::bottom_sheet::is_open(cx);
+        // A form or a panel over the page: a dialog for a pointer, a sheet
+        // for a finger.
+        "dialog" | "sheet" => {
+            let open = Sheet::is_open(window, cx);
             return Some(if open { "open" } else { "closed" }.to_string());
         }
         "theme" => {
-            let dark = cx.theme().mode.is_dark();
+            let dark = cx.colors().dark;
             return Some(if dark { "dark" } else { "light" }.to_string());
         }
         "color" => {
@@ -222,7 +223,7 @@ fn observe(what: &str, window: &mut Window, cx: &mut App) -> Option<String> {
         "themes" => return Some(crate::themes::count(cx).to_string()),
         "light-theme" => return Some(crate::themes::worn(ThemeMode::Light, cx).to_string()),
         "dark-theme" => return Some(crate::themes::worn(ThemeMode::Dark, cx).to_string()),
-        "wearing" => return Some(cx.theme().theme_name().to_string()),
+        "wearing" => return Some(gpui_adaptive::theme::name(cx).to_string()),
         "remote" => {
             let set = Settings::global(cx).remote().ok()?.is_some();
             return Some(if set { "yes" } else { "no" }.to_string());
@@ -251,7 +252,7 @@ fn observe(what: &str, window: &mut Window, cx: &mut App) -> Option<String> {
             Mode::Income => "income",
         }
         .to_string(),
-        "layout" => workspace.layout().name().to_string(),
+        "layout" => workspace.width().name().to_string(),
         "account" => book
             .current_account()
             .map(|account| account.name.clone())

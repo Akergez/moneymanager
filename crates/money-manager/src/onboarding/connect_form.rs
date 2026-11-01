@@ -1,93 +1,76 @@
 //! Tresse S3 and HTTP remote fields, shared by onboarding and Settings.
 //!
-//! Shared by the first-run form and the settings dialog, so the two cannot
+//! Shared by the first-run form and the settings form, so the two cannot
 //! come to disagree about what a remote is made of.
 
-use gpui_android_glue::keyboard::{self, Purpose};
-use gpui_kit::component::button::{Button, ButtonGroup};
-use gpui_kit::component::input::{Input, InputState};
-use gpui_kit::component::{Selectable, Sizable, Size, v_flex};
-use gpui_kit::prelude::*;
-use gpui_kit::{App, AppContext, Context, Div, Entity, Subscription, Window};
+use gpui_adaptive::{Fields, Labelled, Purpose, Segments, TextField, TextFieldState};
+use gpui_kit::{App, AppContext, Context, Entity, Window};
 use money_core::remote::{RemoteConfig, StorageType};
 
-use crate::ui;
-
 pub struct RemoteFields {
-    backend: Entity<InputState>,
-    url: Entity<InputState>,
-    token: Entity<InputState>,
-    endpoint: Entity<InputState>,
-    region: Entity<InputState>,
-    bucket: Entity<InputState>,
-    access_key_id: Entity<InputState>,
-    secret_access_key: Entity<InputState>,
-    prefix: Entity<InputState>,
-    encryption_key: Entity<InputState>,
-    _backend_watch: Subscription,
+    backend: StorageType,
+    url: Entity<TextFieldState>,
+    token: Entity<TextFieldState>,
+    endpoint: Entity<TextFieldState>,
+    region: Entity<TextFieldState>,
+    bucket: Entity<TextFieldState>,
+    access_key_id: Entity<TextFieldState>,
+    secret_access_key: Entity<TextFieldState>,
+    prefix: Entity<TextFieldState>,
+    encryption_key: Entity<TextFieldState>,
 }
 
 impl RemoteFields {
-    /// The inputs, holding `remote` when there is one to edit.
+    /// The fields, holding `remote` when there is one to edit.
     pub fn new<T: 'static>(
         remote: Option<&RemoteConfig>,
         window: &mut Window,
         cx: &mut Context<T>,
     ) -> Self {
-        let mut input = |value: Option<&str>, placeholder: &'static str, masked: bool| {
+        let mut field = |purpose: Purpose, value: Option<&str>, placeholder: &'static str| {
             let value = value.unwrap_or_default().to_string();
             cx.new(|cx| {
-                InputState::new(window, cx)
-                    .default_value(value)
-                    .placeholder(placeholder)
-                    .masked(masked)
+                let mut state = TextFieldState::new(purpose, window, cx);
+                state.set_placeholder(placeholder, window, cx);
+                state.set_value(value, window, cx);
+                state
             })
         };
-        let backend = input(
-            Some(
-                match remote.map(|r| r.storage_type).unwrap_or(StorageType::S3) {
-                    StorageType::S3 => "s3",
-                    StorageType::Http => "http",
-                },
-            ),
-            "",
-            false,
-        );
-        let url = input(
+        let url = field(
+            Purpose::Address,
             remote.map(|r| r.url.as_str()),
             "https://sync.example.com",
-            false,
         );
-        let token = input(remote.map(|r| r.token.as_str()), "", true);
-        let endpoint = input(
+        let token = field(Purpose::Password, remote.map(|r| r.token.as_str()), "");
+        let endpoint = field(
+            Purpose::Address,
             remote.map(|r| r.s3_endpoint.as_str()),
             "https://s3.us-east-1.amazonaws.com",
-            false,
         );
-        let region = input(remote.map(|r| r.s3_region.as_str()), "us-east-1", false);
-        let bucket = input(remote.map(|r| r.s3_bucket.as_str()), "my-bucket", false);
-        let access_key_id = input(remote.map(|r| r.s3_access_key_id.as_str()), "", false);
-        let secret_access_key = input(remote.map(|r| r.s3_secret_access_key.as_str()), "", true);
-        let prefix = input(remote.map(|r| r.repo_id.as_str()), "money-manager", false);
-        let encryption_key = input(
+        let region = field(Purpose::Plain, remote.map(|r| r.s3_region.as_str()), "us-east-1");
+        let bucket = field(Purpose::Plain, remote.map(|r| r.s3_bucket.as_str()), "my-bucket");
+        let access_key_id = field(
+            Purpose::Login,
+            remote.map(|r| r.s3_access_key_id.as_str()),
+            "",
+        );
+        let secret_access_key = field(
+            Purpose::Password,
+            remote.map(|r| r.s3_secret_access_key.as_str()),
+            "",
+        );
+        let prefix = field(
+            Purpose::Plain,
+            remote.map(|r| r.repo_id.as_str()),
+            "money-manager",
+        );
+        let encryption_key = field(
+            Purpose::Password,
             remote.map(|r| r.encryption_key.as_str()),
             "Required: 32-byte base64 key",
-            true,
         );
-        for (input, purpose) in [
-            (&url, Purpose::Address),
-            (&token, Purpose::Password),
-            (&endpoint, Purpose::Address),
-            (&access_key_id, Purpose::Login),
-            (&secret_access_key, Purpose::Password),
-            (&encryption_key, Purpose::Password),
-        ] {
-            ui::keyboard_for(input, purpose, cx);
-        }
-        let backend_watch = cx.observe(&backend, |_, _, cx| cx.notify());
         RemoteFields {
-            backend,
-            _backend_watch: backend_watch,
+            backend: remote.map_or(StorageType::S3, |r| r.storage_type),
             url,
             token,
             endpoint,
@@ -100,9 +83,9 @@ impl RemoteFields {
         }
     }
 
-    pub fn inputs(&self) -> [&Entity<InputState>; 10] {
+    /// Every field, in the order they are laid out.
+    pub fn fields(&self) -> [&Entity<TextFieldState>; 9] {
         [
-            &self.backend,
             &self.url,
             &self.token,
             &self.endpoint,
@@ -115,18 +98,17 @@ impl RemoteFields {
         ]
     }
 
+    pub fn set_backend(&mut self, backend: StorageType) {
+        self.backend = backend;
+    }
+
     /// What the fields currently say, trimmed. The secret is not trimmed
     /// away at its ends by anything but this: stores hand it out without
     /// spaces, and one pasted with a trailing newline is the usual mistake.
     pub fn read(&self, cx: &App) -> Result<RemoteConfig, String> {
-        let text = |input: &Entity<InputState>| input.read(cx).value().trim().to_string();
-        let encryption_key = text(&self.encryption_key);
+        let text = |field: &Entity<TextFieldState>| field.read(cx).value(cx).trim().to_string();
         Ok(RemoteConfig {
-            storage_type: match text(&self.backend).as_str() {
-                "s3" => StorageType::S3,
-                "http" => StorageType::Http,
-                _ => return Err("Backend must be s3 or http.".into()),
-            },
+            storage_type: self.backend,
             url: text(&self.url),
             token: text(&self.token),
             s3_endpoint: text(&self.endpoint),
@@ -135,18 +117,14 @@ impl RemoteFields {
             s3_access_key_id: text(&self.access_key_id),
             s3_secret_access_key: text(&self.secret_access_key),
             repo_id: text(&self.prefix),
-            encryption_key,
+            encryption_key: text(&self.encryption_key),
         })
     }
 
     /// Replaces what the fields hold, as pasting a config string does.
-    pub fn fill(&self, remote: &RemoteConfig, window: &mut Window, cx: &mut App) {
+    pub fn fill(&mut self, remote: &RemoteConfig, window: &mut Window, cx: &mut App) {
+        self.backend = remote.storage_type;
         let values = [
-            match remote.storage_type {
-                StorageType::S3 => "s3",
-                StorageType::Http => "http",
-            }
-            .to_string(),
             remote.url.clone(),
             remote.token.clone(),
             remote.s3_endpoint.clone(),
@@ -157,51 +135,44 @@ impl RemoteFields {
             remote.repo_id.clone(),
             remote.encryption_key.clone(),
         ];
-        for (input, value) in self.inputs().into_iter().zip(values) {
-            input.update(cx, |input, cx| input.set_value(value, window, cx));
+        for (field, value) in self.fields().into_iter().zip(values) {
+            field.update(cx, |field, cx| field.set_value(value, window, cx));
         }
     }
 
-    pub fn render(&self, size: Size, cx: &App) -> Div {
-        let is_http = self.backend.read(cx).value() == "http";
-        let backend = self.backend.clone();
-        let field = |label: &'static str, input: &Entity<InputState>| {
-            ui::field(
-                label,
-                keyboard::on_tap(Input::new(input).with_size(size), input, cx),
-            )
+    /// The fields of the storage type chosen, under the choice of it.
+    /// `on_backend` is told when another is chosen.
+    pub fn render(
+        &self,
+        on_backend: impl Fn(StorageType, &mut Window, &mut App) + 'static,
+    ) -> Fields {
+        let is_http = self.backend == StorageType::Http;
+        let backend = Segments::new("remote-backend", if is_http { "http" } else { "s3" })
+            .segment("s3", "S3")
+            .segment("http", "HTTP")
+            .on_change(move |key, window, cx| {
+                let backend = if key.as_ref() == "http" {
+                    StorageType::Http
+                } else {
+                    StorageType::S3
+                };
+                on_backend(backend, window, cx)
+            });
+        let fields = Fields::new().child(Labelled::new("Storage type", backend));
+        let fields = if is_http {
+            fields
+                .child(TextField::new(&self.url).label("Server URL"))
+                .child(TextField::new(&self.token).label("Token"))
+        } else {
+            fields
+                .child(TextField::new(&self.endpoint).label("Endpoint"))
+                .child(TextField::new(&self.region).label("Region"))
+                .child(TextField::new(&self.bucket).label("Bucket"))
+                .child(TextField::new(&self.access_key_id).label("Access key ID"))
+                .child(TextField::new(&self.secret_access_key).label("Secret access key"))
         };
-        v_flex()
-            .gap_3()
-            .child(ui::field(
-                "Storage type",
-                ButtonGroup::new("remote-backend")
-                    .outline()
-                    .child(Button::new("s3").label("S3").selected(!is_http))
-                    .child(Button::new("http").label("HTTP").selected(is_http))
-                    .on_click(move |picked, window, cx| {
-                        let value = if picked.first() == Some(&1) {
-                            "http"
-                        } else {
-                            "s3"
-                        };
-                        backend.update(cx, |input, cx| input.set_value(value, window, cx));
-                    }),
-            ))
-            .when(is_http, |column| {
-                column
-                    .child(field("Server URL", &self.url))
-                    .child(field("Token", &self.token))
-            })
-            .when(!is_http, |column| {
-                column
-                    .child(field("Endpoint", &self.endpoint))
-                    .child(field("Region", &self.region))
-                    .child(field("Bucket", &self.bucket))
-                    .child(field("Access key ID", &self.access_key_id))
-                    .child(field("Secret access key", &self.secret_access_key))
-            })
-            .child(field("Repository ID", &self.prefix))
-            .child(field("Encryption key", &self.encryption_key))
+        fields
+            .child(TextField::new(&self.prefix).label("Repository ID"))
+            .child(TextField::new(&self.encryption_key).label("Encryption key"))
     }
 }
