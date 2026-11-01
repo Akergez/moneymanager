@@ -166,7 +166,9 @@ impl Workspace {
         let mode = row()
             .flex_none()
             .px(scale.space_m)
-            .py(scale.space_s)
+            .pb(scale.space_s)
+            // On a finger the header above ends with its own room.
+            .when(!env.is_touch(), |mode| mode.pt(scale.space_s))
             .child(self.mode_switch(cx));
         let content = column()
             .w_full()
