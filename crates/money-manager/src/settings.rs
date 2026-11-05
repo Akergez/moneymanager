@@ -94,6 +94,41 @@ impl Settings {
         money_core::tresse::config::read_remote(&crate::paths::ledger_dir())
     }
 
+    /// The unfinished server sign-in, kept across restarts: Android may kill
+    /// the app while the browser is in front, and the return link would find
+    /// no attempt. None when it expired.
+    pub fn pending_connect(&self) -> Option<crate::sync_server::ConnectAttempt> {
+        #[derive(Deserialize)]
+        struct Stored {
+            server_url: String,
+            state: String,
+            expires_millis: u64,
+        }
+        let stored: Stored = self.get("pending_connect")?;
+        crate::sync_server::ConnectAttempt::restore(
+            stored.server_url,
+            stored.state,
+            stored.expires_millis,
+        )
+    }
+
+    pub fn set_pending_connect(&mut self, attempt: Option<&crate::sync_server::ConnectAttempt>) {
+        #[derive(Serialize)]
+        struct Stored<'a> {
+            server_url: &'a str,
+            state: &'a str,
+            expires_millis: u64,
+        }
+        self.set(
+            "pending_connect",
+            attempt.map(|attempt| Stored {
+                server_url: &attempt.server_url,
+                state: &attempt.state,
+                expires_millis: attempt.expires_millis(),
+            }),
+        );
+    }
+
     /// Drop old transport settings only after the native baseline is durable.
     pub fn finish_migration(cx: &mut App) -> Result<(), String> {
         let settings = cx.global_mut::<Self>();

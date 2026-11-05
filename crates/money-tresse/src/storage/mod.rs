@@ -1,8 +1,5 @@
 #[cfg(test)]
 pub(crate) mod dir;
-mod server;
-
-pub use server::ServerTresseClient;
 
 use tresse_lib::VersionLabel;
 

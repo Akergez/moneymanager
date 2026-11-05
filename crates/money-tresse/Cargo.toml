@@ -14,7 +14,6 @@ rdx-sync-s3 = { git = "https://gitlab.com/ragusseven/tresse.git", branch = "mast
 serde.workspace = true
 serde_json.workspace = true
 toml = "0.8"
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 
 [target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
 libc = "0.2"

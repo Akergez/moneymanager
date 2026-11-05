@@ -31,6 +31,9 @@ mod script;
 mod settings;
 mod settings_dialog;
 mod shell;
+mod sync_server;
+#[cfg(test)]
+mod connect_flow;
 mod themes;
 mod transactions;
 mod ui;
@@ -82,6 +85,9 @@ fn start(cx: &mut gpui_kit::App) {
     gpui_android_glue::init(cx);
     gpui_adaptive::init(input_mode(), cx);
     settings::Settings::install(cx);
+    #[cfg(target_os = "android")]
+    sync_server::install_deep_links();
+    sync_server::SyncConnect::install(cx);
     fonts::install(cx);
     appearance::init(cx);
     themes::load(cx);

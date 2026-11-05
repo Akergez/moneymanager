@@ -74,6 +74,19 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- The Tresse server's connect page returns the repository's
+                 config string through this link
+                 (crates/money-manager/src/sync_server.rs). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:host="tresse-connect"
+                    android:scheme="moneymanager"
+                />
+            </intent-filter>
         </activity>
 
     </application>

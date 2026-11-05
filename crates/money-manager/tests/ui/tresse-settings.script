@@ -2,7 +2,8 @@
 # size: 1240x800
 #
 # Tresse configuration is saved from the GUI, read again on reopening, and
-# removed explicitly without removing the ledger.
+# removed explicitly without removing the ledger. The server-connect block
+# above the config string moved the string's field down a row.
 wait:2500
 expect:remote=no
 key:ctrl-,
@@ -10,9 +11,9 @@ wait:900
 scroll:620,400,-200
 wait:600
 shot:tresse-settings
-click:585,481
+click:585,568
 type:tresse://http?url=http%3A%2F%2F127.0.0.1%3A9&token=test&repo_id=money-test&encryption_key=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA%3D
-click:968,507
+click:968,594
 wait:500
 click:811,738
 wait:700

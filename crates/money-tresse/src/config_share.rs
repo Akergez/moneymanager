@@ -154,6 +154,59 @@ fn hex_digit(byte: u8) -> Result<u8, DecodeError> {
         .ok_or_else(|| DecodeError("invalid percent escape in config string".into()))
 }
 
+/// Does the string mark a repository the server has just created (`new=1`)?
+///
+/// A Tresse server never knows, and so never sends, an encryption key. For a
+/// new repository the importing client generates one; for an existing one the
+/// string carries none and the key must already be on this device.
+pub fn marks_new_repository(input: &str) -> bool {
+    let trimmed = input.trim_start_matches('\u{feff}').trim();
+    trimmed
+        .split_once('?')
+        .map(|(_, query)| query.split('&').any(|pair| pair == "new=1"))
+        .unwrap_or(false)
+}
+
+/// The key a key-less server string should use, given the remote it replaces.
+pub enum KeyChoice {
+    /// The string carries its own key.
+    Carried,
+    /// A new repository: generate a key on this device.
+    Generate,
+    /// The same repository on the same server as before: keep its key.
+    Keep(String),
+}
+
+pub fn choose_key(
+    incoming: &RemoteConfig,
+    new_repository: bool,
+    previous: Option<&RemoteConfig>,
+) -> Result<KeyChoice, DecodeError> {
+    if !incoming.encryption_key.is_empty() {
+        return Ok(KeyChoice::Carried);
+    }
+    if new_repository {
+        return Ok(KeyChoice::Generate);
+    }
+    match previous {
+        Some(previous)
+            if !previous.encryption_key.is_empty()
+                && previous.storage_type == incoming.storage_type
+                && previous.url.trim_end_matches('/') == incoming.url.trim_end_matches('/')
+                && previous.repo_id == incoming.repo_id =>
+        {
+            Ok(KeyChoice::Keep(previous.encryption_key.clone()))
+        }
+        // Any other key would belong to another repository and decrypt nothing.
+        _ => Err(DecodeError(
+            "the config string has no encryption key and this device has none for that \
+             repository; import the full string (`tresse config export`) from a device that \
+             already syncs it"
+                .into(),
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{decode, encode};
@@ -272,5 +325,43 @@ mod tests {
         ] {
             assert!(decode(input).is_err(), "accepted {input:?}");
         }
+    }
+}
+
+#[cfg(test)]
+mod key_choice_tests {
+    use super::{KeyChoice, choose_key, decode, marks_new_repository};
+
+    const NEW: &str = "tresse://http?url=https://sync.example&repo_id=notes&token=trs_a&new=1";
+    const EXISTING: &str = "tresse://http?url=https://sync.example&repo_id=notes&token=trs_b";
+
+    #[test]
+    fn a_new_repository_gets_a_locally_generated_key() {
+        assert!(marks_new_repository(NEW));
+        assert!(!marks_new_repository(EXISTING));
+        let incoming = decode(NEW).unwrap();
+        assert!(matches!(
+            choose_key(&incoming, true, None),
+            Ok(KeyChoice::Generate)
+        ));
+    }
+
+    #[test]
+    fn an_existing_repository_keeps_only_its_own_key() {
+        let mut previous = decode(EXISTING).unwrap();
+        previous.encryption_key = "k".into();
+        let incoming = decode(EXISTING).unwrap();
+        assert!(
+            matches!(choose_key(&incoming, false, Some(&previous)), Ok(KeyChoice::Keep(k)) if k == "k")
+        );
+
+        // Another repository, or another server: the old key would decrypt nothing.
+        let mut other = previous.clone();
+        other.repo_id = "photos".into();
+        assert!(choose_key(&incoming, false, Some(&other)).is_err());
+        let mut elsewhere = previous.clone();
+        elsewhere.url = "https://other.example".into();
+        assert!(choose_key(&incoming, false, Some(&elsewhere)).is_err());
+        assert!(choose_key(&incoming, false, None).is_err());
     }
 }

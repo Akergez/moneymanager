@@ -42,6 +42,8 @@ serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+# The random `state` a server connection starts with.
+uuid = { version = "1.11", features = ["v4"] }
 # The Android side shared with matterfast and aiddiction: android_main, the
 # status bar, the insets, saving a document, back. Every function of it also
 # exists off Android. Its Java half is `com.akergez.gpui:android-glue` in
@@ -54,3 +56,11 @@ gpui-android-glue = { git = "https://github.com/Akergez/gpui-android-glue", tag 
 [target.'cfg(target_os = "android")'.dependencies]
 # With no subscriber, events go to `log`, and from there to logcat.
 tracing = { workspace = true, features = ["log"] }
+# The deep links the Tresse server's connect page returns through
+# (packages::deeplink). The same revision gpui-android-glue builds against, so
+# one copy of the platform ends up in the library.
+gpui-mobile = { package = "gpui-pre-mobile", git = "https://github.com/Akergez/gpui-mobile", rev = "dda3bf3635142249a5384ba603929bf4a3db284f" }
+
+[dev-dependencies]
+# The #[gpui_kit::test] harness the connect-flow test renders a window with.
+gpui-kit = { version = "0.7.0", features = ["test-support"] }

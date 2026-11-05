@@ -3,14 +3,14 @@ use std::path::Path;
 use rdx_rs::Stamp;
 use rdx_sync::{ChunkClass, ObjectStore, RemoteKv, SyncError};
 use rdx_sync_fs::FileObjectStore;
-use rdx_sync_s3::{S3ChunkStore, S3Config};
+use rdx_sync_s3::{Remote, RemoteSpec, S3Config};
 use tresse_lib::VersionLabel;
 use tresse_lib::commit::{MergedMeta, merge_local_meta};
 use tresse_lib::entry::Entry;
 use tresse_lib::meta_bundle::{self, MetaBundleError};
 
 use crate::config::{RemoteConfig, StorageType};
-use crate::storage::{ServerTresseClient, parse_version_label};
+use crate::storage::parse_version_label;
 
 pub const DEFAULT_CHUNK_RAW_SIZE: u64 = 64 * 1024 * 1024;
 pub const DEFAULT_MAX_OBJECT_SIZE: usize = 96 * 1024 * 1024;
@@ -48,62 +48,54 @@ pub fn resolve_version(meta: &MergedMeta, spec: &str) -> Result<Stamp, String> {
     })
 }
 
-pub enum ConfiguredRemote {
-    Http(ServerTresseClient),
-    S3(S3ChunkStore),
+/// The configured origin, opened. One `Remote` type speaks both the server
+/// protocol (presigned URLs) and plain S3; the encryption key is validated
+/// here, before the first remote call, not when the first object is sealed.
+pub struct ConfiguredRemote {
+    inner: Remote,
 }
 
 impl ConfiguredRemote {
     pub fn open(config: &RemoteConfig) -> Result<Self, SyncError> {
-        match config.storage_type {
-            StorageType::Http => Ok(Self::Http(ServerTresseClient::new(
-                config.url.clone(),
-                config.token.clone(),
-                config.repo_id.clone(),
-                &config.encryption_key,
-            )?)),
-            StorageType::S3 => Ok(Self::S3(S3ChunkStore::with_encryption_key(
-                S3Config {
-                    endpoint: config.s3_endpoint.clone(),
-                    region: config.s3_region.clone(),
-                    bucket: config.s3_bucket.clone(),
-                    access_key_id: config.s3_access_key_id.clone(),
-                    secret_access_key: config.s3_secret_access_key.clone(),
-                    prefix: config.repo_id.clone(),
-                },
-                &config.encryption_key,
-            )?)),
-        }
+        tresse_lib::crypto::decode_key_b64(&config.encryption_key)
+            .map_err(|error| SyncError::Other(error.to_string()))?;
+        let spec = match config.storage_type {
+            // The server finds the repository by its token; `repo_id` is a
+            // local label only.
+            StorageType::Http => RemoteSpec::Server {
+                url: config.url.clone(),
+                token: config.token.clone(),
+            },
+            StorageType::S3 => RemoteSpec::S3(S3Config {
+                endpoint: config.s3_endpoint.clone(),
+                region: config.s3_region.clone(),
+                bucket: config.s3_bucket.clone(),
+                access_key_id: config.s3_access_key_id.clone(),
+                secret_access_key: config.s3_secret_access_key.clone(),
+                prefix: config.repo_id.clone(),
+            }),
+        };
+        Ok(Self {
+            inner: Remote::open(spec)?,
+        })
     }
 }
 
 impl RemoteKv for ConfiguredRemote {
     fn list(&self, prefix: &str) -> Result<Vec<String>, SyncError> {
-        match self {
-            Self::Http(remote) => remote.list(prefix),
-            Self::S3(remote) => remote.list(prefix),
-        }
+        self.inner.list(prefix)
     }
 
     fn get(&self, key: &str) -> Result<Vec<u8>, SyncError> {
-        match self {
-            Self::Http(remote) => remote.get(key),
-            Self::S3(remote) => remote.get(key),
-        }
+        self.inner.get(key)
     }
 
     fn put(&mut self, key: &str, value: &[u8]) -> Result<(), SyncError> {
-        match self {
-            Self::Http(remote) => remote.put(key, value),
-            Self::S3(remote) => remote.put(key, value),
-        }
+        self.inner.put(key, value)
     }
 
     fn delete(&mut self, key: &str) -> Result<(), SyncError> {
-        match self {
-            Self::Http(remote) => remote.delete(key),
-            Self::S3(remote) => remote.delete(key),
-        }
+        self.inner.delete(key)
     }
 }
 

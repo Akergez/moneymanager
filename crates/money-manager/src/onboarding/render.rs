@@ -59,17 +59,19 @@ impl Onboarding {
         let way = Segments::new(
             "connect-by",
             match by {
+                ConnectBy::Server => "server",
                 ConnectBy::ConfigString => "string",
                 ConnectBy::Details => "details",
             },
         )
+        .segment("server", "Server")
         .segment("string", "Config string")
         .segment("details", "Details")
         .on_change(move |key, _, cx| {
-            let by = if key.as_ref() == "string" {
-                ConnectBy::ConfigString
-            } else {
-                ConnectBy::Details
+            let by = match key.as_ref() {
+                "string" => ConnectBy::ConfigString,
+                "details" => ConnectBy::Details,
+                _ => ConnectBy::Server,
             };
             choose
                 .update(cx, |this, cx| {
@@ -79,23 +81,70 @@ impl Onboarding {
                 })
                 .ok();
         });
+        let waiting = crate::sync_server::SyncConnect::waiting(cx);
         let fields = match by {
-            ConnectBy::ConfigString => Fields::new().child(
-                TextField::new(&self.config_string)
-                    .label("Config string")
-                    .help(
-                        "Exported by another device in Settings. It holds the keys, so \
-                         treat it as a password.",
-                    ),
-            ),
-            ConnectBy::Details => self.remote.render(move |kind: StorageType, _, cx| {
-                backend
-                    .update(cx, |this, cx| {
-                        this.remote.set_backend(kind);
-                        cx.notify();
-                    })
-                    .ok();
-            }),
+            ConnectBy::Server => {
+                let start = cx.entity().downgrade();
+                let cancel = cx.entity().downgrade();
+                let mut fields = Fields::new()
+                    .child(
+                        TextField::new(&self.server_url)
+                            .label("Server URL")
+                            .help(
+                                "Any Tresse server. Yours is already filled in when this \
+                                 build names one.",
+                            ),
+                    )
+                    .child(Note::new(
+                        "Sign in on the server's page in the browser; it sends the \
+                         repository back to the app. The page ends with a config string \
+                         too — on a desktop, copy it and pick “Config string” here.",
+                    ));
+                fields = if waiting {
+                    let cancel = Command::new("cancel-server-connect", "Cancel").on_trigger(
+                        move |_, cx| {
+                            cancel
+                                .update(cx, |_, cx| {
+                                    crate::sync_server::SyncConnect::cancel(cx);
+                                })
+                                .ok();
+                        },
+                    );
+                    fields
+                        .child(Busy::new("waiting-for-server").label("Waiting for the server…"))
+                        .child(cancel.as_button())
+                } else {
+                    fields.child(Self::button(
+                        Command::new("open-server", "Sign in on the server")
+                            .primary()
+                            .on_trigger(move |_, cx| {
+                                start.update(cx, |this, cx| this.open_server_page(cx)).ok();
+                            }),
+                    ))
+                };
+                fields.into_any_element()
+            }
+            ConnectBy::ConfigString => Fields::new()
+                .child(
+                    TextField::new(&self.config_string)
+                        .label("Config string")
+                        .help(
+                            "Exported by another device in Settings, or by the server's \
+                             Copy button. It holds the keys, so treat it as a password.",
+                        ),
+                )
+                .into_any_element(),
+            ConnectBy::Details => self
+                .remote
+                .render(move |kind: StorageType, _, cx| {
+                    backend
+                        .update(cx, |this, cx| {
+                            this.remote.set_backend(kind);
+                            cx.notify();
+                        })
+                        .ok();
+                })
+                .into_any_element(),
         };
         Fields::new()
             .child(way)
@@ -125,7 +174,12 @@ impl Onboarding {
 }
 
 impl Render for Onboarding {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // A remote the server page returned lands in the fields here, where
+        // there is a window to set them with.
+        if let Some(remote) = self.pending_fill.take() {
+            self.remote.fill(&remote, window, cx);
+        }
         let (title, lead) = match self.step {
             Step::Choose => (
                 "Set up your ledger",

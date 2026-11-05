@@ -1,9 +1,11 @@
 //! Embedded filesystem client for Tresse.
 //!
 //! The filesystem adapters are adapted from tresse-cli at
-//! 809dff9a0a5b0d162a2efbca602b5cceb4073f9c. The upstream CLI does not yet
+//! b5bf4cf0073fe94193d003b9751ec7dd5590841f. The upstream CLI does not yet
 //! publish a library target. Keep its configuration, layout, locking, index
-//! and operation journal compatible; diff, CAS and sync algorithms stay upstream.
+//! and operation journal compatible; diff, CAS and sync algorithms stay
+//! upstream, including the server transport (`rdx_sync_s3::Remote` over
+//! presigned URLs).
 
 mod cas;
 pub mod config;
@@ -23,6 +25,8 @@ mod commands {
 }
 
 pub use config::{RemoteConfig, StorageType, TresseConfig};
+pub use config_share::{KeyChoice, choose_key, marks_new_repository};
+pub use rdx_sync_s3::connect_url;
 use std::path::Path;
 
 pub fn init(root: &Path) -> Result<(), String> {

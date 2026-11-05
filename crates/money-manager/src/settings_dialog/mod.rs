@@ -11,7 +11,7 @@
 
 use gpui_adaptive::prim::row;
 use gpui_adaptive::{
-    ActiveScale as _, Command, Fields, Form, Note, Notice, Purpose, Segments, Setting,
+    ActiveScale as _, Busy, Command, Fields, Form, Note, Notice, Purpose, Segments, Setting,
     Swatches, Text, TextField, TextFieldState, Tone,
 };
 use gpui_adaptive_colors::Color;
@@ -29,12 +29,19 @@ use theme_rows::ThemeRows;
 
 struct SettingsForm {
     themes: ThemeRows,
+    /// The server the sign-in page opens on; the build's default, or any
+    /// other one typed over it.
+    server_url: Entity<TextFieldState>,
     config_string: Entity<TextFieldState>,
     remote: RemoteFields,
+    /// A remote the server page just returned, shown in the fields at the
+    /// next render, where there is a window and `set_value` wants one.
+    received: Option<RemoteConfig>,
     /// Whether a storage was set up when the dialog opened, which is what
     /// decides whether there is one to remove.
     had_remote: bool,
     error: Option<SharedString>,
+    _connect: gpui_kit::Subscription,
 }
 
 impl SettingsForm {
@@ -42,17 +49,62 @@ impl SettingsForm {
         let loaded = Settings::global(cx).remote();
         let error = loaded.as_ref().err().cloned().map(Into::into);
         let stored = loaded.unwrap_or_default();
+        let server_url = cx.new(|cx| {
+            let mut state = TextFieldState::new(Purpose::Address, window, cx);
+            state.set_placeholder("https://sync.example.com", window, cx);
+            state.set_value(
+                crate::sync_server::default_server_url().unwrap_or_default(),
+                window,
+                cx,
+            );
+            state
+        });
+        let connect = cx.observe_global::<crate::sync_server::SyncConnect>(
+            |this, cx| this.server_connect_changed(cx),
+        );
         SettingsForm {
             themes: ThemeRows::new(window, cx),
+            server_url,
             config_string: cx.new(|cx| {
                 let mut state = TextFieldState::new(Purpose::Address, window, cx);
                 state.set_placeholder("tresse://…", window, cx);
                 state
             }),
             remote: RemoteFields::new(stored.as_ref(), window, cx),
+            received: None,
             had_remote: stored.is_some(),
             error,
+            _connect: connect,
         }
+    }
+
+    /// The server page's return (or its refusal): show the remote it
+    /// describes in the fields, or the refusal.
+    fn server_connect_changed(&mut self, cx: &mut Context<Self>) {
+        if !crate::sync_server::SyncConnect::waiting(cx) {
+            match crate::sync_server::SyncConnect::take_outcome(cx) {
+                Some(Ok(remote)) => {
+                    self.received = Some(remote);
+                    self.error = None;
+                }
+                Some(Err(error)) => self.error = Some(error.into()),
+                None => {}
+            }
+        }
+        cx.notify();
+    }
+
+    /// Starts the browser round trip to the server named in the field.
+    fn open_server_page(&mut self, cx: &mut Context<Self>) {
+        if crate::sync_server::SyncConnect::waiting(cx) {
+            return;
+        }
+        let server = self.server_url.read(cx).value(cx).to_string();
+        match crate::sync_server::SyncConnect::begin(cx, &server) {
+            Ok(page) => gpui_android_glue::open_url(&page, cx),
+            Err(error) => self.error = Some(error.into()),
+        }
+        cx.notify();
     }
 
     /// Whether every field is empty, which is how "no storage" is said.
@@ -68,19 +120,20 @@ impl SettingsForm {
             && remote.s3_secret_access_key.is_empty()
     }
 
-    /// Fills the fields from the pasted string.
+    /// Fills the fields from the pasted string. A string from the server's
+    /// Copy button may carry no key: a new repository gets one generated
+    /// here, an existing one keeps the key of the storage on disk.
     fn apply_string(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let text = self.config_string.read(cx).value(cx);
-        match RemoteConfig::from_share_string(&text) {
+        let previous = Settings::global(cx).remote().ok().flatten();
+        match crate::sync_server::import_share_string(&text, previous.as_ref()) {
             Ok(remote) => {
                 self.remote.fill(&remote, window, cx);
                 self.config_string
                     .update(cx, |field, cx| field.set_value("", window, cx));
                 self.error = None;
             }
-            Err(_) => {
-                self.error = Some("That is not a config string. It starts with tresse://".into())
-            }
+            Err(error) => self.error = Some(error.into()),
         }
         cx.notify();
     }
@@ -227,6 +280,16 @@ impl SettingsForm {
             .read(cx)
             .is_ok_and(|remote| !remote.encryption_key.is_empty());
         let gap = cx.scale().space_s;
+        let waiting = crate::sync_server::SyncConnect::waiting(cx);
+        let connect_server =
+            self.command("connect-server", "Connect", cx, |this, _, cx| {
+                this.open_server_page(cx)
+            });
+        let cancel_server = self.command("cancel-server-connect", "Cancel", cx, |this, _, cx| {
+            crate::sync_server::SyncConnect::cancel(cx);
+            this.error = None;
+            cx.notify();
+        });
         let fill = self.command("apply-string", "Fill in", cx, |this, window, cx| {
             this.apply_string(window, cx)
         });
@@ -243,13 +306,37 @@ impl SettingsForm {
                 this.generate_key(window, cx)
             })
         });
+        let server = if waiting {
+            row()
+                .gap(gap)
+                .items_center()
+                .child(Busy::new("waiting-for-server").label("Waiting for the server…"))
+                .child(cancel_server.as_button())
+        } else {
+            row()
+                .gap(gap)
+                .items_end()
+                .child(
+                    gpui_kit::div().flex_1().min_w_0().child(
+                        TextField::new(&self.server_url)
+                            .label("Server URL")
+                            .help(
+                                "Any Tresse server. Yours is already filled in when this build \
+                                 names one.",
+                            ),
+                    ),
+                )
+                .child(connect_server.as_button())
+        };
         let this = cx.entity().downgrade();
         Fields::new()
             .child(Text::title("Sync storage"))
             .child(Note::new(
-                "A Tresse repository on S3 or an HTTP server. \
-                 Leave every field empty to keep the ledger on this device only.",
+                "Sign in on a Tresse server's page, or set up the storage by hand: \
+                 a Tresse repository on S3 or an HTTP server. Leave every field empty to \
+                 keep the ledger on this device only.",
             ))
+            .child(server)
             .child(
                 row()
                     .gap(gap)
@@ -258,7 +345,10 @@ impl SettingsForm {
                         gpui_kit::div().flex_1().min_w_0().child(
                             TextField::new(&self.config_string)
                                 .label("Config string")
-                                .help("Paste the string another device copied to fill in the fields below."),
+                                .help(
+                                    "Paste the string another device copied, or the server's \
+                                     Copy button, to fill in the fields below.",
+                                ),
                         ),
                     )
                     .child(fill.as_button()),
@@ -293,7 +383,12 @@ impl SettingsForm {
 }
 
 impl Render for SettingsForm {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // A remote the server page returned lands in the fields here, where
+        // there is a window to set them with.
+        if let Some(remote) = self.received.take() {
+            self.remote.fill(&remote, window, cx);
+        }
         let space = cx.scale().space_xl;
         gpui_adaptive::prim::column()
             .gap(space)

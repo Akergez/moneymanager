@@ -31,9 +31,11 @@ pub(crate) enum Step {
     Connect,
 }
 
-/// The two ways of saying where the storage is.
+/// The two ways of saying where the storage is, and the server page that is
+/// the first one offered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ConnectBy {
+    Server,
     ConfigString,
     Details,
 }
@@ -49,8 +51,14 @@ pub struct Onboarding {
     connect_by: ConnectBy,
     currency: Entity<TextFieldState>,
     account_name: Entity<TextFieldState>,
+    /// The server the sign-in page opens on; the build's default, or any
+    /// other one typed over it.
+    server_url: Entity<TextFieldState>,
     config_string: Entity<TextFieldState>,
     remote: RemoteFields,
+    /// A remote the server page just returned: shown in the fields at the
+    /// next render, which has a window and `set_value` wants one.
+    pending_fill: Option<RemoteConfig>,
     connecting: Option<Connecting>,
     error: Option<SharedString>,
     /// Back, past the first step: to the first step.
@@ -93,6 +101,11 @@ impl Onboarding {
         };
         let account_name = field(Purpose::Message, "Основной", "Account name");
         let currency = field(Purpose::Plain, &default_currency, "USD");
+        let server_url = field(
+            Purpose::Address,
+            crate::sync_server::default_server_url().unwrap_or_default(),
+            "https://sync.example.com",
+        );
         let config_string = field(Purpose::Address, "", "tresse://…");
         let remote = RemoteFields::new(None, window, cx);
 
@@ -100,7 +113,7 @@ impl Onboarding {
         let mut subscriptions: Vec<Subscription> = remote
             .fields()
             .into_iter()
-            .chain([&account_name, &currency, &config_string])
+            .chain([&account_name, &currency, &server_url, &config_string])
             .map(|field| {
                 cx.subscribe(field, |this, _, event: &FieldEvent, cx| {
                     if matches!(event, FieldEvent::Submit) {
@@ -109,15 +122,20 @@ impl Onboarding {
                 })
             })
             .collect();
+        subscriptions.push(cx.observe_global::<crate::sync_server::SyncConnect>(
+            |this, cx| this.server_connect_changed(cx),
+        ));
         subscriptions.shrink_to_fit();
 
         Onboarding {
             step: Step::Choose,
-            connect_by: ConnectBy::ConfigString,
+            connect_by: ConnectBy::Server,
             currency,
             account_name,
+            server_url,
             config_string,
             remote,
+            pending_fill: None,
             connecting: None,
             error: None,
             back: None,
@@ -131,6 +149,10 @@ impl Onboarding {
 
     pub(crate) fn is_connecting(&self) -> bool {
         self.connecting.is_some()
+    }
+
+    pub(crate) fn error(&self) -> Option<&SharedString> {
+        self.error.as_ref()
     }
 
     fn go_to(&mut self, step: Step, cx: &mut Context<Self>) {
@@ -159,7 +181,52 @@ impl Onboarding {
         match self.step {
             Step::Choose => {}
             Step::Create => self.create(cx),
-            Step::Connect => self.connect(cx),
+            Step::Connect => match self.connect_by {
+                ConnectBy::Server => self.open_server_page(cx),
+                ConnectBy::ConfigString | ConnectBy::Details => self.connect(cx),
+            },
+        }
+    }
+
+    /// Opens the server's sign-in page in the browser; its return is matched
+    /// against the attempt in [`crate::sync_server::SyncConnect`] and arrives
+    /// through `server_connect_changed`.
+    fn open_server_page(&mut self, cx: &mut Context<Self>) {
+        if crate::sync_server::SyncConnect::waiting(cx) {
+            return;
+        }
+        let server = self.server_url.read(cx).value(cx).to_string();
+        match crate::sync_server::SyncConnect::begin(cx, &server) {
+            Ok(page) => {
+                gpui_android_glue::open_url(&page, cx);
+                self.error = None;
+            }
+            Err(error) => self.error = Some(error.into()),
+        }
+        cx.notify();
+    }
+
+    /// The server page's return (or its refusal): proceed to the first sync,
+    /// or say why not.
+    fn server_connect_changed(&mut self, cx: &mut Context<Self>) {
+        if self.step != Step::Connect || self.connect_by != ConnectBy::Server {
+            return;
+        }
+        let Some(outcome) = crate::sync_server::SyncConnect::take_outcome(cx) else {
+            // Only the waiting state changed.
+            cx.notify();
+            return;
+        };
+        match outcome {
+            Ok(remote) => {
+                self.pending_fill = Some(remote.clone());
+                self.connect_by = ConnectBy::Details;
+                self.connect_with(remote, cx);
+            }
+            Err(error) => {
+                self.error = Some(error.into());
+                cx.notify();
+            }
         }
     }
 
@@ -178,14 +245,17 @@ impl Onboarding {
     /// The remote the form currently describes, checked.
     fn remote_from_form(&self, cx: &App) -> Result<RemoteConfig, String> {
         let remote = match self.connect_by {
+            // A string the server page ended with carries no key for a new
+            // repository: one is generated here, as for any pasted string.
             ConnectBy::ConfigString => {
                 let text = self.config_string.read(cx).value(cx);
                 if text.trim().is_empty() {
                     return Err("Paste the config string first.".to_string());
                 }
-                RemoteConfig::from_share_string(&text).map_err(|_| {
-                    "That is not a config string. It starts with tresse://".to_string()
-                })?
+                crate::sync_server::import_share_string(&text, None)?
+            }
+            ConnectBy::Server => {
+                return Err("Finish signing in in the browser, or pick another way.".to_string())
             }
             ConnectBy::Details => self.remote.read(cx)?,
         };
@@ -194,9 +264,6 @@ impl Onboarding {
     }
 
     fn connect(&mut self, cx: &mut Context<Self>) {
-        if self.is_connecting() {
-            return;
-        }
         let remote = match self.remote_from_form(cx) {
             Ok(remote) => remote,
             Err(error) => {
@@ -205,6 +272,13 @@ impl Onboarding {
                 return;
             }
         };
+        self.connect_with(remote, cx);
+    }
+
+    fn connect_with(&mut self, remote: RemoteConfig, cx: &mut Context<Self>) {
+        if self.is_connecting() {
+            return;
+        }
         let source = settings::new_source();
         let book = match Book::open(&crate::paths::ledger_dir(), source, None) {
             Ok(book) => cx.new(|_| book),
@@ -231,7 +305,6 @@ impl Onboarding {
         });
         cx.notify();
     }
-
     fn first_sync_changed(&mut self, book: Entity<Book>, cx: &mut Context<Self>) {
         match book.read(cx).sync_state().clone() {
             SyncState::Idle | SyncState::Running => {}

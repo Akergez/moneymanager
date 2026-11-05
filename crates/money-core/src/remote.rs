@@ -1,6 +1,8 @@
 //! Tresse remote configuration; persisted only in `.tresse/remotes.toml`.
 use base64::Engine;
-pub use money_tresse::{RemoteConfig, StorageType};
+pub use money_tresse::{
+    KeyChoice, RemoteConfig, StorageType, choose_key, connect_url, marks_new_repository,
+};
 pub const DEFAULT_CURRENCY: &str = "RUB";
 /// A fresh base64 encryption key, as `encryption_key` wants it.
 pub fn generate_encryption_key() -> Result<String, String> {
