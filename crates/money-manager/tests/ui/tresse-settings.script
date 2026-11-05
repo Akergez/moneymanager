@@ -3,7 +3,8 @@
 #
 # Tresse configuration is saved from the GUI, read again on reopening, and
 # removed explicitly without removing the ledger. The server-connect block
-# above the config string moved the string's field down a row.
+# above the config string moved the string's field down a row; the clicks are
+# the settled positions (the scroll eases for a while after the step).
 wait:2500
 expect:remote=no
 key:ctrl-,
@@ -11,9 +12,9 @@ wait:900
 scroll:620,400,-200
 wait:600
 shot:tresse-settings
-click:585,568
+click:585,594
 type:tresse://http?url=http%3A%2F%2F127.0.0.1%3A9&token=test&repo_id=money-test&encryption_key=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA%3D
-click:968,594
+click:968,620
 wait:500
 click:811,738
 wait:700
