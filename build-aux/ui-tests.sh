@@ -200,6 +200,11 @@ done
 echo
 if (( ${#failed[@]} )); then
   echo "${#failed[@]} of ${#files[@]} failed: ${failed[*]}"
+  # The job log needs rights to read; the summary shows in the run's overview.
+  if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then
+    printf '### UI scenarios\n\n' >> "$GITHUB_STEP_SUMMARY"
+    printf '%s\n' "${failed[@]/#/- }" >> "$GITHUB_STEP_SUMMARY"
+  fi
   exit 1
 fi
 echo "all ${#files[@]} passed"
