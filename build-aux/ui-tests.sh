@@ -192,6 +192,8 @@ PY_CHECK
       *)   why="exit status $status" ;;
     esac
     echo "FAIL  $name — $why"
+    # An annotation is readable from the run's checks without log rights.
+    echo "::error title=UI scenario $name::$why"
     grep -E 'panicked|ERROR' "$home/app.log" | head -n 5 | sed 's/^/        /' || true
     failed+=("$name")
   fi
