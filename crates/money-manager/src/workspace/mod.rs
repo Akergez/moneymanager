@@ -127,10 +127,15 @@ impl Workspace {
             }
             .await;
             this.update_in(cx, |_, window, cx| match result {
-                Ok(Some(count)) => Notice::new(if export {
+                Ok(Some(report)) => Notice::new(if export {
                     "CSV exported".to_string()
+                } else if report.skipped == 0 {
+                    format!("Imported {} transactions", report.added)
                 } else {
-                    format!("Imported {count} transactions")
+                    format!(
+                        "Imported {} transactions. {} were already in the ledger.",
+                        report.added, report.skipped
+                    )
                 })
                 .tone(Tone::Success)
                 .push(window, cx),
@@ -263,7 +268,7 @@ impl Workspace {
     }
 
     fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        crate::settings_dialog::open(window, cx);
+        crate::settings_dialog::open(Some(self.book.clone()), window, cx);
     }
 
     /// Syncs with the remote. With none set up, the place to set one up is

@@ -6,6 +6,7 @@
 /.flatpak-build
 /.flatpak-repo
 /.flatpak-state
+/.tresse-server-url
 
 # What a containerised UI-test run leaves when the checkout is its home
 # (fontconfig and Mesa's shader cache).

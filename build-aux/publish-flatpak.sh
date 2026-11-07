@@ -55,6 +55,10 @@ if [[ -z $site ]]; then
     builder=(flatpak run org.flatpak.Builder)
   fi
 
+  # The default sync server (crates/money-manager/src/sync_server.rs): the
+  # manifest's build reads it from here, as the sandbox has no environment.
+  printf '%s' "${TRESSE_SERVER_URL:-${MONEY_MANAGER_TRESSE_SERVER_URL:-}}" > .tresse-server-url
+
   # rofiles-fuse cannot start inside a CI container: flatpak there believes it
   # is sandboxed and routes fusermount through a portal that is not running.
   "${builder[@]}" --force-clean --disable-rofiles-fuse \

@@ -1,0 +1,33 @@
+# mode: demo
+# size: 1240x800
+# restart: wait:2500;expect:stage=workspace;expect:records=44;expect:remote=no;quit
+#
+# Rebuilding the Tresse storage keeps every record, turns sync off and
+# closes Settings, so the storage just removed cannot be saved back. The
+# ledger opens the same after a restart.
+wait:2500
+key:ctrl-,
+wait:900
+scroll:620,400,-2000
+wait:900
+click:590,524
+type:tresse://http?url=http%3A%2F%2F127.0.0.1%3A9&token=test&repo_id=money-test&encryption_key=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA%3D
+click:973,524
+wait:500
+click:811,738
+wait:700
+expect:remote=yes
+key:ctrl-,
+wait:700
+scroll:620,400,-2000
+wait:900
+click:954,670
+wait:700
+shot:rebuild-storage
+click:725,323
+wait:1200
+expect:dialog=closed
+expect:remote=no
+expect:records=44
+expect:accounts=2
+quit

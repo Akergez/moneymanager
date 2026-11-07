@@ -1,20 +1,23 @@
 # mode: fresh
 # size: 1240x800
 #
-# Connecting asks for the storage before anything else, and a string that is
-# not a config string goes nowhere: still the first run, nothing recorded.
+# A string that is not a config string goes nowhere: still the first run,
+# nothing recorded. The second tab holds every field of a storage.
 wait:2000
-expect:onboarding=choose
-click:620,280
-wait:600
-expect:onboarding=connect
-click:620,265
+expect:onboarding=server
+click:620,600
 wait:300
 type:not-a-config-string
 wait:300
 key:enter
 wait:800
 expect:stage=welcome
-expect:onboarding=connect
+expect:onboarding=server
+expect:remote=no
+click:523,197
+wait:600
+expect:onboarding=custom
+shot:first-run-custom
+expect:stage=welcome
 expect:remote=no
 quit

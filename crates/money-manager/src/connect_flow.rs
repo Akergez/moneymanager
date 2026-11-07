@@ -26,10 +26,7 @@ mod tests {
     async fn server_connect_round_trip(cx: &mut gpui_kit::TestAppContext) {
         let _ = std::fs::remove_dir_all("/tmp/money-manager-connect-test");
         unsafe {
-            std::env::set_var(
-                "XDG_CONFIG_HOME",
-                "/tmp/money-manager-connect-test/config",
-            );
+            std::env::set_var("XDG_CONFIG_HOME", "/tmp/money-manager-connect-test/config");
             std::env::set_var("XDG_DATA_HOME", "/tmp/money-manager-connect-test/data");
         }
         cx.update(|cx| {
@@ -38,14 +35,8 @@ mod tests {
             crate::settings::Settings::install(cx);
             crate::sync_server::SyncConnect::install(cx);
         });
-        let onboarding =
-            cx.add_window(|window, cx| crate::onboarding::Onboarding::new(window, cx));
+        let onboarding = cx.add_window(crate::onboarding::Onboarding::new);
         let window = onboarding.into();
-        frame(cx, window);
-        cx.update_window(window, |_, window, cx| {
-            window.click("connect-ledger", cx);
-        })
-        .ok();
         frame(cx, window);
         assert!(!cx.update(|cx| crate::sync_server::SyncConnect::waiting(cx)));
 
@@ -57,13 +48,15 @@ mod tests {
         assert!(page.starts_with("https://sync.example.com/?return_to="));
         assert!(cx.update(|cx| crate::sync_server::SyncConnect::waiting(cx)));
         assert!(
-            cx.update(|cx| crate::settings::Settings::global(cx).pending_connect()).is_some()
+            cx.update(|cx| crate::settings::Settings::global(cx).pending_connect())
+                .is_some()
         );
 
         // The browser comes back with the repository (a new one: no key).
-        let attempt = cx.update(|cx| crate::sync_server::SyncConnect::attempt(cx)).unwrap();
-        let config =
-            "tresse://http?url=https://sync.example.com&repo_id=money&token=trs_a&new=1";
+        let attempt = cx
+            .update(|cx| crate::sync_server::SyncConnect::attempt(cx))
+            .unwrap();
+        let config = "tresse://http?url=https://sync.example.com&repo_id=money&token=trs_a&new=1";
         let mut encoded = String::new();
         for byte in config.bytes() {
             if byte.is_ascii_alphanumeric() || b"-_.!~*'()".contains(&byte) {
@@ -81,7 +74,8 @@ mod tests {
 
         // The poller matches the link against the attempt and reports it.
         for _ in 0..20 {
-            cx.executor().advance_clock(std::time::Duration::from_millis(100));
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(100));
             frame(cx, window);
             if !cx.update(|cx| crate::sync_server::SyncConnect::waiting(cx)) {
                 break;
@@ -89,21 +83,22 @@ mod tests {
         }
         assert!(!cx.update(|cx| crate::sync_server::SyncConnect::waiting(cx)));
         assert!(
-            cx.update(|cx| crate::settings::Settings::global(cx).pending_connect()).is_none()
+            cx.update(|cx| crate::settings::Settings::global(cx).pending_connect())
+                .is_none()
         );
 
         // The onboarding consumed the outcome and started connecting (the
         // sync itself fails: there is no such host).
         let entity = onboarding.root(cx).unwrap();
-        let (connecting, step, error) =
+        let (connecting, tab, error) =
             cx.read_entity(&entity, |view: &crate::onboarding::Onboarding, _| {
                 (
                     view.is_connecting(),
-                    view.step(),
+                    view.tab(),
                     view.error().map(|e| e.to_string()),
                 )
             });
-        assert_eq!(step, crate::onboarding::Step::Connect);
+        assert_eq!(tab, crate::onboarding::Tab::Server);
         assert!(
             connecting || error.is_some(),
             "the returned repository should start the first sync or fail it, got neither"

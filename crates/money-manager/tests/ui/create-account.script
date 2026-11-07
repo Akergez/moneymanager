@@ -1,20 +1,28 @@
 # mode: fresh
 # size: 1240x800
 # restart: wait:2000;expect:stage=workspace;expect:account=Cash;expect:main-account=Cash;expect:balance=0.00 €;quit
-# The name and currency entered at creation survive reopening.
+# A ledger started without sync gets its first account at once; its name
+# and currency are the account's own, changed like any other's, and they
+# survive reopening.
 wait:2000
-click:620,195
-wait:600
-expect:onboarding=create
-click:620,221
-key:ctrl-a
-type:Cash
-click:620,287
-key:ctrl-a
-type:EUR
-key:enter
+click:620,253
 wait:1200
 expect:stage=workspace
+expect:accounts=1
+click:850,58
+wait:500
+click:860,185
+wait:800
+expect:dialog=open
+click:620,167
+key:ctrl-a
+type:Cash
+click:620,233
+key:ctrl-a
+type:EUR
+click:725,399
+wait:800
+expect:dialog=closed
 expect:accounts=1
 expect:main-account=Cash
 expect:account=Cash

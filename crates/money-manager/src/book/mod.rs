@@ -87,7 +87,7 @@ impl Book {
         path: Option<std::path::PathBuf>,
         export: bool,
         cx: &mut Context<Self>,
-    ) -> Result<gpui_kit::Task<Result<Option<usize>, String>>, String> {
+    ) -> Result<gpui_kit::Task<Result<Option<money_core::csv::ImportReport>, String>>, String> {
         let mut store = self.store.take().ok_or(SYNCING)?;
         cx.notify();
         Ok(cx.spawn(async move |book, cx| {
@@ -104,13 +104,13 @@ impl Book {
                                     "text/csv",
                                     "transactions.csv",
                                 )
-                                .map(|saved| saved.then_some(0))
+                                .map(|saved| saved.then_some(Default::default()))
                             }
                             #[cfg(not(target_os = "android"))]
                             {
                                 let path = path.ok_or("No export file selected")?;
                                 std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
-                                Ok(Some(0))
+                                Ok(Some(Default::default()))
                             }
                         } else {
                             let path = path.ok_or("No import file selected")?;
@@ -581,6 +581,22 @@ impl Book {
     }
 
     // ------------------------------------------------------------ syncing
+
+    /// Writes the ledger into fresh Tresse storage: every record stays,
+    /// the version history and the sync settings on this device go. See
+    /// `money_core::store::rebuild_storage`. Answers how many records were
+    /// carried; refused while a sync has the store.
+    pub fn rebuild_storage(&mut self, cx: &mut Context<Self>) -> Result<usize, String> {
+        let store = self
+            .store
+            .as_mut()
+            .ok_or_else(|| "Wait for the sync to finish first.".to_string())?;
+        let records = store.rebuild()?;
+        self.sync = SyncState::Idle;
+        self.reload()?;
+        cx.notify();
+        Ok(records)
+    }
 
     /// Exchanges Tresse objects through the configured origin on a background thread. The store goes
     /// with the work and comes back with the result; see the module comment.

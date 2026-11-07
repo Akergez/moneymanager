@@ -236,6 +236,14 @@ impl Store {
         Ok(SyncReport { pulled, pushed })
     }
 
+    /// Replaces the Tresse storage under this ledger with a fresh one; see
+    /// [`rebuild_storage`]. The records in memory are those on disk.
+    pub fn rebuild(&mut self) -> Result<usize, String> {
+        let records = rebuild_storage(&self.root, self.source)?;
+        self.reload()?;
+        Ok(records)
+    }
+
     fn reload(&mut self) -> Result<(), String> {
         self.doc = read_doc(&self.root.join(LEDGER_FILE))?.unwrap_or_else(empty_doc);
         self.clock = self.clock.max(max_time(&self.doc));
@@ -343,6 +351,86 @@ pub fn migrate_legacy(old: &Path, new: &Path, source: u64) -> Result<usize, Stri
     // directory as a backup. Ordinary edits remain uncommitted until sync.
     store.seal()?;
     Ok(count_records(&doc))
+}
+
+/// The fresh repository is built here before it takes the ledger's place.
+fn rebuild_staging(root: &Path) -> PathBuf {
+    sibling(root, "rebuild")
+}
+
+/// The repository being replaced, between the two renames of a rebuild.
+fn rebuild_replaced(root: &Path) -> PathBuf {
+    sibling(root, "replaced")
+}
+
+fn sibling(root: &Path, suffix: &str) -> PathBuf {
+    let mut name = root.file_name().unwrap_or_default().to_os_string();
+    name.push(".");
+    name.push(suffix);
+    root.with_file_name(name)
+}
+
+/// Writes the ledger into a new, empty Tresse repository in place of the one
+/// in `root`, and answers how many records it carried.
+///
+/// What is kept is `ledger.rdx` as it is on disk, edits not yet committed
+/// included: every record with its stamps, so the ledger merges with other
+/// copies as before. What goes is the whole of `.tresse/` — the objects in
+/// whatever format an earlier Tresse wrote them, the version history, the
+/// index, the operation journal and `remotes.toml` — and `tresse.toml`. The
+/// new repository has one version, the ledger, and no remote: nothing syncs
+/// until a storage is set up again. A remote's own objects are not touched.
+///
+/// Nothing is read through Tresse, so a repository this Tresse cannot open
+/// any more is rebuilt too. The new repository is made beside the old one and
+/// swapped in by two renames; [`finish_interrupted_rebuild`] settles a swap
+/// that was cut short, so the ledger is never without one of them.
+pub fn rebuild_storage(root: &Path, source: u64) -> Result<usize, String> {
+    finish_interrupted_rebuild(root)?;
+    let doc = read_doc(&root.join(LEDGER_FILE))?
+        .ok_or_else(|| format!("there is no {} to rebuild from", LEDGER_FILE))?;
+    let staging = rebuild_staging(root);
+    let replaced = rebuild_replaced(root);
+    remove_dir_if_present(&staging)?;
+    {
+        let mut fresh = Store::open(&staging, source)?;
+        fresh.merge_document(&doc)?;
+        fresh.seal()?;
+    }
+    std::fs::rename(root, &replaced)
+        .map_err(|e| format!("could not move the old storage aside: {e}"))?;
+    if let Err(error) = std::fs::rename(&staging, root) {
+        std::fs::rename(&replaced, root).ok();
+        return Err(format!("could not put the new storage in place: {error}"));
+    }
+    // The swap is done: whatever is left of the old repository is only
+    // waste, and the next start removes it if this does not.
+    remove_dir_if_present(&replaced).ok();
+    Ok(count_records(&doc))
+}
+
+/// Settles a rebuild that stopped half-way: before the swap the old
+/// repository stays, after it the new one, and the leftovers go.
+pub fn finish_interrupted_rebuild(root: &Path) -> Result<(), String> {
+    let replaced = rebuild_replaced(root);
+    if replaced.exists() {
+        if root.exists() {
+            remove_dir_if_present(&replaced)?;
+        } else {
+            std::fs::rename(&replaced, root)
+                .map_err(|e| format!("could not put the storage back: {e}"))?;
+        }
+    }
+    remove_dir_if_present(&rebuild_staging(root))
+}
+
+fn remove_dir_if_present(dir: &Path) -> Result<(), String> {
+    match std::fs::remove_dir_all(dir) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+            Err(format!("could not remove {}: {error}", dir.display()))
+        }
+        _ => Ok(()),
+    }
 }
 
 pub fn has_legacy_data(dir: &Path) -> Result<bool, String> {
@@ -525,6 +613,84 @@ mod tests {
             local.list_objects(rdx_sync::ChunkClass::Meta).unwrap(),
             versions
         );
+    }
+
+    #[test]
+    fn a_rebuild_keeps_every_record_and_drops_history_and_remotes() {
+        use rdx_sync::ObjectStore;
+        let parent = tempfile::tempdir().unwrap();
+        let root = parent.path().join("ledger-tresse");
+        let mut store = Store::open(&root, 7).unwrap();
+        Category::create(&mut store, "Food").unwrap();
+        store.seal().unwrap();
+        let deleted = Category::create(&mut store, "Gone").unwrap();
+        store.seal().unwrap();
+        store
+            .delete(CATEGORIES_IDX, &hex_encode(&deleted.id))
+            .unwrap();
+        // Written after the last commit: only the worktree has it.
+        Category::create(&mut store, "Uncommitted").unwrap();
+        configure_remote(&root);
+        let before = store.doc.clone();
+        let meta = |root: &Path| {
+            rdx_sync_fs::FileObjectStore::open(root.join(".tresse"))
+                .unwrap()
+                .list_objects(rdx_sync::ChunkClass::Meta)
+                .unwrap()
+                .len()
+        };
+        assert!(meta(&root) >= 2);
+        std::fs::write(root.join(".tresse/leftover-from-an-old-format"), b"x").unwrap();
+
+        let records = rebuild_storage(&root, 9).unwrap();
+
+        assert_eq!(records, count_records(&before));
+        let reopened = Store::open(&root, 7).unwrap();
+        // Stamps and the tombstone are carried as they were.
+        assert_eq!(reopened.doc, before);
+        let names: Vec<String> = Category::read_all(&reopened)
+            .unwrap()
+            .into_iter()
+            .map(|c| c.name)
+            .collect();
+        assert_eq!(names.len(), 2);
+        assert!(names.contains(&"Uncommitted".to_string()));
+        assert_eq!(meta(&root), 1, "one fresh version");
+        assert!(!root.join(".tresse/leftover-from-an-old-format").exists());
+        assert_eq!(money_tresse::config::read_remote(&root).unwrap(), None);
+        assert!(!rebuild_staging(&root).exists());
+        assert!(!rebuild_replaced(&root).exists());
+    }
+
+    #[test]
+    fn an_interrupted_rebuild_leaves_one_whole_repository() {
+        let parent = tempfile::tempdir().unwrap();
+        let root = parent.path().join("ledger-tresse");
+        let mut store = Store::open(&root, 7).unwrap();
+        Category::create(&mut store, "Food").unwrap();
+        let doc = store.doc.clone();
+
+        // Stopped between the two renames: the old one goes back.
+        std::fs::create_dir_all(rebuild_staging(&root)).unwrap();
+        std::fs::rename(&root, rebuild_replaced(&root)).unwrap();
+        finish_interrupted_rebuild(&root).unwrap();
+        assert_eq!(Store::open(&root, 7).unwrap().doc, doc);
+        assert!(!rebuild_staging(&root).exists());
+
+        // Stopped after the swap: the replaced one is only waste.
+        std::fs::create_dir_all(rebuild_replaced(&root).join(".tresse")).unwrap();
+        finish_interrupted_rebuild(&root).unwrap();
+        assert!(!rebuild_replaced(&root).exists());
+        assert_eq!(Store::open(&root, 7).unwrap().doc, doc);
+    }
+
+    #[test]
+    fn a_rebuild_without_a_ledger_file_changes_nothing() {
+        let parent = tempfile::tempdir().unwrap();
+        let root = parent.path().join("ledger-tresse");
+        std::fs::create_dir_all(root.join(".tresse")).unwrap();
+        assert!(rebuild_storage(&root, 7).is_err());
+        assert!(root.join(".tresse").is_dir());
     }
 
     #[test]
@@ -990,6 +1156,46 @@ mod tests {
         assert!(Transfer::read_all(&reopened).unwrap().is_empty());
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn an_exported_config_string_brings_the_ledger_to_another_device() {
+        use crate::remote::{KeyChoice, RemoteConfig, choose_key, marks_new_repository};
+        let (da, db) = (temp_dir("share_a"), temp_dir("share_b"));
+        let mut remote = rdx_sync::MemRemoteKv::new();
+
+        // A: a new repository from the server's page, its key made here.
+        let server = "tresse://http?url=https://sync.example&repo_id=money&token=trs_a&new=1";
+        let mut incoming = RemoteConfig::from_share_string(server).unwrap();
+        assert!(matches!(
+            choose_key(&incoming, marks_new_repository(server), None).unwrap(),
+            KeyChoice::Generate
+        ));
+        incoming.encryption_key = crate::remote::generate_encryption_key().unwrap();
+        incoming.validate().unwrap();
+        let mut a = Store::open(&da, 0xA).unwrap();
+        money_tresse::config::write_remote(&da, Some(&incoming)).unwrap();
+        Account::ensure_default(&mut a, "RUB").unwrap();
+        Category::create(&mut a, "Food").unwrap();
+        a.sync_with(&mut remote).unwrap();
+
+        // A exports what it has on disk; B pastes it.
+        let exported = money_tresse::config::read_remote(&da)
+            .unwrap()
+            .unwrap()
+            .to_share_string();
+        let pasted = RemoteConfig::from_share_string(&exported).unwrap();
+        assert!(matches!(
+            choose_key(&pasted, marks_new_repository(&exported), None).unwrap(),
+            KeyChoice::Carried
+        ));
+        pasted.validate().unwrap();
+        assert_eq!(pasted, incoming);
+        let mut b = Store::open(&db, 0xB).unwrap();
+        money_tresse::config::write_remote(&db, Some(&pasted)).unwrap();
+        b.sync_with(&mut remote).unwrap();
+        assert_eq!(b.doc, a.doc);
+        assert_eq!(Category::read_all(&b).unwrap()[0].name, "Food");
     }
 
     #[test]

@@ -19,6 +19,14 @@ preserved; the old directory is kept as a backup. Afterwards, configure Tresse
 sync in the application's Settings. Old chunk remotes and `tresse1:` strings
 are not compatible with the new repository protocol.
 
+Storage written by an earlier Tresse can be replaced from the ledger itself:
+**Settings → Storage → Rebuild Tresse storage** (or **Rebuild storage** on the
+screen shown when the ledger cannot be opened). It writes `ledger.rdx` into a
+fresh Tresse repository with one version: every record, stamp and deletion
+stays; the version history, the old objects and the sync settings on this
+device go, and the ledger stops syncing until a storage is set up again. The
+storage on a server or in a bucket is not changed, so connect to a new one.
+
 ## What it does
 
 - **Transactions** — the records of the current account: id, amount, category
@@ -55,7 +63,7 @@ keep their commas, including the trailing comma for an empty comment.
 | Column | Header | Value |
 |--------|--------|-------|
 | 1 | `дата` | Operation date. Export writes `YYYY-MM-DD`; import also accepts `DD.MM.YYYY`. |
-| 2 | `тип` | `расход` (expense), `доход` (income), or `перевод` (transfer). |
+| 2 | `тип` | `расход` (expense), `доход` (income), `перевод` (transfer), or `счёт` (an account). |
 | 3 | `счёт` | Account name. For a transfer, this is the source account. |
 | 4 | `категория или другой счет` | Expense/income category name, or the destination account name for a transfer. |
 | 5 | `сумма в валюте из` | Positive amount debited from the account; empty for income. |
@@ -71,6 +79,11 @@ Which fields to fill depends on the operation:
 | `расход` | Expense category | Required | Both empty |
 | `доход` | Income category | Both empty | Required |
 | `перевод` | Destination account | Required | Required |
+| `счёт` | Empty | Both empty | Opening balance (may be zero or negative) and currency |
+
+An account row has no date and no comment: `,счёт,Карта,,,,1500,RUB,`. It
+states the account once, with its opening balance, and is how an account with
+no operations travels too.
 
 For transfers, the two accounts must differ. Both amounts are entered in their
 respective account currencies; the exchange rate is implied by their ratio.
@@ -104,46 +117,58 @@ The header is optional on import; if present, it must be the first row and the
 columns must retain the documented order. A UTF-8 BOM is accepted. Every
 operation row must contain all nine columns.
 
-Import appends operations to the existing ledger. Accounts are matched by
+Import adds operations to the existing ledger. Accounts are matched by
 name; categories are matched by name within their type (expense or income).
 Names are case-sensitive, with surrounding whitespace removed from imported
 names. Missing accounts are created in the specified currency with a zero
-opening balance; missing categories are created with the default style.
-Existing opening balances, account currencies and category styles are
-preserved; account balances change with the imported operations.
+opening balance (or the one an account row gives); missing categories are
+created with the default style. An account row sets the opening balance of the
+account it names; account currencies and category styles are preserved.
 
 An account currency that conflicts with the CSV, or multiple matching accounts
 or categories with the same name, causes an error. Invalid dates, operation
 types, amounts or field combinations also cause an error. The whole file is
 validated before saving, so an invalid row leaves the ledger unchanged.
 
-**Repeated imports add the operations again.** There are no operation IDs in
-this format, so import does not deduplicate or update existing operations.
+**Importing a file twice adds nothing twice.** A row is skipped while the
+ledger holds an identical operation (same day, accounts, category, amounts and
+comment) that no earlier row of the file has been matched with; identical rows
+within one file are all added. The notice after an import says how many were
+added and how many were already in the ledger.
 
 ### Export behavior
 
-Export writes the header and all stored expenses, income and transfers from
-**all accounts**, ordered by date, regardless of the current account or screen.
+Export writes the header, one account row per account, and all stored
+expenses, income and transfers from **all accounts**, ordered by date, regardless of the current account or screen.
 Each transfer is written once, with both amounts, rather than as two separate
 expense/income rows. Comments are escaped using standard CSV quoting.
 
-Opening balances, account/category IDs, category styles and sync settings are
-not included. This is an operation interchange format: importing an export
-into a fresh ledger restores its operations, but does not restore opening
-balances or presentation settings.
+Account/category IDs, category styles, categories without operations, hidden
+and main accounts, and sync settings are not included. Importing an export
+into a fresh ledger restores its accounts with their opening balances and
+currencies, and its operations.
 
 ## First run
 
-With no ledger on the device the application asks which there should be:
+With no ledger on the device the application asks which there should be, on
+two tabs:
 
-- **Create a new ledger** — asks for the name and currency of the first account and
-  starts empty. Sync storage can be added later in Settings.
-- **Connect to sync storage** — brings in a ledger that already syncs. The
-  storage is given either as one **config string** (`tresse://…`, exported by
-  another device or `tresse config export`) or through the S3/HTTP fields.
-  An encryption key and repository ID are required.
+- **Server** — **Start without sync** makes a new ledger with its first account
+  (rename it and change its currency like any other account). Or sign in on a
+  Tresse server: the server the build names is filled in and can be changed;
+  **Sign in** opens its page in the browser, which brings the repository back
+  to the app. A **config string** (`tresse://…`, exported by another device,
+  copied from the server's page or by `tresse config export`) can be pasted
+  instead.
+- **Custom storage** — every field of an S3 or HTTP storage, with an
+  encryption key generated on request.
 
-The first-run choice is unchanged. The repository config is written to files,
+Settings has the same two tabs (without starting a new ledger), and
+**Export config string** on the first for setting up the next device.
+The build's default server comes from `TRESSE_SERVER_URL` at build time
+(CI: the repository variable of that name).
+
+The first-run choice is unchanged once made. The repository config is written to files,
 not application preferences. Sync settings can also be changed using Tresse's
 CLI; the GUI re-reads them when opening Settings and synchronizing.
 

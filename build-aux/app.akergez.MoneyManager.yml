@@ -33,7 +33,10 @@ modules:
       build-args:
         - --share=network
     build-commands:
-      - cargo build --profile dist --locked -p money-manager
+      # The default sync server is baked in at build time; the build sandbox
+      # gets no environment from outside, so publish-flatpak.sh leaves it in
+      # this file of the checkout.
+      - TRESSE_SERVER_URL="$(cat .tresse-server-url 2>/dev/null)" cargo build --profile dist --locked -p money-manager
       - install -Dm755 target/dist/money-manager /app/bin/money-manager
       - install -Dm644 data/app.akergez.MoneyManager.desktop /app/share/applications/app.akergez.MoneyManager.desktop
       - install -Dm644 data/app.akergez.MoneyManager.metainfo.xml /app/share/metainfo/app.akergez.MoneyManager.metainfo.xml

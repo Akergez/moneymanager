@@ -41,9 +41,11 @@ env:
   # somebody wants to try a fix with.
   MONEY_MANAGER_PROFILE: ${{ startsWith(github.ref, 'refs/tags/v') && 'dist' || 'release' }}
   # The Tresse server the builds offer first when connecting sync storage
-  # (crates/money-manager/src/sync_server.rs). A repository variable; empty
-  # when unset, which builds without a default server.
-  MONEY_MANAGER_TRESSE_SERVER_URL: ${{ vars.MONEY_MANAGER_TRESSE_SERVER_URL }}
+  # (crates/money-manager/src/sync_server.rs). A repository variable,
+  # `TRESSE_SERVER_URL` as in the other Tresse apps, or the older
+  # `MONEY_MANAGER_TRESSE_SERVER_URL`; empty when neither is set, which
+  # builds without a default server.
+  TRESSE_SERVER_URL: ${{ vars.TRESSE_SERVER_URL || vars.MONEY_MANAGER_TRESSE_SERVER_URL }}
 
 permissions:
   contents: read

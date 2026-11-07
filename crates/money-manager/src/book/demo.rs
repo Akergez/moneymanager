@@ -169,3 +169,55 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 }
+
+#[cfg(test)]
+mod csv_round_trip {
+    use super::*;
+    use money_core::ledger::summaries;
+
+    fn snapshot(store: &Store) -> (Vec<(String, String, f64)>, usize, usize, usize) {
+        let accounts = Account::read_all(store).unwrap();
+        let expenses = Expense::read_all(store).unwrap();
+        let top_ups = TopUp::read_all(store).unwrap();
+        let transfers = Transfer::read_all(store).unwrap();
+        let balances = summaries(&accounts, &expenses, &top_ups, &transfers);
+        let mut by_name: Vec<_> = accounts
+            .iter()
+            .map(|a| {
+                (
+                    a.name.clone(),
+                    a.currency.clone(),
+                    (balances[&a.id].balance * 100.0).round() / 100.0,
+                )
+            })
+            .collect();
+        by_name.sort_by(|a, b| a.0.cmp(&b.0));
+        (by_name, expenses.len(), top_ups.len(), transfers.len())
+    }
+
+    #[test]
+    fn the_sample_ledger_survives_export_and_import_into_a_new_ledger() {
+        let (a, b) = (tempfile_dir("a"), tempfile_dir("b"));
+        let mut source = Store::open(&a, 1).unwrap();
+        seed(&mut source, NaiveDate::from_ymd_opt(2026, 10, 5).unwrap()).unwrap();
+        let mut csv = Vec::new();
+        money_core::csv::export(&source, &mut csv).unwrap();
+
+        // What "Start without sync" leaves: the default account, nothing else.
+        let mut target = Store::open(&b, 2).unwrap();
+        Account::ensure_default(&mut target, "RUB").unwrap();
+        let report = money_core::csv::import(&mut target, csv.as_slice()).unwrap();
+        assert_eq!(report.skipped, 0);
+        assert_eq!(snapshot(&target), snapshot(&source));
+        // And once more into itself: nothing is added twice.
+        let again = money_core::csv::import(&mut target, csv.as_slice()).unwrap();
+        assert_eq!(again.added, 0);
+        assert_eq!(snapshot(&target), snapshot(&source));
+    }
+
+    fn tempfile_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("mm-csv-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+}

@@ -63,6 +63,12 @@ impl Shell {
         };
 
         let root = crate::paths::ledger_dir();
+        // A rebuild of the storage that the app did not live to finish.
+        if let Err(error) = money_core::store::finish_interrupted_rebuild(&root) {
+            self.stage = Stage::Failed(error.into());
+            cx.notify();
+            return;
+        }
         let legacy = money_core::store::has_legacy_data(&crate::paths::legacy_ledger_dir());
         match legacy {
             Err(error) => {
@@ -190,11 +196,11 @@ impl Shell {
                         Ok(book) => {
                             let book = cx.new(|_| book);
                             book.update(cx, |book, cx| book.adopt_legacy_styles(cx));
-                            shell.show_workspace(book, window, cx);
+                            shell.show_workspace(book.clone(), window, cx);
                             Notice::new("Data converted to Tresse. Sync settings were reset.")
                                 .tone(Tone::Success)
                                 .push(window, cx);
-                            crate::settings_dialog::open(window, cx);
+                            crate::settings_dialog::open(Some(book), window, cx);
                         }
                         Err(error) => {
                             shell.stage = Stage::Failed(error.into());
@@ -205,6 +211,27 @@ impl Shell {
                 .ok();
         })
         .detach();
+    }
+
+    /// From the failure to open the ledger: the ledger file in fresh Tresse
+    /// storage, in place of storage this version cannot read, then a new
+    /// start. Sync is off afterwards.
+    fn rebuild(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        crate::sync_server::SyncConnect::cancel(cx);
+        let root = crate::paths::ledger_dir();
+        match money_core::store::rebuild_storage(&root, crate::settings::new_source()) {
+            Ok(records) => {
+                self.start(window, cx);
+                Notice::new(format!(
+                    "Storage rebuilt with {records} records. Sync is off until you set it up again."
+                ))
+                .tone(Tone::Success)
+                .push(window, cx);
+            }
+            Err(error) => {
+                Notice::error(format!("Couldn’t rebuild the storage. ({error})")).push(window, cx)
+            }
+        }
     }
 
     fn show_workspace(&mut self, book: Entity<Book>, window: &mut Window, cx: &mut Context<Self>) {
@@ -242,12 +269,35 @@ impl Render for Shell {
             // The sections keep clear of the system's bars and the keyboard
             // themselves.
             Stage::Workspace(workspace) => frame.edge_to_edge(true).child(workspace.clone()),
-            Stage::Failed(error) => frame.child(
-                Empty::new(Lucide::TriangleAlert, "Couldn’t open the ledger").body(format!(
+            Stage::Failed(error) => {
+                let root = crate::paths::ledger_dir();
+                // Storage an earlier Tresse wrote may be what fails; the
+                // ledger file itself is read without it.
+                let rebuildable = root.join(money_core::store::LEDGER_FILE).is_file();
+                let mut body = format!(
                     "The ledger and original backup are kept in {}. ({error})",
-                    crate::paths::ledger_dir().display()
-                )),
-            ),
+                    root.display()
+                );
+                if rebuildable {
+                    body.push_str(
+                        " Rebuilding writes the ledger into fresh Tresse storage: every record \
+                         stays, the version history and sync settings on this device go.",
+                    );
+                }
+                let failed = Empty::new(Lucide::TriangleAlert, "Couldn’t open the ledger").body(body);
+                let rebuild = rebuildable.then(|| {
+                    let shell = cx.entity().downgrade();
+                    Command::new("rebuild-storage", "Rebuild storage")
+                        .primary()
+                        .on_trigger(move |window, cx| {
+                            shell.update(cx, |shell, cx| shell.rebuild(window, cx)).ok();
+                        })
+                });
+                frame.child(match rebuild {
+                    Some(rebuild) => failed.action(rebuild),
+                    None => failed,
+                })
+            }
         }
     }
 }

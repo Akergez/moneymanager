@@ -47,8 +47,16 @@ impl RemoteFields {
             remote.map(|r| r.s3_endpoint.as_str()),
             "https://s3.us-east-1.amazonaws.com",
         );
-        let region = field(Purpose::Plain, remote.map(|r| r.s3_region.as_str()), "us-east-1");
-        let bucket = field(Purpose::Plain, remote.map(|r| r.s3_bucket.as_str()), "my-bucket");
+        let region = field(
+            Purpose::Plain,
+            remote.map(|r| r.s3_region.as_str()),
+            "us-east-1",
+        );
+        let bucket = field(
+            Purpose::Plain,
+            remote.map(|r| r.s3_bucket.as_str()),
+            "my-bucket",
+        );
         let access_key_id = field(
             Purpose::Login,
             remote.map(|r| r.s3_access_key_id.as_str()),
@@ -140,6 +148,38 @@ impl RemoteFields {
         }
     }
 
+    /// Whether every field is empty, which is how "no storage" is said.
+    pub fn is_blank(remote: &RemoteConfig) -> bool {
+        remote.url.is_empty()
+            && remote.token.is_empty()
+            && remote.repo_id.is_empty()
+            && remote.encryption_key.is_empty()
+            && remote.s3_endpoint.is_empty()
+            && remote.s3_region.is_empty()
+            && remote.s3_bucket.is_empty()
+            && remote.s3_access_key_id.is_empty()
+            && remote.s3_secret_access_key.is_empty()
+    }
+
+    /// Whether the key field holds anything: a key is only generated into an
+    /// empty one.
+    pub fn has_key(&self, cx: &App) -> bool {
+        !self.encryption_key.read(cx).value(cx).trim().is_empty()
+    }
+
+    /// A new key, for a storage that has none yet. Replacing the key of a
+    /// storage that already holds an encrypted ledger would lock it out, so
+    /// an existing key is never replaced.
+    pub fn generate_key(&mut self, window: &mut Window, cx: &mut App) -> Result<(), String> {
+        if self.has_key(cx) {
+            return Ok(());
+        }
+        let key = money_core::remote::generate_encryption_key()?;
+        self.encryption_key
+            .update(cx, |field, cx| field.set_value(key, window, cx));
+        Ok(())
+    }
+
     /// The fields of the storage type chosen, under the choice of it.
     /// `on_backend` is told when another is chosen.
     pub fn render(
@@ -174,5 +214,52 @@ impl RemoteFields {
         fields
             .child(TextField::new(&self.prefix).label("Repository ID"))
             .child(TextField::new(&self.encryption_key).label("Encryption key"))
+    }
+}
+
+/// Where a remote keeps the ledger, in a few words: the server's host, or
+/// the bucket and its prefix.
+pub fn describe(remote: &RemoteConfig) -> String {
+    fn host(url: &str) -> &str {
+        let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+        rest.split('/').next().unwrap_or(rest)
+    }
+    match remote.storage_type {
+        StorageType::Http => host(&remote.url).to_string(),
+        StorageType::S3 if remote.repo_id.is_empty() => {
+            format!("{} on {}", remote.s3_bucket, host(&remote.s3_endpoint))
+        }
+        StorageType::S3 => format!(
+            "{}/{} on {}",
+            remote.s3_bucket,
+            remote.repo_id,
+            host(&remote.s3_endpoint)
+        ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_remote_is_described_by_where_it_is() {
+        let server = RemoteConfig {
+            storage_type: StorageType::Http,
+            url: "https://sync.example.com/".into(),
+            ..Default::default()
+        };
+        assert_eq!(describe(&server), "sync.example.com");
+        let bucket = RemoteConfig {
+            storage_type: StorageType::S3,
+            s3_endpoint: "https://s3.eu-central-1.amazonaws.com".into(),
+            s3_bucket: "money".into(),
+            repo_id: "ledger".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            describe(&bucket),
+            "money/ledger on s3.eu-central-1.amazonaws.com"
+        );
     }
 }

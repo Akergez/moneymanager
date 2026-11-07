@@ -35,12 +35,18 @@ const ATTEMPT_TTL: Duration = Duration::from_secs(30 * 60);
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
 
 /// The Tresse server this build offers first, baked in at build time from
+/// `TRESSE_SERVER_URL` (the name the other Tresse apps read), or
 /// `MONEY_MANAGER_TRESSE_SERVER_URL`. None when the build names none: the
-/// server URL field is then the only way to one.
+/// server URL field then starts empty.
 pub fn default_server_url() -> Option<&'static str> {
-    option_env!("MONEY_MANAGER_TRESSE_SERVER_URL")
-        .map(str::trim)
-        .filter(|url| !url.is_empty())
+    [
+        option_env!("TRESSE_SERVER_URL"),
+        option_env!("MONEY_MANAGER_TRESSE_SERVER_URL"),
+    ]
+    .into_iter()
+    .flatten()
+    .map(str::trim)
+    .find(|url| !url.is_empty())
 }
 
 /// A connection the user started from the app; only its own return is
@@ -82,7 +88,11 @@ impl ConnectAttempt {
 
     /// What [`restore`] reads back, persisted across restarts.
     pub fn expires_millis(&self) -> u64 {
-        now_millis() + self.expires.saturating_duration_since(Instant::now()).as_millis() as u64
+        now_millis()
+            + self
+                .expires
+                .saturating_duration_since(Instant::now())
+                .as_millis() as u64
     }
 }
 
@@ -128,7 +138,10 @@ impl SyncConnect {
     pub fn begin(cx: &mut App, server_url: &str) -> Result<String, String> {
         let server = normalize_server_url(server_url)?;
         let attempt = ConnectAttempt::new(server);
-        let return_to = format!("{CONNECT_SCHEME}://{CONNECT_ACTION}?state={}", attempt.state);
+        let return_to = format!(
+            "{CONNECT_SCHEME}://{CONNECT_ACTION}?state={}",
+            attempt.state
+        );
         let page = connect_url(&attempt.server_url, Some(&return_to));
         let state = cx.global_mut::<Self>();
         state.attempt = Some(attempt.clone());
@@ -148,9 +161,7 @@ impl SyncConnect {
     /// observers, and they call back here — an unconditional `take` would
     /// notify forever.
     pub fn take_outcome(cx: &mut App) -> Option<Result<RemoteConfig, String>> {
-        if cx.global::<Self>().outcome.is_none() {
-            return None;
-        }
+        cx.global::<Self>().outcome.as_ref()?;
         cx.global_mut::<Self>().outcome.take()
     }
 
@@ -175,7 +186,7 @@ fn spawn_poller(cx: &mut App) {
                     SyncConnect::clear(
                         cx,
                         Some(Err(
-                            "The connection timed out. Start again from the app.".into(),
+                            "The connection timed out. Start again from the app.".into()
                         )),
                     );
                     return;
@@ -275,7 +286,11 @@ pub fn accept(
     let config = params
         .get("config")
         .ok_or_else(|| "The server link carried no configuration.".to_string())?;
-    let remote = finish_import(config, previous, "The server link carried no Tresse config string.")?;
+    let remote = finish_import(
+        config,
+        previous,
+        "The server link carried no Tresse config string.",
+    )?;
     if remote.storage_type != StorageType::Http
         || normalize_server_url(&remote.url).ok().as_deref() != Some(attempt.server_url.as_str())
     {
@@ -286,7 +301,10 @@ pub fn accept(
 
 /// Imports a config string pasted into the app, from the server page's Copy
 /// button or another device.
-pub fn import_share_string(text: &str, previous: Option<&RemoteConfig>) -> Result<RemoteConfig, String> {
+pub fn import_share_string(
+    text: &str,
+    previous: Option<&RemoteConfig>,
+) -> Result<RemoteConfig, String> {
     finish_import(
         text,
         previous,
@@ -302,11 +320,14 @@ fn normalize_server_url(url: &str) -> Result<String, String> {
     if trimmed.starts_with("https://") {
         return Ok(trimmed.to_string());
     }
-    if trimmed.starts_with("http://") {
-        let host = trimmed["http://".len()..]
-            .split(['/', ':'])
-            .next()
-            .unwrap_or_default();
+    if let Some(rest) = trimmed.strip_prefix("http://") {
+        let authority = rest.split('/').next().unwrap_or_default();
+        // An IPv6 host is bracketed and holds colons of its own.
+        let host = if authority.starts_with('[') {
+            authority.split_inclusive(']').next().unwrap_or_default()
+        } else {
+            authority.split(':').next().unwrap_or_default()
+        };
         if matches!(host, "localhost" | "127.0.0.1" | "[::1]") {
             return Ok(trimmed.to_string());
         }
@@ -471,8 +492,14 @@ mod tests {
     #[test]
     fn only_this_apps_connect_links_are_matched() {
         let attempt = attempt();
-        assert!(!link_belongs_to("moneymanager://other?state=abc123", &attempt));
-        assert!(!link_belongs_to("https://sync.example/?state=abc123", &attempt));
+        assert!(!link_belongs_to(
+            "moneymanager://other?state=abc123",
+            &attempt
+        ));
+        assert!(!link_belongs_to(
+            "https://sync.example/?state=abc123",
+            &attempt
+        ));
     }
 
     #[test]
@@ -492,9 +519,11 @@ mod tests {
 
     #[test]
     fn a_pasted_new_repository_string_gets_a_generated_key() {
-        let remote =
-            import_share_string("tresse://http?url=https://sync.example&repo_id=money&token=trs_a&new=1", None)
-                .unwrap();
+        let remote = import_share_string(
+            "tresse://http?url=https://sync.example&repo_id=money&token=trs_a&new=1",
+            None,
+        )
+        .unwrap();
 
         assert_eq!(remote.storage_type, StorageType::Http);
         assert!(!remote.encryption_key.is_empty());
@@ -502,16 +531,32 @@ mod tests {
 
     #[test]
     fn url_normalization_accepts_https_and_loopback_http_only() {
-        assert_eq!(normalize_server_url(" https://sync.example/ ").unwrap(), "https://sync.example");
-        assert_eq!(normalize_server_url("http://127.0.0.1:9000/").unwrap(), "http://127.0.0.1:9000");
+        assert_eq!(
+            normalize_server_url(" https://sync.example/ ").unwrap(),
+            "https://sync.example"
+        );
+        assert_eq!(
+            normalize_server_url("http://127.0.0.1:9000/").unwrap(),
+            "http://127.0.0.1:9000"
+        );
         assert!(normalize_server_url("http://sync.example").is_err());
+        assert!(normalize_server_url("http://[::1]:8080").is_ok());
+        assert!(normalize_server_url("http://localhost:8080/").is_ok());
+        assert!(normalize_server_url("http://localhost.evil.example").is_err());
         assert!(normalize_server_url("").is_err());
     }
 
     #[test]
     fn a_restored_attempt_keeps_its_expiry() {
-        let fresh = ConnectAttempt::restore("https://sync.example".into(), "s".into(), now_millis() + 1000);
+        let fresh = ConnectAttempt::restore(
+            "https://sync.example".into(),
+            "s".into(),
+            now_millis() + 1000,
+        );
         assert!(fresh.is_some_and(|attempt| !attempt.expired()));
-        assert!(ConnectAttempt::restore("https://sync.example".into(), "s".into(), now_millis() - 1).is_none());
+        assert!(
+            ConnectAttempt::restore("https://sync.example".into(), "s".into(), now_millis() - 1)
+                .is_none()
+        );
     }
 }

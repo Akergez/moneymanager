@@ -25,7 +25,7 @@
 //! reads the application's state, not the picture, so it does not depend on
 //! fonts or on how a compositor draws:
 //! - `stage=starting|welcome|workspace|failed`
-//! - `onboarding=choose|create|connect` — which step the first-run form is on
+//! - `onboarding=server|custom` — which tab the first-run page shows
 //! - `screen=transactions|categories|charts`
 //! - `mode=expense|income`
 //! - `layout=compact|medium|expanded` — the width class the last frame was
@@ -229,14 +229,7 @@ fn observe(what: &str, window: &mut Window, cx: &mut App) -> Option<String> {
             return Some(if set { "yes" } else { "no" }.to_string());
         }
         "onboarding" => {
-            return Some(
-                match onboarding?.read(cx).step() {
-                    crate::onboarding::Step::Choose => "choose",
-                    crate::onboarding::Step::Create => "create",
-                    crate::onboarding::Step::Connect => "connect",
-                }
-                .to_string(),
-            );
+            return Some(onboarding?.read(cx).tab().key().to_string());
         }
         _ => {}
     }
