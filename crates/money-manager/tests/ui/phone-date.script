@@ -11,13 +11,13 @@ click:350,660
 wait:1000
 type:42
 # The date field.
-click:180,703
+click:180,668
 wait:300
 key:ctrl-a
 type:2026-10-01
 wait:300
 shot:pd-typed
-click:351,125
+click:351,90
 wait:1000
 expect:sheet=closed
 expect:records=45
@@ -25,7 +25,7 @@ shot:pd-saved
 # Pulled up, the sheet stays up; dragged far down, it goes.
 click:350,660
 wait:1000
-press:200,88
+press:200,52
 wait:200
 move:200,60
 wait:200

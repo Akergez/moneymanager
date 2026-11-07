@@ -6,6 +6,7 @@
 //! - [`models`] — the records, as plain structs;
 //! - [`store`] — the native RDX document versioned and synchronized by Tresse;
 //! - [`services`] — how each record is laid out inside that document;
+//! - [`tags`] — labels, any number of them on a record;
 //! - [`ledger`] — per-account views and balances, derived at read time;
 //! - [`remote`] — the Tresse remote and the one-string form of its credentials;
 //! - [`format`] — how amounts are written out.
@@ -21,6 +22,7 @@ pub mod models;
 pub mod remote;
 mod services;
 pub mod store;
+pub mod tags;
 
 pub use money_tresse as tresse;
 pub use store::SyncReport;

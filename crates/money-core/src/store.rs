@@ -1,15 +1,18 @@
 //! RDX-backed persistence: replaces the former SQLite/diesel layer.
 //!
-//! The dataset is a CRDT document — a positional [`Tuple`] of seven [`Eulerian`]
+//! The dataset is a CRDT document — a positional [`Tuple`] of eleven [`Eulerian`]
 //! collections (categories, expenses, top-up categories, top-ups, accounts,
-//! transfers, then account preferences, in the order of the `*_IDX` constants below). Each record is a
+//! transfers, account preferences, then the tags of expenses and their links
+//! and the tags of top-ups and theirs, in the order of the `*_IDX` constants below). Each record is a
 //! `Tuple` whose first child is its key (a hex id for domain records, a name for
 //! preferences); the rest are fields. Per-record stamps give last-write-wins semantics and tombstones mark
 //! deletions.
 //!
 //! Collections are merged positionally with zero-padding, so documents written
 //! with fewer collections (legacy, pre-accounts) merge losslessly into this
-//! seven-collection shape; and a record missing a trailing field reads as empty.
+//! eleven-collection shape; and a record missing a trailing field reads as empty.
+//! The other way round holds too: a version that knows fewer collections
+//! merges a document with more and keeps the ones it does not know.
 //!
 //! `ledger.rdx` is a native RDX file inside a standard Tresse repository.
 //! Tresse owns deltas, version history, CAS, locking and remote synchronization.
@@ -33,7 +36,14 @@ pub const TOP_UPS_IDX: usize = 3;
 pub const ACCOUNTS_IDX: usize = 4;
 pub const TRANSFERS_IDX: usize = 5;
 pub const ACCOUNT_PREFERENCES_IDX: usize = 6;
-const COLLECTION_COUNT: usize = 7;
+/// Tags and the links that put them on records; see [`crate::tags`]. After
+/// every collection an earlier version knows, which it merges and keeps
+/// without reading them.
+pub const EXPENSE_TAGS_IDX: usize = 7;
+pub const EXPENSE_TAG_LINKS_IDX: usize = 8;
+pub const TOP_UP_TAGS_IDX: usize = 9;
+pub const TOP_UP_TAG_LINKS_IDX: usize = 10;
+const COLLECTION_COUNT: usize = 11;
 
 /// Fixed id of the implicit default account. Existing records with no
 /// `account_id` belong to it; the id is deterministic so two devices creating
@@ -975,6 +985,60 @@ mod tests {
         )];
         children.extend(fields.into_iter().map(|v| RdxElement::with_stamp(v, stamp)));
         RdxElement::with_stamp(RdxValue::Tuple(children), stamp)
+    }
+
+    /// What a version from before tags writes: seven collections, and an
+    /// expense rewritten whole with its five fields.
+    #[test]
+    fn a_version_without_tags_keeps_them_through_its_own_edits() {
+        use crate::tags::{Tag, TagKind};
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(dir.path(), 7).unwrap();
+        let food = Category::create(&mut store, "Food").unwrap();
+        let day = NaiveDate::from_ymd_opt(2026, 11, 7).unwrap();
+        let lunch = Expense::create(&mut store, &food.id, 12.0, None, day, &[]).unwrap();
+        let trip = Tag::create(&mut store, TagKind::Expense, "Trip", &Default::default()).unwrap();
+        Tag::set_for_record(
+            &mut store,
+            TagKind::Expense,
+            &lunch.id,
+            std::slice::from_ref(&trip.id),
+        )
+        .unwrap();
+
+        let old_edit = legacy_record(
+            &hex_encode(&lunch.id),
+            vec![
+                RdxValue::Str(hex_encode(&food.id)),
+                RdxValue::Float(15.0),
+                RdxValue::Term("null".to_string()),
+                RdxValue::Str("2026-11-07".to_string()),
+                RdxValue::Str(hex_encode(&DEFAULT_ACCOUNT_ID)),
+            ],
+            Stamp::new(0x99, max_time(&store.doc) + TIME_STEP),
+        );
+        let old_shape = RdxElement::new(RdxValue::Tuple(
+            (0..7)
+                .map(|i| {
+                    RdxElement::new(RdxValue::Eulerian(if i == EXPENSES_IDX {
+                        vec![old_edit.clone()]
+                    } else {
+                        Vec::new()
+                    }))
+                })
+                .collect(),
+        ));
+        // The old version's own view of the merged document: its seven
+        // collections, the others carried along.
+        let merged = rdx_rs::merge(&store.doc, &old_shape);
+        assert_eq!(merged.value.children().unwrap().len(), COLLECTION_COUNT);
+        store.merge_document(&old_shape).unwrap();
+
+        assert_eq!(Expense::read_all(&store).unwrap()[0].amount, 15.0);
+        assert_eq!(
+            Tag::links(&store, TagKind::Expense)[&lunch.id],
+            vec![trip.id]
+        );
     }
 
     #[test]

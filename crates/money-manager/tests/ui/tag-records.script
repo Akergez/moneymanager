@@ -1,0 +1,48 @@
+# mode: demo
+# size: 1240x800
+#
+# A record carries any number of tags, put on and taken off with the chips
+# at the end of its form. A tag deleted comes off every record it was on,
+# and the records stay.
+wait:2500
+key:ctrl-n
+wait:900
+type:5
+# "Friends" on, then "Work" on and off again, then Add.
+click:459,604
+wait:300
+click:553,604
+wait:300
+click:553,604
+wait:300
+shot:tr-form
+click:725,690
+wait:900
+expect:dialog=closed
+expect:records=45
+key:ctrl-4
+wait:600
+click:344,168
+wait:900
+expect:page-records=16
+key:escape
+wait:700
+# "Work": Edit tag…, Delete tag…, and Delete.
+click:344,200
+wait:900
+expect:page-records=11
+click:1135,58
+wait:900
+expect:dialog=open
+click:475,631
+wait:900
+click:725,220
+wait:900
+# The page of a tag that is gone goes back to the tags.
+expect:page=tags
+expect:tags=1
+expect:records=45
+click:344,168
+wait:900
+expect:page-records=16
+quit

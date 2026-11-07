@@ -1,0 +1,64 @@
+# mode: demo
+# size: 1240x800
+#
+# Tags have a screen of their own. A tag's row opens the page of the
+# records that carry it, Escape (back) leaves it; a category's row does the
+# same for its records, and "new" there makes a record in that category.
+wait:2500
+key:ctrl-4
+wait:600
+expect:screen=tags
+expect:tags=2
+# "Friends": the coffee, the movies and the dinner, five months of them.
+click:344,168
+wait:900
+expect:page=records
+expect:page-records=15
+shot:tags-friends
+key:escape
+wait:700
+expect:page=tags
+# Income has a tag of its own.
+key:ctrl-m
+wait:500
+expect:tags=1
+key:ctrl-m
+wait:500
+# A new tag.
+key:ctrl-n
+wait:900
+expect:dialog=open
+type:Trip
+key:enter
+wait:900
+expect:dialog=closed
+expect:tags=3
+# A category’s records ("Food & dining", the second by name), and a
+# record made on its page is in it.
+key:ctrl-2
+wait:600
+click:360,200
+wait:900
+expect:page=records
+expect:page-records=16
+key:ctrl-n
+wait:900
+expect:dialog=open
+type:10
+key:enter
+wait:900
+expect:dialog=closed
+expect:records=45
+expect:page-records=17
+shot:tags-category
+key:alt-left
+wait:700
+expect:page=categories
+# Another screen closes the page too.
+click:360,200
+wait:900
+expect:page=records
+key:ctrl-1
+wait:600
+expect:page=transactions
+quit

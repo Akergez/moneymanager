@@ -1,0 +1,31 @@
+# mode: demo
+# size: 400x800
+# input: touch
+#
+# On a phone Tags is the fourth place of the navigation bar. A tag's row
+# opens its records as a page over the list, without the bar; the round
+# button there makes a record that carries the tag, and back leaves.
+wait:2500
+click:350,760
+wait:700
+expect:screen=tags
+expect:tags=2
+click:99,249
+wait:900
+expect:page=records
+expect:page-records=15
+click:350,750
+wait:1000
+expect:sheet=open
+type:3
+wait:300
+click:351,90
+wait:1000
+expect:sheet=closed
+expect:records=45
+expect:page-records=16
+shot:phone-tags
+key:escape
+wait:800
+expect:page=tags
+quit

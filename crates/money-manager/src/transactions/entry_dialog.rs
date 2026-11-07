@@ -7,7 +7,8 @@
 //! (Enter in the amount too, the keyboard's own key on a phone). Its day
 //! starts on that of the latest record, today and yesterday a press away and
 //! any other typed or picked; the comment stays folded until asked for, so
-//! none of these costs a press when it is not wanted. It is a
+//! none of these costs a press when it is not wanted. Tags are chips at
+//! the categories, any number of them on, and one more makes a tag. It is a
 //! [`Form`]: a dialog for a pointer, a sheet over the keyboard for a finger.
 //!
 //! A record rewritten here is rewritten whole — category, amount, comment,
@@ -19,8 +20,8 @@
 
 use gpui_adaptive::prim::{column, key_pressable, row, testable};
 use gpui_adaptive::{
-    ActiveColors as _, ActiveScale as _, Command, Confirm, DateField, DateFieldEvent,
-    DateFieldState, Env, Fields, FieldEvent, Form, Icon, Labelled, Note, Notice, Purpose, Segments,
+    ActiveColors as _, ActiveScale as _, Chips, Command, Confirm, DateField, DateFieldEvent,
+    DateFieldState, Env, FieldEvent, Fields, Form, Icon, Labelled, Note, Notice, Purpose, Segments,
     Text, TextField, TextFieldState, TileSize, Tone,
 };
 use gpui_kit::prelude::*;
@@ -29,7 +30,7 @@ use gpui_kit::{
 };
 use money_core::format::{format_amount, format_money, parse_amount};
 
-use crate::book::{self, Book, CategoryInfo, CategoryLook, Entry, EntryDraft, Mode};
+use crate::book::{self, Book, CategoryInfo, CategoryLook, Entry, EntryDraft, Filter, Mode};
 use crate::ui::{self, Lucide};
 
 struct EntryForm {
@@ -41,6 +42,13 @@ struct EntryForm {
     categories: Vec<CategoryInfo>,
     /// The chosen category: for a new record, the one Enter saves in.
     category: Option<Vec<u8>>,
+    /// The tags of `mode`, by name.
+    tags: Vec<CategoryInfo>,
+    /// The ones the record is to carry.
+    chosen_tags: Vec<Vec<u8>>,
+    /// Whether New tag… has opened the form for a tag, which is put on
+    /// once it is made.
+    making_tag: bool,
     amount: Entity<TextFieldState>,
     date: Entity<DateFieldState>,
     comment: Entity<TextFieldState>,
@@ -59,18 +67,28 @@ impl EntryForm {
         book: Entity<Book>,
         mode: Mode,
         editing: Option<Entry>,
+        preset: Option<&Filter>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let tags = book.read(cx).tags(mode);
+        // A new record made on a tag's page carries that tag.
+        let chosen_tags = match (&editing, preset) {
+            (Some(entry), _) => entry.tags.clone(),
+            (None, Some(Filter::Tag(id))) => vec![id.clone()],
+            (None, _) => Vec::new(),
+        };
         let entries = book.read(cx).entries(mode);
         let mut categories = book.read(cx).categories(mode);
         book::order_by_use(&mut categories, |c| c.id.as_slice(), &entries);
         // A new record starts on the category of the latest one, as it does
         // on its day; an edited one on its own, or on none if that category
         // no longer exists.
-        let category = match &editing {
-            Some(entry) => Some(entry.category_id.clone()),
-            None => book::latest_category(&entries).map(<[u8]>::to_vec),
+        let category = match (&editing, preset) {
+            (Some(entry), _) => Some(entry.category_id.clone()),
+            // On a category's page, in that category.
+            (None, Some(Filter::Category(id))) => Some(id.clone()),
+            (None, _) => book::latest_category(&entries).map(<[u8]>::to_vec),
         }
         .filter(|id| categories.iter().any(|c| &c.id == id))
         .or_else(|| match editing {
@@ -123,9 +141,14 @@ impl EntryForm {
                     .find(|category| !this.categories.iter().any(|known| known.id == category.id))
                     .map(|category| category.id.clone());
                 // The order the form opened with stays; what is new goes last.
-                this.categories.retain(|known| fresh.iter().any(|c| c.id == known.id));
+                this.categories
+                    .retain(|known| fresh.iter().any(|c| c.id == known.id));
                 for category in fresh {
-                    match this.categories.iter_mut().find(|known| known.id == category.id) {
+                    match this
+                        .categories
+                        .iter_mut()
+                        .find(|known| known.id == category.id)
+                    {
                         Some(known) => *known = category,
                         None => this.categories.push(category),
                     }
@@ -134,6 +157,20 @@ impl EntryForm {
                     this.making_category = false;
                     this.category = made;
                 }
+                // Tags the same way: a new one is offered, and put on if it
+                // was made from here; a deleted one comes off.
+                let fresh = book.read(cx).tags(this.mode);
+                let made = fresh
+                    .iter()
+                    .find(|tag| !this.tags.iter().any(|known| known.id == tag.id))
+                    .map(|tag| tag.id.clone());
+                this.chosen_tags
+                    .retain(|id| fresh.iter().any(|tag| &tag.id == id));
+                if let Some(made) = made.filter(|_| this.making_tag) {
+                    this.making_tag = false;
+                    this.chosen_tags.push(made);
+                }
+                this.tags = fresh;
                 cx.notify();
             }),
         ];
@@ -143,6 +180,9 @@ impl EntryForm {
             editing,
             categories,
             category,
+            tags,
+            chosen_tags,
+            making_tag: false,
             amount,
             date,
             comment,
@@ -157,6 +197,17 @@ impl EntryForm {
     /// so.
     fn choose(&mut self, id: Vec<u8>, cx: &mut Context<Self>) {
         self.category = Some(id);
+        cx.notify();
+    }
+
+    /// A tag pressed: on if it was off, off if it was on.
+    fn toggle_tag(&mut self, id: Vec<u8>, cx: &mut Context<Self>) {
+        match self.chosen_tags.iter().position(|on| *on == id) {
+            Some(at) => {
+                self.chosen_tags.remove(at);
+            }
+            None => self.chosen_tags.push(id),
+        }
         cx.notify();
     }
 
@@ -185,6 +236,7 @@ impl EntryForm {
                     && entry.amount == draft.amount
                     && entry.comment == draft.comment
                     && entry.date == draft.date
+                    && same_tags(&entry.tags, &draft.tags)
             });
             if unchanged {
                 return Ok(());
@@ -223,6 +275,14 @@ impl EntryForm {
             amount,
             comment: (!comment.is_empty()).then_some(comment),
             date,
+            // In the order the tags are listed, whatever order they were
+            // pressed in.
+            tags: self
+                .tags
+                .iter()
+                .filter(|tag| self.chosen_tags.contains(&tag.id))
+                .map(|tag| tag.id.clone())
+                .collect(),
         })
     }
 
@@ -232,7 +292,11 @@ impl EntryForm {
         let (colors, scale) = (cx.colors(), cx.scale());
         // A phone's narrow window has room for three to a row; four would
         // break a long name inside a word.
-        let columns: u16 = if Env::of(window, cx).is_compact() { 3 } else { 4 };
+        let columns: u16 = if Env::of(window, cx).is_compact() {
+            3
+        } else {
+            4
+        };
         let cell = |id: SharedString, window: &mut Window, cx: &mut App| {
             key_pressable(id, window, cx)
                 .flex_col()
@@ -246,13 +310,16 @@ impl EntryForm {
             .categories
             .iter()
             .map(|category| {
-                let look = CategoryLook::of(&category.style, &category.id, &category.name, colors.muted);
+                let look =
+                    CategoryLook::of(&category.style, &category.id, &category.name, colors.muted);
                 let selected = self.category.as_ref() == Some(&category.id);
                 let id = category.id.clone();
                 let key = format!("category-{}", money_core::store::hex_encode(&category.id));
                 testable(
                     cell(key.into(), window, cx)
-                        .when(selected, |cell| cell.bg(colors.mine).text_color(colors.on_mine))
+                        .when(selected, |cell| {
+                            cell.bg(colors.mine).text_color(colors.on_mine)
+                        })
                         .child(ui::category_tile(look, TileSize::Medium))
                         .child(Text::small(category.name.clone()).clamp(2).center())
                         .on_click(cx.listener(move |this, _, _, cx| this.choose(id.clone(), cx))),
@@ -279,7 +346,9 @@ impl EntryForm {
                     // The category's form opens over this one, which keeps
                     // what has been written in it.
                     this.making_category = true;
-                    crate::categories::open_category_dialog(&this.book, this.mode, None, window, cx);
+                    crate::categories::open_category_dialog(
+                        &this.book, this.mode, None, window, cx,
+                    );
                 })),
         );
         div()
@@ -288,6 +357,51 @@ impl EntryForm {
             .gap_1()
             .children(tiles)
             .child(new_category)
+    }
+
+    /// The tags, any number of them on, and the way to make one.
+    fn render_tags(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let muted = cx.colors().muted;
+        let chips = self.tags.iter().fold(Chips::new("tags"), |chips, tag| {
+            let look = CategoryLook::of(&tag.style, &tag.id, &tag.name, muted);
+            chips
+                .chip(
+                    money_core::store::hex_encode(&tag.id),
+                    tag.name.clone(),
+                    self.chosen_tags.contains(&tag.id),
+                )
+                .icon(look.icon, look.color)
+        });
+        let form = cx.entity().downgrade();
+        let chips = chips.on_toggle(move |key, _, cx| {
+            if let Some(key) = key {
+                let id = money_core::store::hex_decode(key);
+                form.update(cx, |this, cx| this.toggle_tag(id, cx)).ok();
+            }
+        });
+        let form = cx.entity().downgrade();
+        column()
+            .gap(cx.scale().space_s)
+            .when(!self.tags.is_empty(), |tags| tags.child(chips))
+            .child(
+                row().child(
+                    Command::new("new-tag", "New tag…")
+                        .icon(Lucide::Plus)
+                        .on_trigger(move |window, cx| {
+                            form.update(cx, |this, cx| {
+                                // The tag's form opens over this one, which
+                                // keeps what has been written in it.
+                                this.making_tag = true;
+                                crate::categories::open_tag_dialog(
+                                    &this.book, this.mode, None, window, cx,
+                                );
+                            })
+                            .ok();
+                        })
+                        .as_button()
+                        .ghost(),
+                ),
+            )
     }
 
     /// Today and yesterday a press away, any other day typed or picked.
@@ -308,8 +422,13 @@ impl EntryForm {
                     .segment("today", "Today")
                     .segment("yesterday", "Yesterday")
                     .on_change(move |key, window, cx| {
-                        let day = if key.as_ref() == "today" { today } else { yesterday };
-                        form.update(cx, |this, cx| this.set_date(day, window, cx)).ok();
+                        let day = if key.as_ref() == "today" {
+                            today
+                        } else {
+                            yesterday
+                        };
+                        form.update(cx, |this, cx| this.set_date(day, window, cx))
+                            .ok();
                     }),
             )
             .child(DateField::new(&self.date))
@@ -321,13 +440,20 @@ impl Render for EntryForm {
         let currency = self.book.read(cx).currency().to_string();
         let form = cx.entity().downgrade();
         Fields::new()
-            .child(TextField::new(&self.amount).label("Amount").suffix(currency))
+            .child(
+                TextField::new(&self.amount)
+                    .label("Amount")
+                    .suffix(currency),
+            )
             .children(
                 self.error
                     .clone()
                     .map(|error| Note::new(error).tone(Tone::Danger)),
             )
-            .child(Labelled::new("Category", self.render_categories(window, cx)))
+            .child(Labelled::new(
+                "Category",
+                self.render_categories(window, cx),
+            ))
             .child(Labelled::new("Date", self.render_date(cx)))
             .child(if self.commenting {
                 TextField::new(&self.comment)
@@ -339,14 +465,21 @@ impl Render for EntryForm {
                         Command::new("add-comment", "Add comment")
                             .icon(Lucide::MessageSquare)
                             .on_trigger(move |window, cx| {
-                                form.update(cx, |this, cx| this.open_comment(window, cx)).ok();
+                                form.update(cx, |this, cx| this.open_comment(window, cx))
+                                    .ok();
                             })
                             .as_button()
                             .ghost(),
                     )
                     .into_any_element()
             })
+            .child(Labelled::new("Tags", self.render_tags(cx)))
     }
+}
+
+/// Whether two lists of tags are the same tags, in any order.
+fn same_tags(a: &[Vec<u8>], b: &[Vec<u8>]) -> bool {
+    a.len() == b.len() && a.iter().all(|tag| b.contains(tag))
 }
 
 /// Opens the form for a new record, or for `entry`.
@@ -354,6 +487,29 @@ pub fn open_entry_dialog(
     book: &Entity<Book>,
     mode: Mode,
     entry: Option<Entry>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    open(book, mode, entry, None, window, cx);
+}
+
+/// Opens the form for a new record on the page of `filter`: in its
+/// category, or carrying its tag.
+pub fn open_new_entry_in(
+    book: &Entity<Book>,
+    mode: Mode,
+    filter: &Filter,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    open(book, mode, None, Some(filter), window, cx);
+}
+
+fn open(
+    book: &Entity<Book>,
+    mode: Mode,
+    entry: Option<Entry>,
+    preset: Option<&Filter>,
     window: &mut Window,
     cx: &mut App,
 ) {
@@ -382,14 +538,16 @@ pub fn open_entry_dialog(
             .destructive()
             .on_trigger(move |window, cx| confirm_delete(&book, mode, entry.clone(), window, cx))
     });
-    let form = cx.new(|cx| EntryForm::new(book.clone(), mode, entry, window, cx));
+    let form = cx.new(|cx| EntryForm::new(book.clone(), mode, entry, preset, window, cx));
     // Typing lands in the amount. It is focused after the form opens: the
     // form remembers what had the focus before it and gives it back on
     // closing, and that has to be the window behind it.
     let first = form.read(cx).amount.focus_handle(cx);
     let saving = form.clone();
     let opened = Form::new(title, form)
-        .commit(commit, move |_, cx| saving.update(cx, |form, cx| form.submit(cx)))
+        .commit(commit, move |_, cx| {
+            saving.update(cx, |form, cx| form.submit(cx))
+        })
         .focus(first);
     match delete {
         Some(delete) => opened.also(delete),
@@ -413,7 +571,11 @@ fn open_transfer_leg(
             .destructive()
             .on_trigger(move |window, cx| confirm_delete(&book, mode, leg.clone(), window, cx))
     };
-    let view = cx.new(|_| TransferLeg { mode, leg, currency });
+    let view = cx.new(|_| TransferLeg {
+        mode,
+        leg,
+        currency,
+    });
     Form::new("Transfer", view).also(delete).open(window, cx);
 }
 
@@ -434,7 +596,12 @@ impl Render for TransferLeg {
                 format_money(self.leg.amount, &self.currency),
                 self.leg.date.format("%Y-%m-%d")
             )))
-            .children(self.leg.comment.clone().map(|comment| Text::body(comment).muted()))
+            .children(
+                self.leg
+                    .comment
+                    .clone()
+                    .map(|comment| Text::body(comment).muted()),
+            )
             .child(Note::new(
                 "This is one side of a transfer between two accounts. \
                  Deleting it removes both sides.",

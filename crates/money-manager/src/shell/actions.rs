@@ -10,6 +10,8 @@ gpui_kit::actions!(
         ShowTransactions,
         ShowCategories,
         ShowCharts,
+        ShowTags,
+        GoBack,
         ToggleMode,
         NewRecord,
         EditRecord,

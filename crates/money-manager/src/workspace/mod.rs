@@ -1,5 +1,6 @@
-//! The open ledger on screen: navigation, the account, and one of three
-//! screens.
+//! The open ledger on screen: navigation, the account, and one of four
+//! screens — and over a screen, the page of one category's or one tag's
+//! records, which back leaves.
 //!
 //! [`Workspace`] owns what the three screens share and none of them should
 //! decide alone — which screen is up and whether it is about expenses or
@@ -11,11 +12,13 @@
 
 mod render;
 
-use gpui_adaptive::{Notice, Tone, WidthClass};
+use std::rc::Rc;
+
+use gpui_adaptive::{NavigatorState, Notice, Route, Tone, WidthClass};
 use gpui_kit::{AppContext, Context, Entity, FocusHandle, Subscription, Window};
 
-use crate::book::{Book, Mode, SyncState};
-use crate::categories::CategoriesView;
+use crate::book::{Book, Filter, Mode, SyncState};
+use crate::categories::{CategoriesView, Kind};
 use crate::charts::ChartsView;
 use crate::settings::Settings;
 use crate::transactions::TransactionsView;
@@ -26,16 +29,23 @@ pub enum Section {
     Transactions,
     Categories,
     Charts,
+    Tags,
 }
 
 impl Section {
-    pub const ALL: [Section; 3] = [Section::Transactions, Section::Categories, Section::Charts];
+    pub const ALL: [Section; 4] = [
+        Section::Transactions,
+        Section::Categories,
+        Section::Charts,
+        Section::Tags,
+    ];
 
     pub fn title(self) -> &'static str {
         match self {
             Section::Transactions => "Transactions",
             Section::Categories => "Categories",
             Section::Charts => "Charts",
+            Section::Tags => "Tags",
         }
     }
 
@@ -44,6 +54,7 @@ impl Section {
             Section::Transactions => Lucide::List,
             Section::Categories => Lucide::LayoutGrid,
             Section::Charts => Lucide::ChartColumn,
+            Section::Tags => Lucide::Tags,
         }
     }
 
@@ -53,7 +64,23 @@ impl Section {
             Section::Transactions => "transactions",
             Section::Categories => "categories",
             Section::Charts => "charts",
+            Section::Tags => "tags",
         }
+    }
+}
+
+/// A page of the workspace: a screen of its navigation, or the records of
+/// one category or one tag, opened from the screen that lists them.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Place {
+    Section(Section),
+    Records(Mode, Filter),
+}
+
+impl Route for Place {
+    /// The charts' bars scroll sideways; a swipe there is theirs.
+    fn scrolls_sideways(&self) -> bool {
+        matches!(self, Place::Section(Section::Charts))
     }
 }
 
@@ -63,7 +90,12 @@ pub struct Workspace {
     mode: Mode,
     transactions: Entity<TransactionsView>,
     categories: Entity<CategoriesView>,
+    tags: Entity<CategoriesView>,
     charts: Entity<ChartsView>,
+    /// The screen up, and the page over it.
+    navigator: Entity<NavigatorState<Place>>,
+    /// The records of the page over the screen, while there is one.
+    records: Option<Entity<TransactionsView>>,
     focus: FocusHandle,
     /// The width the last frame was drawn at, for a UI scenario to ask about.
     width: WidthClass,
@@ -149,15 +181,28 @@ impl Workspace {
 
     pub fn new(book: Entity<Book>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mode = Mode::default();
-        let transactions = cx.new(|cx| TransactionsView::new(book.clone(), mode, cx));
-        let categories = cx.new(|cx| CategoriesView::new(book.clone(), mode, cx));
+        let transactions = cx.new(|cx| TransactionsView::new(book.clone(), mode, None, cx));
+        let workspace = cx.weak_entity();
+        let open_records: crate::categories::OpenRecords = Rc::new(move |mode, filter, _, cx| {
+            workspace
+                .update(cx, |this, cx| this.open_records(mode, filter, cx))
+                .ok();
+        });
+        let categories = cx.new(|cx| {
+            CategoriesView::new(book.clone(), mode, Kind::Category, open_records.clone(), cx)
+        });
+        let tags =
+            cx.new(|cx| CategoriesView::new(book.clone(), mode, Kind::Tag, open_records, cx));
         let charts = cx.new(|cx| ChartsView::new(book.clone(), mode, cx));
+        let navigator = cx.new(|_| NavigatorState::new(Place::Section(Section::Transactions)));
+        cx.observe(&navigator, |_, _, cx| cx.notify()).detach();
         // Selecting a row is what makes Edit available, and Edit is drawn
         // here.
         cx.observe(&transactions, |_, _, cx| cx.notify()).detach();
         let announced = book.read(cx).sync_state().clone();
         let watch = cx.observe_in(&book, window, |this, _, window, cx| {
             this.announce_sync(window, cx);
+            this.leave_missing_page(cx);
             cx.notify();
         });
         Workspace {
@@ -166,7 +211,10 @@ impl Workspace {
             mode,
             transactions,
             categories,
+            tags,
             charts,
+            navigator,
+            records: None,
             focus: cx.focus_handle(),
             width: WidthClass::Expanded,
             announced,
@@ -200,10 +248,64 @@ impl Workspace {
         self.focus.focus(window, cx);
     }
 
+    /// The page on top: a screen, or the records over one.
+    pub fn place(&self, cx: &gpui_kit::App) -> Place {
+        self.navigator.read(cx).top().clone()
+    }
+
+    /// The records of the page over the screen, while one is up.
+    pub fn records_page(&self, cx: &gpui_kit::App) -> Option<&Entity<TransactionsView>> {
+        match self.place(cx) {
+            Place::Records(..) => self.records.as_ref(),
+            Place::Section(_) => None,
+        }
+    }
+
+    /// Goes to a screen; a page open over the last one is closed.
     pub fn show(&mut self, screen: Section, cx: &mut Context<Self>) {
-        if self.screen != screen {
-            self.screen = screen;
-            cx.notify();
+        self.screen = screen;
+        self.navigator.update(cx, |navigator, cx| {
+            navigator.replace_root(Place::Section(screen), cx)
+        });
+        cx.notify();
+    }
+
+    /// Opens the page of the records `filter` admits, over the screen that
+    /// is up.
+    pub fn open_records(&mut self, mode: Mode, filter: Filter, cx: &mut Context<Self>) {
+        let book = self.book.clone();
+        let view = {
+            let filter = filter.clone();
+            cx.new(|cx| TransactionsView::new(book, mode, Some(filter), cx))
+        };
+        cx.observe(&view, |_, _, cx| cx.notify()).detach();
+        self.records = Some(view);
+        let root = Place::Section(self.screen);
+        self.navigator.update(cx, |navigator, cx| {
+            navigator.set_stack(vec![root, Place::Records(mode, filter)], cx)
+        });
+    }
+
+    /// Back, from the page of records to its screen.
+    fn go_back(&mut self, cx: &mut Context<Self>) {
+        self.navigator.update(cx, |navigator, cx| {
+            navigator.back(cx);
+        });
+    }
+
+    /// A page of a category or a tag that is no longer there (a tag
+    /// deleted, here or on another device) has nothing to show: back.
+    fn leave_missing_page(&mut self, cx: &mut Context<Self>) {
+        let Place::Records(mode, filter) = self.place(cx) else {
+            return;
+        };
+        let book = self.book.read(cx);
+        let there = match &filter {
+            Filter::Category(id) => book.category(mode, id).is_some(),
+            Filter::Tag(id) => book.tag(mode, id).is_some(),
+        };
+        if !there {
+            self.go_back(cx);
         }
     }
 
@@ -216,6 +318,7 @@ impl Workspace {
             .update(cx, |view, cx| view.set_mode(mode, cx));
         self.categories
             .update(cx, |view, cx| view.set_mode(mode, cx));
+        self.tags.update(cx, |view, cx| view.set_mode(mode, cx));
         self.charts.update(cx, |view, cx| view.set_mode(mode, cx));
         cx.notify();
     }
@@ -228,38 +331,55 @@ impl Workspace {
         self.set_mode(other, cx);
     }
 
-    /// What "new" means on the screen that is up: a category on the
-    /// categories screen, a record everywhere else.
+    /// What "new" means on the page that is up: a category on the
+    /// categories screen, a tag on the tags screen, a record in the category
+    /// or with the tag on the page of one, and a record everywhere else.
     fn new_record(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        match self.screen {
-            Section::Categories => {
-                crate::categories::open_category_dialog(&self.book, self.mode, None, window, cx)
+        let book = &self.book;
+        match (self.place(cx), self.screen) {
+            (Place::Records(mode, filter), _) => {
+                crate::transactions::open_new_entry_in(book, mode, &filter, window, cx)
             }
-            Section::Transactions | Section::Charts => {
-                crate::transactions::open_entry_dialog(&self.book, self.mode, None, window, cx)
+            (_, Section::Categories) => {
+                crate::categories::open_category_dialog(book, self.mode, None, window, cx)
+            }
+            (_, Section::Tags) => {
+                crate::categories::open_tag_dialog(book, self.mode, None, window, cx)
+            }
+            (_, Section::Transactions | Section::Charts) => {
+                crate::transactions::open_entry_dialog(book, self.mode, None, window, cx)
             }
         }
     }
 
-    /// Whether there is something for Edit to open: a selected row of the
-    /// table. The other screens open what is pressed, and have no selection.
+    /// The list of records on the page that is up, if it has one.
+    fn active_records(&self, cx: &gpui_kit::App) -> Option<Entity<TransactionsView>> {
+        match self.place(cx) {
+            Place::Records(..) => self.records.clone(),
+            Place::Section(Section::Transactions) => Some(self.transactions.clone()),
+            Place::Section(_) => None,
+        }
+    }
+
+    /// Whether there is something for Edit to open: a selected row of a
+    /// list of records. The other screens open what is pressed, and have no
+    /// selection.
     fn can_edit(&self, cx: &gpui_kit::App) -> bool {
-        self.screen == Section::Transactions && self.transactions.read(cx).has_selection(cx)
+        self.active_records(cx)
+            .is_some_and(|records| records.read(cx).has_selection(cx))
     }
 
     fn edit_record(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.can_edit(cx) {
-            self.transactions
-                .update(cx, |view, cx| view.open_selected(window, cx));
+        if let Some(records) = self.active_records(cx).filter(|_| self.can_edit(cx)) {
+            records.update(cx, |view, cx| view.open_selected(window, cx));
         }
     }
 
-    /// Moves the table's selection a row up or down: the keyboard's way
+    /// Moves the list's selection a row up or down: the keyboard's way
     /// through the records, Enter opening the one it is on.
     fn step_selection(&mut self, forward: bool, cx: &mut Context<Self>) {
-        if self.screen == Section::Transactions {
-            self.transactions
-                .update(cx, |view, cx| view.step_selection(forward, cx));
+        if let Some(records) = self.active_records(cx) {
+            records.update(cx, |view, cx| view.step_selection(forward, cx));
         }
     }
 

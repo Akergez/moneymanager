@@ -50,6 +50,26 @@ pub struct Entry {
     /// A leg is derived from its transfer and cannot be edited by itself;
     /// deleting it deletes the transfer.
     pub is_transfer: bool,
+    /// The ids of its tags, in the order of their names. A transfer leg has
+    /// none.
+    pub tags: Vec<Vec<u8>>,
+}
+
+/// What a page of records is narrowed to: one category, or one tag.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Filter {
+    Category(Vec<u8>),
+    Tag(Vec<u8>),
+}
+
+impl Filter {
+    /// Whether `entry` is on the page.
+    pub fn admits(&self, entry: &Entry) -> bool {
+        match self {
+            Filter::Category(id) => &entry.category_id == id,
+            Filter::Tag(id) => entry.tags.contains(id),
+        }
+    }
 }
 
 /// What a person filled in for an expense or an income, before it is a
@@ -60,6 +80,8 @@ pub struct EntryDraft {
     pub amount: f64,
     pub comment: Option<String>,
     pub date: NaiveDate,
+    /// The ids of the tags it is to carry.
+    pub tags: Vec<Vec<u8>>,
 }
 
 /// What a person filled in for a transfer.
@@ -128,6 +150,7 @@ impl From<&Expense> for Entry {
             comment: expense.comment.clone(),
             date: expense.date,
             is_transfer: expense.transfer.is_some(),
+            tags: Vec::new(),
         }
     }
 }
@@ -141,6 +164,7 @@ impl From<&TopUp> for Entry {
             comment: top_up.comment.clone(),
             date: top_up.date,
             is_transfer: top_up.transfer.is_some(),
+            tags: Vec::new(),
         }
     }
 }
@@ -164,6 +188,7 @@ mod tests {
             comment: None,
             date: NaiveDate::from_ymd_opt(2026, 9, day).unwrap(),
             is_transfer,
+            tags: Vec::new(),
         };
         let entries = [on(3, false), on(12, false), on(7, false), on(20, true)];
         // The latest by date, whatever the order; the transfer leg after it
@@ -182,6 +207,7 @@ mod tests {
             comment: None,
             date: NaiveDate::from_ymd_opt(2026, 9, day).unwrap(),
             is_transfer,
+            tags: Vec::new(),
         };
         let entries = [on(3, 1, false), on(12, 2, false), on(20, 3, true)];
         assert_eq!(latest_category(&entries), Some(&[2][..]));
@@ -197,6 +223,7 @@ mod tests {
             comment: None,
             date: NaiveDate::from_ymd_opt(2026, 9, 1).unwrap(),
             is_transfer: false,
+            tags: Vec::new(),
         };
         let entries = [2, 3, 3, 2, 3, 4].map(in_category);
         let mut categories = vec![vec![1u8], vec![2], vec![3], vec![4], vec![5]];
@@ -214,7 +241,25 @@ mod tests {
             comment: None,
             date: NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
             is_transfer: false,
+            tags: Vec::new(),
         };
         assert_eq!(entry.short_id(), "9f3a1c07");
+    }
+
+    #[test]
+    fn a_page_admits_the_records_of_its_category_or_tag() {
+        let entry = Entry {
+            id: vec![1],
+            category_id: vec![7],
+            amount: 1.0,
+            comment: None,
+            date: NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+            is_transfer: false,
+            tags: vec![vec![8], vec![9]],
+        };
+        assert!(Filter::Category(vec![7]).admits(&entry));
+        assert!(!Filter::Category(vec![8]).admits(&entry));
+        assert!(Filter::Tag(vec![9]).admits(&entry));
+        assert!(!Filter::Tag(vec![7]).admits(&entry));
     }
 }

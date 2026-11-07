@@ -4,6 +4,10 @@
 //! both are one [`Records`], drawn from the same [`EntryRow`]s, so the two
 //! cannot show different records. The table's headers sort it.
 //!
+//! A record's tags are small pills on its row, after the category in a
+//! table and on the second line of a list. The same view, given a
+//! [`Filter`], is the page of one category's or one tag's records.
+//!
 //! A row leads to one place, the record form ([`entry_dialog`]), which is
 //! also where a record is deleted from — so nothing here depends on hovering
 //! over a row to find out what can be done with it. The keyboard has the
@@ -16,17 +20,17 @@ use std::rc::Rc;
 
 use gpui_adaptive::records::ScrollStrategy;
 use gpui_adaptive::{
-    ActiveColors as _, Column, ColumnRole, Command, Empty, Env, Record, Records, RecordsScroll,
-    WidthClass,
+    ActiveColors as _, Column, ColumnRole, Command, Empty, Env, Pill, Record, Records,
+    RecordsScroll, WidthClass,
 };
 use gpui_kit::prelude::*;
 use gpui_kit::{App, Context, ElementId, Entity, SharedString, Subscription, Window};
 use money_core::format::{format_amount, format_money};
 use money_core::store::hex_encode;
 
-pub use entry_dialog::open_entry_dialog;
+pub use entry_dialog::{open_entry_dialog, open_new_entry_in};
 
-use crate::book::{Book, CategoryLook, CategoryStyle, Entry, Mode};
+use crate::book::{Book, CategoryInfo, CategoryLook, CategoryStyle, Entry, Filter, Mode};
 use crate::ui::Lucide;
 
 const ID: &str = "id";
@@ -47,11 +51,14 @@ pub(crate) struct EntryRow {
     pub amount: SharedString,
     pub date: SharedString,
     pub short_id: SharedString,
+    /// Its tags, in the order of their names.
+    tags: Vec<CategoryInfo>,
 }
 
 impl EntryRow {
     fn new(entry: Entry, category: SharedString, style: CategoryStyle) -> Self {
         EntryRow {
+            tags: Vec::new(),
             category,
             style,
             amount: format_amount(entry.amount).into(),
@@ -71,6 +78,18 @@ impl EntryRow {
         )
     }
 
+    /// Its tags as pills, in the theme of this frame.
+    fn pills(&self, cx: &App) -> Vec<Pill> {
+        let muted = cx.colors().muted;
+        self.tags
+            .iter()
+            .map(|tag| {
+                let look = CategoryLook::of(&tag.style, &tag.id, &tag.name, muted);
+                Pill::new(tag.name.clone(), look.color).icon(look.icon)
+            })
+            .collect()
+    }
+
     /// The id its row goes by, from the record's own.
     fn element_id(&self) -> ElementId {
         SharedString::from(format!("entry-{}", hex_encode(&self.entry.id))).into()
@@ -87,9 +106,18 @@ enum Direction {
 /// What a press on a column's header does to the order: the column's own
 /// first direction (the newest dates, the smallest amounts), then the other,
 /// then back to the ledger's order.
-fn next_sort(current: Option<(&'static str, Direction)>, pressed: &str) -> Option<(&'static str, Direction)> {
-    let key = [AMOUNT, CATEGORY, DATE].into_iter().find(|key| *key == pressed)?;
-    let first = if key == DATE { Direction::Descending } else { Direction::Ascending };
+fn next_sort(
+    current: Option<(&'static str, Direction)>,
+    pressed: &str,
+) -> Option<(&'static str, Direction)> {
+    let key = [AMOUNT, CATEGORY, DATE]
+        .into_iter()
+        .find(|key| *key == pressed)?;
+    let first = if key == DATE {
+        Direction::Descending
+    } else {
+        Direction::Ascending
+    };
     match current {
         Some((sorted, direction)) if sorted == key && direction == first => Some((
             key,
@@ -127,14 +155,21 @@ fn sort_rows(rows: &mut [EntryRow], sort: Option<(&'static str, Direction)>) {
         _ => Ordering::Equal,
     };
     match direction {
-        Direction::Ascending => rows.sort_by(|a, b| by_column(a, b).then_with(|| newest_first(a, b))),
-        Direction::Descending => rows.sort_by(|a, b| by_column(b, a).then_with(|| newest_first(a, b))),
+        Direction::Ascending => {
+            rows.sort_by(|a, b| by_column(a, b).then_with(|| newest_first(a, b)))
+        }
+        Direction::Descending => {
+            rows.sort_by(|a, b| by_column(b, a).then_with(|| newest_first(a, b)))
+        }
     }
 }
 
 pub struct TransactionsView {
     book: Entity<Book>,
     mode: Mode,
+    /// What the rows are narrowed to: none on the transactions screen, a
+    /// category or a tag on the page of one.
+    filter: Option<Filter>,
     rows: Rc<Vec<EntryRow>>,
     /// How the rows are ordered, so that new rows come in the same order
     /// instead of resetting what the person chose.
@@ -146,11 +181,17 @@ pub struct TransactionsView {
 }
 
 impl TransactionsView {
-    pub fn new(book: Entity<Book>, mode: Mode, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        book: Entity<Book>,
+        mode: Mode,
+        filter: Option<Filter>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let subscriptions = vec![cx.observe(&book, |this, _, cx| this.refresh(cx))];
         let mut view = TransactionsView {
             book,
             mode,
+            filter,
             rows: Rc::new(Vec::new()),
             sort: None,
             selected: None,
@@ -174,12 +215,25 @@ impl TransactionsView {
         let mode = self.mode;
         let mut rows: Vec<EntryRow> = {
             let book = self.book.read(cx);
+            let tags = book.tags(mode);
             book.entries(mode)
                 .into_iter()
+                .filter(|entry| {
+                    self.filter
+                        .as_ref()
+                        .is_none_or(|filter| filter.admits(entry))
+                })
                 .map(|entry| {
                     let category = book.category_name(mode, &entry.category_id);
                     let style = book.category_style(mode, &entry.category_id);
-                    EntryRow::new(entry, category, style)
+                    let on: Vec<CategoryInfo> = entry
+                        .tags
+                        .iter()
+                        .filter_map(|id| tags.iter().find(|tag| &tag.id == id).cloned())
+                        .collect();
+                    let mut row = EntryRow::new(entry, category, style);
+                    row.tags = on;
+                    row
                 })
                 .collect()
         };
@@ -257,15 +311,45 @@ impl TransactionsView {
         cx.notify();
     }
 
+    pub fn filter(&self) -> Option<&Filter> {
+        self.filter.as_ref()
+    }
+
+    /// How many records are listed.
+    pub fn count(&self) -> usize {
+        self.rows.len()
+    }
+
     fn render_empty(&self) -> Empty {
         let noun = self.mode.noun();
         let (book, mode) = (self.book.clone(), self.mode);
-        Empty::new(Lucide::List, format!("No {} yet", self.mode.title().to_lowercase()))
-            .body(format!("Every {noun} you record on this account is listed here."))
-            .action(
-                Command::new("first-record", format!("New {noun}…"))
-                    .on_trigger(move |window, cx| open_entry_dialog(&book, mode, None, window, cx)),
+        if let Some(filter) = self.filter.clone() {
+            let what = match filter {
+                Filter::Category(_) => "in this category",
+                Filter::Tag(_) => "with this tag",
+            };
+            return Empty::new(
+                Lucide::List,
+                format!("No {} {what}", self.mode.title().to_lowercase()),
             )
+            .body("Records on this account are listed here as they are made.")
+            .action(
+                Command::new("first-record", format!("New {noun}…")).on_trigger(
+                    move |window, cx| open_new_entry_in(&book, mode, &filter, window, cx),
+                ),
+            );
+        }
+        Empty::new(
+            Lucide::List,
+            format!("No {} yet", self.mode.title().to_lowercase()),
+        )
+        .body(format!(
+            "Every {noun} you record on this account is listed here."
+        ))
+        .action(
+            Command::new("first-record", format!("New {noun}…"))
+                .on_trigger(move |window, cx| open_entry_dialog(&book, mode, None, window, cx)),
+        )
     }
 }
 
@@ -290,7 +374,9 @@ impl Render for TransactionsView {
                 if with_comments {
                     cells.push(row.entry.comment.clone().unwrap_or_default().into());
                 }
-                Record::new(row.element_id(), cells).tile(look.icon, look.color)
+                Record::new(row.element_id(), cells)
+                    .tile(look.icon, look.color)
+                    .pills(row.pills(cx))
             })
             .collect();
         let selected = self
@@ -343,7 +429,8 @@ impl Render for TransactionsView {
                     return;
                 };
                 let entry = row.entry.clone();
-                view.update(cx, |this, cx| this.open(entry, window, cx)).ok();
+                view.update(cx, |this, cx| this.open(entry, window, cx))
+                    .ok();
             })
             .into_any_element()
     }
@@ -363,6 +450,7 @@ mod tests {
                 comment: None,
                 date: NaiveDate::from_ymd_opt(2026, 10, day).unwrap(),
                 is_transfer: false,
+                tags: Vec::new(),
             },
             category.to_string().into(),
             Default::default(),

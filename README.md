@@ -33,7 +33,15 @@ storage on a server or in a bucket is not changed, so connect to a new one.
   and date (and the comment where there is room). One switch turns the screen
   from expenses to income. Sortable by column; a row opens the record.
 - **Categories** — expense and income categories, each with a colour and an
-  icon.
+  icon. A category's row opens the page of its records, where it is edited
+  and where **New expense…** makes a record in it.
+- **Tags** — labels of your own across categories (a trip, a project), drawn
+  like categories with a name, a colour and an icon, but a record carries any
+  number of them. They are chips at the end of the record form and small
+  pills on every record in the list. The Tags screen lists them with how many
+  records each has; a tag's row opens the page of its records, where it is
+  edited or deleted (it comes off its records; the records stay). Expenses and
+  income each have tags of their own; transfers have none.
 - **Charts** — one screen with all three: a pie by category (for the month or
   for all time), bars by month, and the running total through the chosen month.
 - **Accounts** — chosen at the top of every screen, with the balance beside the
@@ -55,8 +63,8 @@ On Android, import opens the system document picker and export opens the system
 save dialog. Choosing a document grants access to that document; no storage
 permission is requested. Cancelling a picker leaves the ledger unchanged.
 
-Both commands use the same format: **UTF-8, comma-separated, exactly nine
-columns in the order below**. The column names and operation types are Russian
+Both commands use the same format: **UTF-8, comma-separated, nine columns in
+the order below, and a tenth for tags**. The column names and operation types are Russian
 regardless of the interface language. Empty fields still occupy a column, so
 keep their commas, including the trailing comma for an empty comment.
 
@@ -71,6 +79,13 @@ keep their commas, including the trailing comma for an empty comment.
 | 7 | `сумма в валюте в` | Positive amount credited to the account; empty for expenses. |
 | 8 | `валюта в` | Destination currency code, such as `USD`; empty for expenses. |
 | 9 | `коммент` | Optional comment; may contain commas, quotes and line breaks when quoted. |
+| 10 | `теги` | Optional, only in a file with this column: the record's tags, their names separated by `;`. Empty on transfers and account rows. |
+
+Export writes the tenth column only when some record has a tag, so a ledger
+without tags exports exactly the nine columns earlier versions read. Import
+takes files of either width; a tag a row names that the ledger does not have
+is made with the default style (expense tags and income tags are separate). A
+tag's name cannot contain `;`.
 
 Which fields to fill depends on the operation:
 
@@ -115,7 +130,7 @@ accepts a decimal comma inside a quoted amount:
 
 The header is optional on import; if present, it must be the first row and the
 columns must retain the documented order. A UTF-8 BOM is accepted. Every
-operation row must contain all nine columns.
+operation row must contain all nine columns, or ten with tags.
 
 Import adds operations to the existing ledger. Accounts are matched by
 name; categories are matched by name within their type (expense or income).
@@ -143,7 +158,7 @@ expenses, income and transfers from **all accounts**, ordered by date, regardles
 Each transfer is written once, with both amounts, rather than as two separate
 expense/income rows. Comments are escaped using standard CSV quoting.
 
-Account/category IDs, category styles, categories without operations, hidden
+Account/category/tag IDs, category and tag styles, categories and tags without operations, hidden
 and main accounts, and sync settings are not included. Importing an export
 into a fresh ledger restores its accounts with their opening balances and
 currencies, and its operations.
@@ -241,10 +256,19 @@ moved into the ledger the first time it is opened.
 The internal record schema is unchanged from the terminal version;
 `crates/money-core/src/store.rs` describes it:
 
-- The document is a tuple of seven collections: categories, expenses, income
-  categories, income, accounts, transfers, and account preferences (an optional
-  trailing collection, absent in older ledgers). A record is a tuple whose first
-  child is its key: a hex ID for domain records or a name for preferences.
+- The document is a tuple of eleven collections: categories, expenses, income
+  categories, income, accounts, transfers, account preferences, then expense
+  tags, the links that put them on expenses, income tags and their links. The
+  trailing ones are absent in older ledgers. A record is a tuple whose first
+  child is its key: a hex ID for domain records, a name for preferences, and
+  `<record id>:<tag id>` for a tag's link.
+- Tags are backward compatible both ways. A version from before them merges
+  the document by position and keeps the collections it does not know, so
+  tags travel through its syncs untouched; and since a tag is a link record of
+  its own rather than a field of the expense, an older version rewriting an
+  expense (it always writes all five fields) does not drop its tags. Two
+  devices tagging one record at once both keep their tag; taking a tag off is
+  the link's tombstone. `store.rs` and `tags.rs` have tests for both.
 - Every write is stamped (source + Lamport time); a newer write replaces the
   record, and a deletion is a tombstone. This is what makes two devices'
   changes merge.
@@ -280,9 +304,10 @@ that shows both orders.
 
 | Key | Action |
 |-----|--------|
-| `Ctrl+1` / `Ctrl+2` / `Ctrl+3` | Transactions / Categories / Charts |
+| `Ctrl+1` / `Ctrl+2` / `Ctrl+3` / `Ctrl+4` | Transactions / Categories / Charts / Tags |
 | `Ctrl+M` | Switch between expenses and income |
-| `Ctrl+N` | New record (a new category on the Categories screen) |
+| `Ctrl+N` | New record (a new category on the Categories screen, a new tag on the Tags screen, a record in the category or with the tag on the page of one) |
+| `Escape`, `Alt+Left` | Back from the page of a category's or a tag's records |
 | `Up` / `Down` | Select the previous / next record |
 | `Enter`, `Ctrl+E` | Open the selected record |
 | `Ctrl+T` | New transfer |

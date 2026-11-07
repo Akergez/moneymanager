@@ -1,5 +1,11 @@
 //! Nine-column CSV interchange for all accounts. Transfers are exported once.
 //!
+//! A tenth column, `теги`, carries the tags of an expense or an income, their
+//! names separated by `;`. It is written only when the ledger has a tagged
+//! record, so a ledger without tags exports exactly the nine columns an
+//! earlier version reads; an import takes either. A tag a file names that
+//! the ledger does not have is made.
+//!
 //! Besides the operations (`расход`, `доход`, `перевод`) a file states each
 //! account once, as a `счёт` row with no date: its currency and opening
 //! balance in the "в" pair. That is what carries an account's opening
@@ -22,6 +28,7 @@ use uuid::Uuid;
 
 use crate::models::{Account, Category, Expense, TopUp, TopUpCategory, Transfer};
 use crate::store::{self, Store, hex_encode};
+use crate::tags::{Tag, TagKind};
 
 /// The fixed column order used by both import and export.
 pub const HEADER: [&str; 9] = [
@@ -37,6 +44,12 @@ pub const HEADER: [&str; 9] = [
 ];
 
 type Record = (usize, String, Vec<RdxValue>);
+
+/// The optional tenth column.
+pub const TAGS_HEADER: &str = "теги";
+
+/// What separates the names of a row's tags.
+pub const TAG_SEPARATOR: char = ';';
 
 /// The type of a row that states an account rather than an operation.
 const ACCOUNT_ROW: &str = "счёт";
@@ -61,6 +74,21 @@ struct Row {
     amount_to: Option<f64>,
     currency_to: String,
     comment: String,
+    /// The names in the tenth column, if the file has one.
+    tags: Vec<String>,
+}
+
+/// The names in a row's tag column: separated by `;`, blanks left out, each
+/// once.
+fn tag_names(fields: &::csv::StringRecord) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    for name in fields.get(9).unwrap_or("").split(TAG_SEPARATOR) {
+        let name = name.trim();
+        if !name.is_empty() && !names.iter().any(|known| known == name) {
+            names.push(name.to_string());
+        }
+    }
+    names
 }
 
 fn amount(value: &str) -> Result<Option<f64>, String> {
@@ -119,9 +147,9 @@ impl AccountRow {
         if name.is_empty() || currency.is_empty() {
             return Err("Строка счёта требует название счёта и валюту в".into());
         }
-        if [0, 3, 4, 5, 8]
+        if [0, 3, 4, 5, 8, 9]
             .iter()
-            .any(|&ix| !fields[ix].trim().is_empty())
+            .any(|&ix| fields.get(ix).is_some_and(|field| !field.trim().is_empty()))
         {
             return Err(
                 "В строке счёта заполняются только счёт, сумма в валюте в и валюта в".into(),
@@ -152,6 +180,7 @@ impl Row {
             amount_to: amount(&fields[6])?,
             currency_to: currency(&fields[7])?,
             comment: fields[8].to_string(),
+            tags: tag_names(fields),
         };
         if row.account.is_empty() || row.category.is_empty() {
             return Err("Укажите счёт и категорию или счёт получателя".into());
@@ -161,6 +190,7 @@ impl Row {
         match row.kind.as_str() {
             "расход" if from && row.amount_to.is_none() && row.currency_to.is_empty() => {}
             "доход" if to && row.amount_from.is_none() && row.currency_from.is_empty() => {}
+            "перевод" if !row.tags.is_empty() => return Err("У перевода не бывает тегов".into()),
             "перевод" if from && to && row.account != row.category => {}
             "расход" | "доход" | "перевод" => return Err("Расход требует только сумму и валюту из, доход — только в, перевод — обе пары и разные счета".into()),
             _ => return Err("Тип должен быть расход, доход или перевод".into()),
@@ -307,14 +337,14 @@ pub fn import(store: &mut Store, reader: impl Read) -> Result<ImportReport, Stri
                 .get(0)
                 .is_some_and(|s| s.trim().eq_ignore_ascii_case("дата"))
         {
-            if fields.len() != 9 {
-                return Err("Заголовок должен содержать 9 колонок".into());
+            if !matches!(fields.len(), 9 | 10) {
+                return Err("Заголовок должен содержать 9 колонок (или 10, с тегами)".into());
             }
             continue;
         }
         let at = |e: String| format!("Строка {line}: {e}");
-        if fields.len() != 9 {
-            return Err(at("Ожидается 9 колонок".into()));
+        if !matches!(fields.len(), 9 | 10) {
+            return Err(at("Ожидается 9 колонок (или 10, с тегами)".into()));
         }
         if fields[1].trim().to_lowercase() == ACCOUNT_ROW {
             account_rows.push((line, AccountRow::parse(&fields).map_err(at)?));
@@ -331,6 +361,13 @@ pub fn import(store: &mut Store, reader: impl Read) -> Result<ImportReport, Stri
     let mut income: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
     for category in TopUpCategory::read_all(store)? {
         income.entry(category.name).or_default().push(category.id);
+    }
+    let mut tags: HashMap<TagKind, HashMap<String, Vec<Vec<u8>>>> = HashMap::new();
+    for kind in [TagKind::Expense, TagKind::TopUp] {
+        let names = tags.entry(kind).or_default();
+        for tag in Tag::read_all(store, kind) {
+            names.entry(tag.name).or_default().push(tag.id);
+        }
     }
     let mut existing = existing_operations(store)?;
     let mut records = Vec::new();
@@ -395,6 +432,7 @@ pub fn import(store: &mut Store, reader: impl Read) -> Result<ImportReport, Stri
             let comment_text = (!row.comment.is_empty()).then(|| row.comment.clone());
             let comment = store::opt_str_value(comment_text.as_deref());
             let date = RdxValue::Str(day.clone());
+            let mut tag_ids = Vec::new();
             let (collection, values, signature) = match row.kind.as_str() {
                 "расход" | "доход" => {
                     let expense = row.kind == "расход";
@@ -420,6 +458,25 @@ pub fn import(store: &mut Store, reader: impl Read) -> Result<ImportReport, Stri
                     } else {
                         store::TOP_UPS_IDX
                     };
+                    let kind = if expense {
+                        TagKind::Expense
+                    } else {
+                        TagKind::TopUp
+                    };
+                    for name in &row.tags {
+                        let names = tags.entry(kind).or_default();
+                        let id = match names.get(name).map(Vec::as_slice) {
+                            Some([id]) => id.clone(),
+                            Some(_) => return Err(format!("Несколько тегов с названием «{name}»")),
+                            None => {
+                                let id = new_id();
+                                records.push(Tag::record(kind, &id, name));
+                                names.insert(name.clone(), vec![id.clone()]);
+                                id
+                            }
+                        };
+                        tag_ids.push((kind, id));
+                    }
                     let signature = Signature {
                         collection,
                         date: day,
@@ -481,7 +538,11 @@ pub fn import(store: &mut Store, reader: impl Read) -> Result<ImportReport, Stri
                     report.skipped += 1;
                 }
                 _ => {
-                    records.push((collection, hex_encode(&new_id()), values));
+                    let id = new_id();
+                    records.push((collection, hex_encode(&id), values));
+                    for (kind, tag) in &tag_ids {
+                        records.extend(Tag::link_records(*kind, &id, std::slice::from_ref(tag)));
+                    }
                     report.added += 1;
                 }
             }
@@ -515,10 +576,10 @@ pub fn export(store: &Store, writer: impl Write) -> Result<(), String> {
             .copied()
             .ok_or_else(|| format!("Не найден счёт {}", hex_encode(id)))
     };
-    let mut rows = Vec::new();
+    let mut rows: Vec<Vec<String>> = Vec::new();
     // No date: they sort before every operation.
     for a in accounts.values() {
-        rows.push([
+        rows.push(vec![
             String::new(),
             ACCOUNT_ROW.into(),
             a.name.clone(),
@@ -530,12 +591,40 @@ pub fn export(store: &Store, writer: impl Write) -> Result<(), String> {
             String::new(),
         ]);
     }
+    let names = |kind: TagKind| -> HashMap<Vec<u8>, String> {
+        Tag::read_all(store, kind)
+            .into_iter()
+            .map(|tag| (tag.id, tag.name))
+            .collect()
+    };
+    let tag_cells = |kind: TagKind| -> HashMap<Vec<u8>, String> {
+        let names = names(kind);
+        Tag::links(store, kind)
+            .into_iter()
+            .map(|(record, tags)| {
+                let mut tags: Vec<&str> = tags
+                    .iter()
+                    .filter_map(|tag| names.get(tag).map(String::as_str))
+                    .collect();
+                tags.sort_unstable();
+                (record, tags.join(&TAG_SEPARATOR.to_string()))
+            })
+            .filter(|(_, cell)| !cell.is_empty())
+            .collect()
+    };
+    let (expense_tags, income_tags) = (tag_cells(TagKind::Expense), tag_cells(TagKind::TopUp));
+    let with_tags = !expense_tags.is_empty() || !income_tags.is_empty();
+    // Where each row's tag cell goes, once the rows are sorted.
+    let mut row_tags: HashMap<usize, String> = HashMap::new();
     for entry in Expense::read_all(store)? {
+        if let Some(cell) = expense_tags.get(&entry.id) {
+            row_tags.insert(rows.len(), cell.clone());
+        }
         let a = account(&entry.account_id)?;
         let category = expenses
             .get(entry.category_id.as_slice())
             .ok_or("Не найдена категория расхода")?;
-        rows.push([
+        rows.push(vec![
             entry.date.to_string(),
             "расход".into(),
             a.name.clone(),
@@ -548,11 +637,14 @@ pub fn export(store: &Store, writer: impl Write) -> Result<(), String> {
         ]);
     }
     for entry in TopUp::read_all(store)? {
+        if let Some(cell) = income_tags.get(&entry.id) {
+            row_tags.insert(rows.len(), cell.clone());
+        }
         let a = account(&entry.account_id)?;
         let category = income
             .get(entry.category_id.as_slice())
             .ok_or("Не найдена категория дохода")?;
-        rows.push([
+        rows.push(vec![
             entry.date.to_string(),
             "доход".into(),
             a.name.clone(),
@@ -567,7 +659,7 @@ pub fn export(store: &Store, writer: impl Write) -> Result<(), String> {
     for entry in Transfer::read_all(store)? {
         let from = account(&entry.from_account_id)?;
         let to = account(&entry.to_account_id)?;
-        rows.push([
+        rows.push(vec![
             entry.date.to_string(),
             "перевод".into(),
             from.name.clone(),
@@ -579,9 +671,18 @@ pub fn export(store: &Store, writer: impl Write) -> Result<(), String> {
             entry.comment.unwrap_or_default(),
         ]);
     }
+    if with_tags {
+        for (ix, row) in rows.iter_mut().enumerate() {
+            row.push(row_tags.remove(&ix).unwrap_or_default());
+        }
+    }
     rows.sort();
     let mut writer = ::csv::Writer::from_writer(writer);
-    writer.write_record(HEADER).map_err(|e| e.to_string())?;
+    let mut header: Vec<&str> = HEADER.to_vec();
+    if with_tags {
+        header.push(TAGS_HEADER);
+    }
+    writer.write_record(header).map_err(|e| e.to_string())?;
     for row in rows {
         writer.write_record(row).map_err(|e| e.to_string())?;
     }
@@ -687,7 +788,9 @@ mod tests {
             "2026-10-10,перевод,А,А,1,RUB,1,RUB,",
             "2026-10-10,перевод,А,Б,1,RUB,,,",
             "2026-10-10,доход,А,Зарплата,1,RUB,,,",
-            "2026-10-10,расход,А,Еда,1,RUB,,,коммент,лишнее",
+            "2026-10-10,расход,А,Еда,1,RUB,,,коммент,тег,лишнее",
+            "2026-10-10,перевод,А,Б,1,RUB,1,RUB,,тег",
+            ",счёт,А,,,,10,RUB,,тег",
         ] {
             let dir = tempfile::tempdir().unwrap();
             let mut store = Store::open(dir.path(), 1).unwrap();
@@ -840,5 +943,53 @@ mod tests {
         let b = accounts.iter().find(|a| a.name == "Б").unwrap();
         assert_eq!(b.opening_balance, 5.0);
         assert_eq!(accounts.len(), 2);
+    }
+
+    #[test]
+    fn tags_travel_in_a_tenth_column_only_when_there_are_any() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(dir.path(), 1).unwrap();
+        import(&mut store, SAMPLE.as_bytes()).unwrap();
+        let mut csv = Vec::new();
+        export(&store, &mut csv).unwrap();
+        let text = String::from_utf8(csv).unwrap();
+        assert!(text.lines().next().unwrap().ends_with(",коммент"), "{text}");
+
+        let tagged = concat!(
+            "дата,тип,счёт,категория или другой счет,сумма в валюте из,валюта из,сумма в валюте в,валюта в,коммент,теги\n",
+            "2026-10-04,расход,Кошелёк,Еда,10,RUB,,,,Поездка; Работа ;\n",
+            "2026-10-05,доход,Кошелёк,Зарплата,,,5,RUB,,Поездка\n",
+            "2026-10-06,расход,Кошелёк,Еда,3,RUB,,,,\n",
+        );
+        assert_eq!(import(&mut store, tagged.as_bytes()).unwrap().added, 3);
+        // An expense tag and an income tag are two tags, of their kinds.
+        assert_eq!(Tag::read_all(&store, TagKind::Expense).len(), 2);
+        assert_eq!(Tag::read_all(&store, TagKind::TopUp).len(), 1);
+        let expense = Expense::read_all(&store)
+            .unwrap()
+            .into_iter()
+            .find(|e| e.amount == 10.0)
+            .unwrap();
+        assert_eq!(Tag::links(&store, TagKind::Expense)[&expense.id].len(), 2);
+
+        let mut csv = Vec::new();
+        export(&store, &mut csv).unwrap();
+        let text = String::from_utf8(csv.clone()).unwrap();
+        assert!(
+            text.lines().next().unwrap().ends_with(",коммент,теги"),
+            "{text}"
+        );
+        assert!(
+            text.contains("2026-10-04,расход,Кошелёк,Еда,10,RUB,,,,Поездка;Работа"),
+            "{text}"
+        );
+
+        // Into a fresh ledger, and back out the same.
+        let other = tempfile::tempdir().unwrap();
+        let mut restored = Store::open(other.path(), 2).unwrap();
+        import(&mut restored, csv.as_slice()).unwrap();
+        let mut again = Vec::new();
+        export(&restored, &mut again).unwrap();
+        assert_eq!(String::from_utf8(again).unwrap(), text);
     }
 }

@@ -16,12 +16,12 @@ expect:sheet=open
 type:42
 wait:300
 # "Food & dining": chosen, not saved.
-click:77,345
+click:77,310
 wait:500
 expect:sheet=open
 expect:records=44
 # Add.
-click:351,125
+click:351,90
 wait:1000
 expect:sheet=closed
 expect:records=45
@@ -29,7 +29,7 @@ expect:balance=1 054 195.45 ₽
 # The handle dragged a little springs back...
 click:350,660
 wait:1000
-press:200,88
+press:200,52
 wait:200
 move:200,117
 wait:200
@@ -37,7 +37,7 @@ release:200,117
 wait:600
 expect:sheet=open
 # ...and dragged far enough, the sheet goes away with nothing saved.
-press:200,88
+press:200,52
 wait:200
 move:200,170
 wait:200
@@ -47,10 +47,11 @@ release:200,330
 wait:800
 expect:sheet=closed
 expect:records=45
-# A press above the sheet puts it away too.
+# A press above the sheet, on the dimmed strip it leaves at full height,
+# puts it away too.
 click:350,660
 wait:1000
-click:200,50
+click:200,18
 wait:800
 expect:sheet=closed
 # And Escape.

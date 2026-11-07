@@ -39,6 +39,8 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("ctrl-1", ShowTransactions, Some(CONTEXT)),
         KeyBinding::new("ctrl-2", ShowCategories, Some(CONTEXT)),
         KeyBinding::new("ctrl-3", ShowCharts, Some(CONTEXT)),
+        KeyBinding::new("ctrl-4", ShowTags, Some(CONTEXT)),
+        KeyBinding::new("alt-left", GoBack, Some(CONTEXT)),
         KeyBinding::new("ctrl-m", ToggleMode, Some(CONTEXT)),
         KeyBinding::new("ctrl-n", NewRecord, Some(CONTEXT)),
         KeyBinding::new("ctrl-e", EditRecord, Some(CONTEXT)),

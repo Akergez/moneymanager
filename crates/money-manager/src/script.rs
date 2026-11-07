@@ -26,7 +26,10 @@
 //! fonts or on how a compositor draws:
 //! - `stage=starting|welcome|workspace|failed`
 //! - `onboarding=server|custom` — which tab the first-run page shows
-//! - `screen=transactions|categories|charts`
+//! - `screen=transactions|categories|charts|tags`
+//! - `page=<screen>|records` — the page on top: a screen, or the records
+//!   of a category or a tag over it; `page-records=<n>` how many it lists
+//! - `tags=<n>` — the tags of the mode
 //! - `mode=expense|income`
 //! - `layout=compact|medium|expanded` — the width class the last frame was
 //!   drawn at
@@ -240,6 +243,15 @@ fn observe(what: &str, window: &mut Window, cx: &mut App) -> Option<String> {
     let mode = workspace.mode();
     Some(match what {
         "screen" => workspace.screen().name().to_string(),
+        "page" => match workspace.place(cx) {
+            crate::workspace::Place::Section(section) => section.name().to_string(),
+            crate::workspace::Place::Records(..) => "records".to_string(),
+        },
+        "page-records" => workspace
+            .records_page(cx)
+            .map_or(0, |records| records.read(cx).count())
+            .to_string(),
+        "tags" => book.tags(mode).len().to_string(),
         "mode" => match mode {
             Mode::Expense => "expense",
             Mode::Income => "income",

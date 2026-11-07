@@ -10,6 +10,7 @@ use money_core::models::{
     Account, Category, CategoryStyle, Expense, TopUp, TopUpCategory, Transfer,
 };
 use money_core::store::{DEFAULT_ACCOUNT_ID, Store};
+use money_core::tags::{Tag, TagKind};
 
 /// How the sample categories are drawn, by name: (name, colour, icon key).
 const LOOKS: [(&str, &str, &str); 9] = [
@@ -59,23 +60,48 @@ pub fn seed(store: &mut Store, today: NaiveDate) -> Result<(), String> {
     let freelance = TopUpCategory::create_styled(store, "Freelance", &look("Freelance"))?;
     let gifts = TopUpCategory::create_styled(store, "Gifts", &look("Gifts"))?;
 
+    // Tags across categories: what the friends cost, what was for work.
+    let styled = |color: &str, icon: &str| CategoryStyle {
+        color: Some(color.to_string()),
+        icon: Some(icon.to_string()),
+    };
+    let friends = Tag::create(
+        store,
+        TagKind::Expense,
+        "Friends",
+        &styled("#e0569a", "users"),
+    )?;
+    let work = Tag::create(
+        store,
+        TagKind::Expense,
+        "Work",
+        &styled("#7f93a8", "briefcase"),
+    )?;
+    let side = Tag::create(
+        store,
+        TagKind::TopUp,
+        "Side project",
+        &styled("#9a6cf0", "laptop"),
+    )?;
+
     // Six months of the same shape, so every chart has something to say.
     // (day of month, category, amount, comment)
-    let month: [(u64, &Category, f64, &str); 8] = [
-        (1, &utilities, 5200.0, "Electricity bill"),
-        (2, &food, 1240.0, "Grocery shopping"),
-        (4, &transport, 450.0, "Taxi"),
-        (7, &food, 385.5, "Coffee shop"),
-        (11, &fun, 890.0, "Movie tickets"),
-        (15, &shopping, 4990.0, "New shoes"),
-        (19, &health, 3200.0, "Doctor visit"),
-        (23, &food, 2150.0, "Dinner with friends"),
+    let none: &[&Tag] = &[];
+    let month: [(u64, &Category, f64, &str, &[&Tag]); 8] = [
+        (1, &utilities, 5200.0, "Electricity bill", none),
+        (2, &food, 1240.0, "Grocery shopping", none),
+        (4, &transport, 450.0, "Taxi", &[&work]),
+        (7, &food, 385.5, "Coffee shop", &[&work, &friends]),
+        (11, &fun, 890.0, "Movie tickets", &[&friends]),
+        (15, &shopping, 4990.0, "New shoes", none),
+        (19, &health, 3200.0, "Doctor visit", none),
+        (23, &food, 2150.0, "Dinner with friends", &[&friends]),
     ];
     for back in 0..6u32 {
         let first = month_start(today, back);
         // A little more is spent every month, so the bars are not a wall.
         let growth = 1.0 - f64::from(back) * 0.06;
-        for (day, category, amount, comment) in month {
+        for (day, category, amount, comment, tags) in month {
             let Some(date) = first.checked_add_days(Days::new(day - 1)) else {
                 continue;
             };
@@ -83,7 +109,7 @@ pub fn seed(store: &mut Store, today: NaiveDate) -> Result<(), String> {
             if date > today {
                 continue;
             }
-            Expense::create(
+            let expense = Expense::create(
                 store,
                 &category.id,
                 (amount * growth * 100.0).round() / 100.0,
@@ -91,6 +117,8 @@ pub fn seed(store: &mut Store, today: NaiveDate) -> Result<(), String> {
                 date,
                 &DEFAULT_ACCOUNT_ID,
             )?;
+            let tags: Vec<Vec<u8>> = tags.iter().map(|tag| tag.id.clone()).collect();
+            Tag::set_for_record(store, TagKind::Expense, &expense.id, &tags)?;
         }
         TopUp::create(
             store,
@@ -102,7 +130,7 @@ pub fn seed(store: &mut Store, today: NaiveDate) -> Result<(), String> {
         )?;
     }
     let last_month = month_start(today, 1);
-    TopUp::create(
+    let project = TopUp::create(
         store,
         &freelance.id,
         42_000.0,
@@ -112,6 +140,7 @@ pub fn seed(store: &mut Store, today: NaiveDate) -> Result<(), String> {
             .unwrap_or(last_month),
         &DEFAULT_ACCOUNT_ID,
     )?;
+    Tag::set_for_record(store, TagKind::TopUp, &project.id, &[side.id])?;
     TopUp::create(
         store,
         &gifts.id,
@@ -166,6 +195,11 @@ mod tests {
         // on or before the 5th.
         assert_eq!(expenses.len(), 5 * 8 + 3);
         assert_eq!(TopUp::read_all(&store).unwrap().len(), 6 + 2);
+        assert_eq!(Tag::read_all(&store, TagKind::Expense).len(), 2);
+        assert_eq!(Tag::read_all(&store, TagKind::TopUp).len(), 1);
+        // Taxi, coffee, the movies and dinner: four a month, the 4th of
+        // this one too.
+        assert_eq!(Tag::links(&store, TagKind::Expense).len(), 5 * 4 + 1);
         std::fs::remove_dir_all(&dir).ok();
     }
 }

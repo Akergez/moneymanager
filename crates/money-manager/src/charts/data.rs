@@ -258,6 +258,7 @@ mod tests {
             comment: None,
             date: NaiveDate::from_ymd_opt(y, m, d).unwrap(),
             is_transfer: false,
+            tags: Vec::new(),
         }
     }
 

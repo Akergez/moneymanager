@@ -19,11 +19,12 @@ expect:sheet=open
 key:escape
 wait:700
 expect:sheet=closed
-# The navigation bar along the bottom: "Charts", then "Transactions".
-click:333,760
+# The navigation bar along the bottom, four to it: "Charts", then
+# "Transactions".
+click:250,760
 wait:600
 expect:screen=charts
-click:66,760
+click:50,760
 wait:600
 expect:screen=transactions
 # The round button floating over the corner is "new". It lies over a row of

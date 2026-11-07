@@ -23,9 +23,10 @@ use gpui_kit::{AppContext, Context, SharedString};
 use money_core::ledger::{self, AccountLedger, AccountSummary};
 use money_core::models::{Account, Category, Expense, TopUp, TopUpCategory, Transfer};
 use money_core::store::{Store, hex_encode};
+use money_core::tags::{Tag, TagKind};
 
 pub use entry::{
-    Entry, EntryDraft, Mode, TransferDraft, latest_category, latest_date, order_by_use,
+    Entry, EntryDraft, Filter, Mode, TransferDraft, latest_category, latest_date, order_by_use,
 };
 pub use money_core::models::CategoryStyle;
 pub use style::{CategoryLook, ICONS, PALETTE, color_of};
@@ -46,7 +47,16 @@ pub enum SyncState {
     Failed(SharedString),
 }
 
+/// The kind of tag a record of `mode` carries.
+pub fn tag_kind(mode: Mode) -> TagKind {
+    match mode {
+        Mode::Expense => TagKind::Expense,
+        Mode::Income => TagKind::TopUp,
+    }
+}
+
 /// A category of either kind, which is all a list or a chart needs of one.
+/// A tag is one too: a name, a colour and an icon.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CategoryInfo {
     pub id: Vec<u8>,
@@ -65,6 +75,10 @@ pub struct Book {
     expenses: Vec<Expense>,
     top_ups: Vec<TopUp>,
     transfers: Vec<Transfer>,
+    /// The tags of each kind, by name.
+    tags: HashMap<TagKind, Vec<Tag>>,
+    /// The tags on each record, by record id; each in the order of `tags`.
+    links: HashMap<TagKind, HashMap<Vec<u8>, Vec<Vec<u8>>>>,
     summaries: HashMap<Vec<u8>, AccountSummary>,
     /// The account every list and chart is about.
     account: Vec<u8>,
@@ -147,6 +161,8 @@ impl Book {
             expenses: Vec::new(),
             top_ups: Vec::new(),
             transfers: Vec::new(),
+            tags: HashMap::new(),
+            links: HashMap::new(),
             summaries: HashMap::new(),
             account: last_account
                 .map(|hex| money_core::store::hex_decode(&hex))
@@ -204,6 +220,17 @@ impl Book {
         self.expenses = Expense::read_all(store)?;
         self.top_ups = TopUp::read_all(store)?;
         self.transfers = Transfer::read_all(store)?;
+        for kind in [TagKind::Expense, TagKind::TopUp] {
+            let mut tags = Tag::read_all(store, kind);
+            tags.sort_by(|a, b| a.name.cmp(&b.name).then(a.id.cmp(&b.id)));
+            let order = |id: &Vec<u8>| tags.iter().position(|tag| &tag.id == id);
+            let mut links = Tag::links(store, kind);
+            for on in links.values_mut() {
+                on.sort_by_key(order);
+            }
+            self.links.insert(kind, links);
+            self.tags.insert(kind, tags);
+        }
         self.summaries = ledger::summaries(
             &self.accounts,
             &self.expenses,
@@ -306,6 +333,13 @@ impl Book {
             Mode::Expense => self.ledger.expenses.iter().map(Entry::from).collect(),
             Mode::Income => self.ledger.top_ups.iter().map(Entry::from).collect(),
         };
+        if let Some(links) = self.links.get(&tag_kind(mode)) {
+            for entry in entries.iter_mut().filter(|entry| !entry.is_transfer) {
+                if let Some(tags) = links.get(&entry.id) {
+                    entry.tags = tags.clone();
+                }
+            }
+        }
         entries.sort_by(|a, b| b.date.cmp(&a.date).then(b.id.cmp(&a.id)));
         entries
     }
@@ -332,6 +366,30 @@ impl Book {
                 })
                 .collect(),
         }
+    }
+
+    /// The tags of `mode`'s records, by name.
+    pub fn tags(&self, mode: Mode) -> Vec<CategoryInfo> {
+        self.tags
+            .get(&tag_kind(mode))
+            .into_iter()
+            .flatten()
+            .map(|tag| CategoryInfo {
+                id: tag.id.clone(),
+                name: tag.name.clone().into(),
+                style: tag.style.clone(),
+            })
+            .collect()
+    }
+
+    /// One tag of `mode`, if it is still there.
+    pub fn tag(&self, mode: Mode, id: &[u8]) -> Option<CategoryInfo> {
+        self.tags(mode).into_iter().find(|tag| tag.id == id)
+    }
+
+    /// One category of `mode`, if it is still there.
+    pub fn category(&self, mode: Mode, id: &[u8]) -> Option<CategoryInfo> {
+        self.categories(mode).into_iter().find(|c| c.id == id)
     }
 
     /// A category's colour and icon. None for a transfer leg, for a category
@@ -409,19 +467,44 @@ impl Book {
             return Err("Amount must be greater than 0.".to_string());
         }
         let account = self.account.clone();
-        self.write(cx, |store| match (mode, id) {
-            (Mode::Expense, None) => {
-                Expense::create(store, category_id, amount, comment, date, &account).map(drop)
-            }
-            (Mode::Expense, Some(id)) => {
-                Expense::create_with_id(store, id, category_id, amount, comment, date, &account)
-            }
-            (Mode::Income, None) => {
-                TopUp::create(store, category_id, amount, comment, date, &account).map(drop)
-            }
-            (Mode::Income, Some(id)) => {
-                TopUp::create_with_id(store, id, category_id, amount, comment, date, &account)
-            }
+        let tags = draft.tags.clone();
+        // An edit that only changed the tags leaves the record as it was.
+        let record_unchanged = id.is_some_and(|id| {
+            self.entries(mode).iter().any(|entry| {
+                entry.id == id
+                    && entry.category_id == draft.category_id
+                    && entry.amount == amount
+                    && entry.comment == draft.comment
+                    && entry.date == date
+            })
+        });
+        self.write(cx, |store| {
+            let id = match (mode, id) {
+                (_, Some(id)) if record_unchanged => id.to_vec(),
+                (Mode::Expense, None) => {
+                    Expense::create(store, category_id, amount, comment, date, &account)?.id
+                }
+                (Mode::Expense, Some(id)) => {
+                    Expense::create_with_id(
+                        store,
+                        id,
+                        category_id,
+                        amount,
+                        comment,
+                        date,
+                        &account,
+                    )?;
+                    id.to_vec()
+                }
+                (Mode::Income, None) => {
+                    TopUp::create(store, category_id, amount, comment, date, &account)?.id
+                }
+                (Mode::Income, Some(id)) => {
+                    TopUp::create_with_id(store, id, category_id, amount, comment, date, &account)?;
+                    id.to_vec()
+                }
+            };
+            Tag::set_for_record(store, tag_kind(mode), &id, &tags)
         })
     }
 
@@ -439,9 +522,10 @@ impl Book {
                 Transfer::delete(store, &id).map(drop)
             } else {
                 match mode {
-                    Mode::Expense => Expense::delete(store, &id).map(drop),
-                    Mode::Income => TopUp::delete(store, &id).map(drop),
+                    Mode::Expense => Expense::delete(store, &id).map(drop)?,
+                    Mode::Income => TopUp::delete(store, &id).map(drop)?,
                 }
+                Tag::set_for_record(store, tag_kind(mode), &id, &[])
             }
         })
     }
@@ -475,6 +559,50 @@ impl Book {
             Ok(())
         })?;
         Ok(saved.unwrap_or_default())
+    }
+
+    /// Makes a tag, or rewrites one: its name, colour and icon together.
+    /// Answers its id.
+    pub fn save_tag(
+        &mut self,
+        mode: Mode,
+        id: Option<&[u8]>,
+        name: &str,
+        style: &CategoryStyle,
+        cx: &mut Context<Self>,
+    ) -> Result<Vec<u8>, String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("Name is required.".to_string());
+        }
+        // The CSV file lists a record's tags separated by it.
+        if name.contains(money_core::csv::TAG_SEPARATOR) {
+            return Err(format!(
+                "A tag’s name can’t have “{}” in it.",
+                money_core::csv::TAG_SEPARATOR
+            ));
+        }
+        let kind = tag_kind(mode);
+        let mut saved = id.map(<[u8]>::to_vec);
+        self.write(cx, |store| {
+            match id {
+                None => saved = Some(Tag::create(store, kind, name, style)?.id),
+                Some(id) => Tag::create_with_id(store, kind, id, name, style)?,
+            }
+            Ok(())
+        })?;
+        Ok(saved.unwrap_or_default())
+    }
+
+    /// Deletes a tag; the records it was on stay, without it.
+    pub fn delete_tag(
+        &mut self,
+        mode: Mode,
+        id: &[u8],
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        let kind = tag_kind(mode);
+        self.write(cx, |store| Tag::delete(store, kind, id))
     }
 
     /// Moves the colours and icons an earlier version kept in the settings
@@ -830,5 +958,36 @@ mod tests {
         assert!(describe_sync_error("open S3 store: NoSuchBucket").starts_with("That bucket"));
         assert!(describe_sync_error("sync: error trying to connect").starts_with("Couldn’t reach"));
         assert!(describe_sync_error("merge chunks: bad").starts_with("Sync failed."));
+    }
+
+    #[test]
+    fn a_record_keeps_its_tags_through_an_edit_and_loses_them_when_deleted() {
+        let dir = scratch("tags");
+        let mut store = Store::open(&dir, 7).unwrap();
+        Account::ensure_default(&mut store, "RUB").unwrap();
+        let food = Category::create(&mut store, "Food").unwrap();
+        let a = Tag::create(&mut store, TagKind::Expense, "B-trip", &Default::default()).unwrap();
+        let b = Tag::create(&mut store, TagKind::Expense, "A-work", &Default::default()).unwrap();
+        drop(store);
+        let mut book = Book::open(&dir, 7, None).unwrap();
+        let tags = book.tags(Mode::Expense);
+        assert_eq!(tags[0].name.as_ref(), "A-work");
+        let store = book.store.as_mut().unwrap();
+        let draft = EntryDraft {
+            category_id: food.id.clone(),
+            amount: 5.0,
+            comment: None,
+            date: NaiveDate::from_ymd_opt(2026, 11, 7).unwrap(),
+            tags: vec![a.id.clone(), b.id.clone()],
+        };
+        let made = Expense::create(store, &food.id, 5.0, None, draft.date, &book.account).unwrap();
+        Tag::set_for_record(store, TagKind::Expense, &made.id, &draft.tags).unwrap();
+        book.reload().unwrap();
+        let entry = &book.entries(Mode::Expense)[0];
+        // In the order of the names.
+        assert_eq!(entry.tags, vec![b.id.clone(), a.id.clone()]);
+        assert!(Filter::Tag(a.id.clone()).admits(entry));
+        assert!(book.entries(Mode::Income).is_empty());
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
