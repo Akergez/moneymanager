@@ -199,10 +199,11 @@ impl Workspace {
         };
         let handle = self.book.clone();
         let is_tag = matches!(filter, Filter::Tag(_));
+        let editing = item.clone();
         let edit = Command::new("edit-filter", format!("Edit {noun}…"))
             .icon(Lucide::Pencil)
             .disabled(item.is_none())
-            .on_trigger(move |window, cx| match (&item, is_tag) {
+            .on_trigger(move |window, cx| match (&editing, is_tag) {
                 (Some(item), true) => crate::categories::open_tag_dialog(
                     &handle,
                     mode,
@@ -219,8 +220,63 @@ impl Workspace {
                 ),
                 (None, _) => {}
             });
+        let kind = match is_tag {
+            true => crate::categories::Kind::Tag,
+            false => crate::categories::Kind::Category,
+        };
+        let hidden = item.as_ref().is_some_and(|item| item.hidden);
+        let (handle, target) = (self.book.clone(), item.clone());
+        let hide = Command::new(
+            "hide-filter",
+            match hidden {
+                true => format!("Show {noun}"),
+                false => format!("Hide {noun}"),
+            },
+        )
+        .icon(match hidden {
+            true => Lucide::Eye,
+            false => Lucide::EyeOff,
+        })
+        .overflow()
+        .disabled(item.is_none())
+        .on_trigger(move |window, cx| {
+            let Some(item) = &target else { return };
+            let state = match hidden {
+                true => money_core::models::CategoryState::Visible,
+                false => money_core::models::CategoryState::Hidden,
+            };
+            let done = handle.update(cx, |book, cx| match kind {
+                crate::categories::Kind::Tag => book.set_tag_state(mode, &item.id, state, cx),
+                crate::categories::Kind::Category => {
+                    book.set_category_state(mode, &item.id, state, cx)
+                }
+            });
+            if let Err(error) = done {
+                gpui_adaptive::Notice::error(error).push(window, cx);
+            }
+        });
+        let (handle, target) = (self.book.clone(), item.clone());
+        let delete = Command::new("delete-filter", format!("Delete {noun}…"))
+            .icon(Lucide::Trash)
+            .overflow()
+            .destructive()
+            .disabled(item.is_none())
+            .on_trigger(move |window, cx| {
+                if let Some(item) = &target {
+                    crate::categories::open_delete_dialog(
+                        &handle,
+                        mode,
+                        kind,
+                        item.clone(),
+                        window,
+                        cx,
+                    );
+                }
+            });
         let mut commands = vec![
             edit,
+            hide,
+            delete,
             Command::new("edit", "Open record")
                 .icon(Lucide::Pencil)
                 .overflow()

@@ -75,25 +75,30 @@ impl EntryForm {
         // A new record made on a tag's page carries that tag.
         let chosen_tags = match (&editing, preset) {
             (Some(entry), _) => entry.tags.clone(),
-            (None, Some(Filter::Tag(id))) => vec![id.clone()],
+            // Not a hidden one: it is not offered for a new record.
+            (None, Some(Filter::Tag(id))) if tags.iter().any(|t| &t.id == id && !t.hidden) => {
+                vec![id.clone()]
+            }
             (None, _) => Vec::new(),
         };
         let entries = book.read(cx).entries(mode);
         let mut categories = book.read(cx).categories(mode);
         book::order_by_use(&mut categories, |c| c.id.as_slice(), &entries);
         // A new record starts on the category of the latest one, as it does
-        // on its day; an edited one on its own, or on none if that category
-        // no longer exists.
+        // on its day, if that one is still offered; an edited one stays in
+        // its own, hidden or removed as it may be, until another is chosen.
+        let offered = |id: &Vec<u8>| categories.iter().any(|c| &c.id == id && !c.hidden);
         let category = match (&editing, preset) {
             (Some(entry), _) => Some(entry.category_id.clone()),
             // On a category's page, in that category.
-            (None, Some(Filter::Category(id))) => Some(id.clone()),
-            (None, _) => book::latest_category(&entries).map(<[u8]>::to_vec),
+            (None, Some(Filter::Category(id))) => Some(id.clone()).filter(offered),
+            (None, _) => book::latest_category(&entries)
+                .map(<[u8]>::to_vec)
+                .filter(offered),
         }
-        .filter(|id| categories.iter().any(|c| &c.id == id))
         .or_else(|| match editing {
             Some(_) => None,
-            None => categories.first().map(|c| c.id.clone()),
+            None => categories.iter().find(|c| !c.hidden).map(|c| c.id.clone()),
         });
         let amount = cx.new(|cx| {
             let mut state = TextFieldState::amount(window, cx);
@@ -306,9 +311,11 @@ impl EntryForm {
                 .px_0p5()
                 .rounded(scale.radius_container)
         };
+        // A hidden category is offered only to the record already in it.
         let tiles: Vec<_> = self
             .categories
             .iter()
+            .filter(|category| !category.hidden || self.category.as_ref() == Some(&category.id))
             .map(|category| {
                 let look =
                     CategoryLook::of(&category.style, &category.id, &category.name, colors.muted);
@@ -362,7 +369,14 @@ impl EntryForm {
     /// The tags, any number of them on, and the way to make one.
     fn render_tags(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let muted = cx.colors().muted;
-        let chips = self.tags.iter().fold(Chips::new("tags"), |chips, tag| {
+        // A hidden tag is offered only to a record that carries it.
+        let offered: Vec<_> = self
+            .tags
+            .iter()
+            .filter(|tag| !tag.hidden || self.chosen_tags.contains(&tag.id))
+            .collect();
+        let any = !offered.is_empty();
+        let chips = offered.into_iter().fold(Chips::new("tags"), |chips, tag| {
             let look = CategoryLook::of(&tag.style, &tag.id, &tag.name, muted);
             chips
                 .chip(
@@ -382,7 +396,7 @@ impl EntryForm {
         let form = cx.entity().downgrade();
         column()
             .gap(cx.scale().space_s)
-            .when(!self.tags.is_empty(), |tags| tags.child(chips))
+            .when(any, |tags| tags.child(chips))
             .child(
                 row().child(
                     Command::new("new-tag", "New tag…")
@@ -518,7 +532,13 @@ fn open(
     }
     // A record has to be of some category, so with none the first step is
     // making one — said, rather than left as a form that cannot be saved.
-    if entry.is_none() && book.read(cx).categories(mode).is_empty() {
+    // Hidden ones are not offered, so they do not count.
+    let offered = book
+        .read(cx)
+        .categories(mode)
+        .iter()
+        .any(|category| !category.hidden);
+    if entry.is_none() && !offered {
         Notice::new(format!(
             "Make a category first: every {} belongs to one.",
             mode.noun()

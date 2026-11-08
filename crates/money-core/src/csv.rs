@@ -13,6 +13,12 @@
 //! an import. A file without such rows (written by hand, or by an earlier
 //! version) still imports: an account it names is made with a zero balance.
 //!
+//! An expense or an income whose category was removed (see
+//! [`CategoryState::Removed`]) is written with an empty category, and a row
+//! with an empty category is imported into such a category: one the ledger
+//! already has, or one made for it. A merged category is written as the one
+//! it went into, and a removed or merged tag as the interface shows it.
+//!
 //! Importing a file into a ledger that already holds its operations adds
 //! nothing twice: a row is skipped while the ledger has an identical
 //! operation (same day, accounts, category, amounts and comment) that no
@@ -26,7 +32,9 @@ use chrono::NaiveDate;
 use rdx_rs::RdxValue;
 use uuid::Uuid;
 
-use crate::models::{Account, Category, Expense, TopUp, TopUpCategory, Transfer};
+use crate::models::{
+    Account, Category, CategoryState, Expense, Redirects, TopUp, TopUpCategory, Transfer,
+};
 use crate::store::{self, Store, hex_encode};
 use crate::tags::{Tag, TagKind};
 
@@ -182,7 +190,8 @@ impl Row {
             comment: fields[8].to_string(),
             tags: tag_names(fields),
         };
-        if row.account.is_empty() || row.category.is_empty() {
+        // An expense or an income may have none: its category was removed.
+        if row.account.is_empty() || (row.category.is_empty() && row.kind == "перевод") {
             return Err("Укажите счёт и категорию или счёт получателя".into());
         }
         let from = row.amount_from.is_some() && !row.currency_from.is_empty();
@@ -249,10 +258,15 @@ fn category_id(
         };
     }
     let id = new_id();
+    // A row without a category goes into a removed one, as it came out.
+    let state = match name.is_empty() {
+        true => CategoryState::Removed,
+        false => CategoryState::Visible,
+    };
     records.push((
         collection,
         hex_encode(&id),
-        vec![RdxValue::Str(name.into())],
+        store::category_fields(name, &Default::default(), &state),
     ));
     categories.insert(name.into(), vec![id.clone()]);
     Ok(id)
@@ -270,8 +284,36 @@ struct Signature {
     comment: Option<String>,
 }
 
+/// What a signature says of a record's category: the one it is shown in, or
+/// nothing for one shown without a category, as a row without one says.
+fn shown_category(redirects: &Redirects, id: &[u8]) -> Vec<u8> {
+    match redirects.is_live(id) {
+        true => redirects.resolve(id),
+        false => Vec::new(),
+    }
+}
+
+/// How each category of a kind is shown.
+fn expense_redirects(store: &Store) -> Result<Redirects, String> {
+    Ok(Redirects::new(
+        Category::read_all(store)?
+            .into_iter()
+            .map(|c| (c.id, c.state)),
+    ))
+}
+
+fn income_redirects(store: &Store) -> Result<Redirects, String> {
+    Ok(Redirects::new(
+        TopUpCategory::read_all(store)?
+            .into_iter()
+            .map(|c| (c.id, c.state)),
+    ))
+}
+
 /// How many of each operation the ledger already holds.
 fn existing_operations(store: &Store) -> Result<HashMap<Signature, usize>, String> {
+    let (expense_categories, income_categories) =
+        (expense_redirects(store)?, income_redirects(store)?);
     let mut seen = HashMap::new();
     let mut add = |signature: Signature| *seen.entry(signature).or_insert(0) += 1;
     for e in Expense::read_all(store)? {
@@ -279,7 +321,7 @@ fn existing_operations(store: &Store) -> Result<HashMap<Signature, usize>, Strin
             collection: store::EXPENSES_IDX,
             date: e.date.format("%Y-%m-%d").to_string(),
             account: e.account_id,
-            other: e.category_id,
+            other: shown_category(&expense_categories, &e.category_id),
             amount_from: e.amount.to_bits(),
             amount_to: 0,
             comment: e.comment,
@@ -290,7 +332,7 @@ fn existing_operations(store: &Store) -> Result<HashMap<Signature, usize>, Strin
             collection: store::TOP_UPS_IDX,
             date: t.date.format("%Y-%m-%d").to_string(),
             account: t.account_id,
-            other: t.category_id,
+            other: shown_category(&income_categories, &t.category_id),
             amount_from: 0,
             amount_to: t.amount.to_bits(),
             comment: t.comment,
@@ -354,19 +396,44 @@ pub fn import(store: &mut Store, reader: impl Read) -> Result<ImportReport, Stri
     }
 
     let mut accounts = Account::read_all(store)?;
-    let mut expenses: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
-    for category in Category::read_all(store)? {
-        expenses.entry(category.name).or_default().push(category.id);
-    }
-    let mut income: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
-    for category in TopUpCategory::read_all(store)? {
-        income.entry(category.name).or_default().push(category.id);
-    }
+    // By name, the categories the interface has; under no name, the first
+    // removed one, for the rows without a category.
+    let by_name = |categories: Vec<(Vec<u8>, String, CategoryState)>| {
+        let mut names: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
+        let mut removed: Vec<Vec<u8>> = Vec::new();
+        for (id, name, state) in categories {
+            match state {
+                CategoryState::Visible | CategoryState::Hidden => {
+                    names.entry(name).or_default().push(id)
+                }
+                CategoryState::Removed => removed.push(id),
+                CategoryState::Merged(_) => {}
+            }
+        }
+        if let Some(first) = removed.into_iter().min() {
+            names.insert(String::new(), vec![first]);
+        }
+        names
+    };
+    let mut expenses = by_name(
+        Category::read_all(store)?
+            .into_iter()
+            .map(|c| (c.id, c.name, c.state))
+            .collect(),
+    );
+    let mut income = by_name(
+        TopUpCategory::read_all(store)?
+            .into_iter()
+            .map(|c| (c.id, c.name, c.state))
+            .collect(),
+    );
     let mut tags: HashMap<TagKind, HashMap<String, Vec<Vec<u8>>>> = HashMap::new();
     for kind in [TagKind::Expense, TagKind::TopUp] {
         let names = tags.entry(kind).or_default();
         for tag in Tag::read_all(store, kind) {
-            names.entry(tag.name).or_default().push(tag.id);
+            if tag.state.is_live() {
+                names.entry(tag.name).or_default().push(tag.id);
+            }
         }
     }
     let mut existing = existing_operations(store)?;
@@ -481,7 +548,10 @@ pub fn import(store: &mut Store, reader: impl Read) -> Result<ImportReport, Stri
                         collection,
                         date: day,
                         account: account.clone(),
-                        other: category.clone(),
+                        other: match row.category.is_empty() {
+                            true => Vec::new(),
+                            false => category.clone(),
+                        },
                         amount_from: if expense { value.to_bits() } else { 0 },
                         amount_to: if expense { 0 } else { value.to_bits() },
                         comment: comment_text,
@@ -560,16 +630,40 @@ pub fn import(store: &mut Store, reader: impl Read) -> Result<ImportReport, Stri
 pub fn export(store: &Store, writer: impl Write) -> Result<(), String> {
     let accounts = Account::read_all(store)?;
     let accounts: HashMap<_, _> = accounts.iter().map(|a| (a.id.as_slice(), a)).collect();
-    let expenses = Category::read_all(store)?;
-    let expenses: HashMap<_, _> = expenses
-        .iter()
-        .map(|c| (c.id.as_slice(), c.name.as_str()))
-        .collect();
-    let income = TopUpCategory::read_all(store)?;
-    let income: HashMap<_, _> = income
-        .iter()
-        .map(|c| (c.id.as_slice(), c.name.as_str()))
-        .collect();
+    // A record's category as the interface shows it: where a merge leads,
+    // and no name for one removed.
+    let shown_names = |categories: Vec<(Vec<u8>, String, CategoryState)>| {
+        let redirects = Redirects::new(
+            categories
+                .iter()
+                .map(|(id, _, state)| (id.clone(), state.clone())),
+        );
+        let names: HashMap<Vec<u8>, String> = categories
+            .into_iter()
+            .map(|(id, name, _)| (id, name))
+            .collect();
+        move |id: &[u8]| -> Option<String> {
+            if !names.contains_key(id) {
+                return None;
+            }
+            Some(match redirects.is_live(id) {
+                true => names[&redirects.resolve(id)].clone(),
+                false => String::new(),
+            })
+        }
+    };
+    let expenses = shown_names(
+        Category::read_all(store)?
+            .into_iter()
+            .map(|c| (c.id, c.name, c.state))
+            .collect(),
+    );
+    let income = shown_names(
+        TopUpCategory::read_all(store)?
+            .into_iter()
+            .map(|c| (c.id, c.name, c.state))
+            .collect(),
+    );
     let account = |id: &[u8]| {
         accounts
             .get(id)
@@ -599,7 +693,7 @@ pub fn export(store: &Store, writer: impl Write) -> Result<(), String> {
     };
     let tag_cells = |kind: TagKind| -> HashMap<Vec<u8>, String> {
         let names = names(kind);
-        Tag::links(store, kind)
+        Tag::shown_links(store, kind)
             .into_iter()
             .map(|(record, tags)| {
                 let mut tags: Vec<&str> = tags
@@ -621,14 +715,12 @@ pub fn export(store: &Store, writer: impl Write) -> Result<(), String> {
             row_tags.insert(rows.len(), cell.clone());
         }
         let a = account(&entry.account_id)?;
-        let category = expenses
-            .get(entry.category_id.as_slice())
-            .ok_or("Не найдена категория расхода")?;
+        let category = expenses(&entry.category_id).ok_or("Не найдена категория расхода")?;
         rows.push(vec![
             entry.date.to_string(),
             "расход".into(),
             a.name.clone(),
-            (*category).into(),
+            category,
             entry.amount.to_string(),
             a.currency.clone(),
             String::new(),
@@ -641,14 +733,12 @@ pub fn export(store: &Store, writer: impl Write) -> Result<(), String> {
             row_tags.insert(rows.len(), cell.clone());
         }
         let a = account(&entry.account_id)?;
-        let category = income
-            .get(entry.category_id.as_slice())
-            .ok_or("Не найдена категория дохода")?;
+        let category = income(&entry.category_id).ok_or("Не найдена категория дохода")?;
         rows.push(vec![
             entry.date.to_string(),
             "доход".into(),
             a.name.clone(),
-            (*category).into(),
+            category,
             String::new(),
             String::new(),
             entry.amount.to_string(),
@@ -943,6 +1033,76 @@ mod tests {
         let b = accounts.iter().find(|a| a.name == "Б").unwrap();
         assert_eq!(b.opening_balance, 5.0);
         assert_eq!(accounts.len(), 2);
+    }
+
+    #[test]
+    fn a_merged_category_exports_as_its_target_and_a_removed_one_without_a_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(dir.path(), 7).unwrap();
+        import(
+            &mut store,
+            concat!(
+                "2026-10-01,расход,Кошелёк,Такси,10,RUB,,,\n",
+                "2026-10-02,расход,Кошелёк,Транспорт,20,RUB,,,\n",
+                "2026-10-03,расход,Кошелёк,Кафе,30,RUB,,,\n",
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        let id = |name: &str| {
+            Category::read_all(&store)
+                .unwrap()
+                .into_iter()
+                .find(|c| c.name == name)
+                .unwrap()
+                .id
+        };
+        let (taxi, transport, cafe) = (id("Такси"), id("Транспорт"), id("Кафе"));
+        let style = Default::default();
+        Category::create_with_id(
+            &mut store,
+            &taxi,
+            "Такси",
+            &style,
+            &CategoryState::Merged(transport),
+        )
+        .unwrap();
+        Category::create_with_id(&mut store, &cafe, "Кафе", &style, &CategoryState::Removed)
+            .unwrap();
+
+        let mut out = Vec::new();
+        export(&store, &mut out).unwrap();
+        let out = String::from_utf8(out).unwrap();
+        assert!(out.contains("2026-10-01,расход,Кошелёк,Транспорт,10,RUB"));
+        assert!(out.contains("2026-10-03,расход,Кошелёк,,30,RUB"));
+        assert!(!out.contains("Такси") && !out.contains("Кафе"));
+
+        // Into itself: nothing twice, the row without a category included.
+        assert_eq!(import(&mut store, out.as_bytes()).unwrap().added, 0);
+
+        // Into another ledger: the row without a category goes into a
+        // removed category made for it, and comes out the same way.
+        let other = tempfile::tempdir().unwrap();
+        let mut copy = Store::open(other.path(), 8).unwrap();
+        assert_eq!(import(&mut copy, out.as_bytes()).unwrap().added, 3);
+        let removed: Vec<_> = Category::read_all(&copy)
+            .unwrap()
+            .into_iter()
+            .filter(|c| c.state == CategoryState::Removed)
+            .collect();
+        assert_eq!(removed.len(), 1);
+        assert_eq!(import(&mut copy, out.as_bytes()).unwrap().added, 0);
+        let mut again = Vec::new();
+        export(&copy, &mut again).unwrap();
+        assert_eq!(String::from_utf8(again).unwrap(), out);
+        // A transfer still needs both accounts.
+        assert!(
+            import(
+                &mut copy,
+                "2026-10-04,перевод,Кошелёк,,1,RUB,1,RUB,\n".as_bytes()
+            )
+            .is_err()
+        );
     }
 
     #[test]

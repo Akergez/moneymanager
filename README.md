@@ -34,14 +34,19 @@ storage on a server or in a bucket is not changed, so connect to a new one.
   from expenses to income. Sortable by column; a row opens the record.
 - **Categories** — expense and income categories, each with a colour and an
   icon. A category's row opens the page of its records, where it is edited
-  and where **New expense…** makes a record in it.
+  and where **New expense…** makes a record in it. From that page a category
+  is **hidden** (listed under Hidden, its records still in it, but not
+  offered for a new record; **Show** brings it back) or **deleted**: its
+  records are moved into another category, or left **Uncategorized**. A
+  deletion is not undone.
 - **Tags** — labels of your own across categories (a trip, a project), drawn
   like categories with a name, a colour and an icon, but a record carries any
   number of them. They are chips at the end of the record form and small
   pills on every record in the list. The Tags screen lists them with how many
   records each has; a tag's row opens the page of its records, where it is
-  edited or deleted (it comes off its records; the records stay). Expenses and
-  income each have tags of their own; transfers have none.
+  edited, hidden or deleted, just like a category: deleted, it is replaced on
+  its records by another tag, or just comes off them; the records stay.
+  Expenses and income each have tags of their own; transfers have none.
 - **Charts** — one screen with all three: a pie by category (for the month or
   for all time), bars by month, and the running total through the chosen month.
 - **Accounts** — chosen at the top of every screen, with the balance beside the
@@ -139,6 +144,9 @@ names. Missing accounts are created in the specified currency with a zero
 opening balance (or the one an account row gives); missing categories are
 created with the default style. An account row sets the opening balance of the
 account it names; account currencies and category styles are preserved.
+Deleted categories and tags are not matched by name. An expense or income row
+with an empty category goes into a deleted, unnamed category: one the ledger
+already has, or one made for it.
 
 An account currency that conflicts with the CSV, or multiple matching accounts
 or categories with the same name, causes an error. Invalid dates, operation
@@ -157,6 +165,9 @@ Export writes the header, one account row per account, and all stored
 expenses, income and transfers from **all accounts**, ordered by date, regardless of the current account or screen.
 Each transfer is written once, with both amounts, rather than as two separate
 expense/income rows. Comments are escaped using standard CSV quoting.
+A record in a category merged into another is written with that one; a record
+in a deleted category left uncategorized is written with an empty category;
+merged and deleted tags are written as the interface shows them.
 
 Account/category/tag IDs, category and tag styles, categories and tags without operations, hidden
 and main accounts, and sync settings are not included. Importing an export
@@ -247,6 +258,21 @@ unstyled category, drawn in a colour derived from its name, the same on every
 device; and a client that knows nothing of them still finds the name where it
 always was. A record is rewritten whole, so a client that rewrites a category
 without these fields removes its colour and icon.
+
+### Hidden and deleted categories and tags
+
+A category is never erased from the ledger, and its records are never
+rewritten when it is hidden or deleted. Two more optional fields after the
+icon hold its state: `hidden`, `merged` with the id of the category it went
+into, or `removed`; a record without them is a visible category, so every
+earlier ledger reads unchanged. A record in a merged category is shown in the
+one the merge leads to (merges are followed, so a record that arrives later
+from a device that did not know of the merge goes there too); a record in a
+removed category is shown as **Uncategorized**, every such category alike.
+Tags have the same fields: a merged tag is shown on its records as the one it
+went into, a removed tag not at all. Earlier versions do not read these fields
+and show such categories and tags as ordinary ones; a rewrite of the category
+by an earlier version clears its state.
 
 Styles that an earlier build kept in `settings.json` (`category_styles`) are
 moved into the ledger the first time it is opened.

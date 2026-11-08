@@ -27,7 +27,7 @@ use rdx_rs::{RdxElement, RdxValue, Stamp};
 use rdx_sync::ChunkStore;
 use rdx_sync_fs::FileChunkStore;
 
-use crate::models::CategoryStyle;
+use crate::models::{CategoryState, CategoryStyle};
 
 pub const CATEGORIES_IDX: usize = 0;
 pub const EXPENSES_IDX: usize = 1;
@@ -525,17 +525,33 @@ pub fn child_opt_str(rec: &RdxElement, pos: usize) -> Option<String> {
 }
 
 /// The fields of a category record after its key: the name, then the colour
-/// and the icon. An unstyled category is written as the name alone, exactly
-/// as before the two existed; a colour that is absent beside an icon that is
-/// not holds its place with a `null`.
-pub fn category_fields(name: &str, style: &CategoryStyle) -> Vec<RdxValue> {
+/// and the icon, then the state and the category it was merged into. A
+/// visible, unstyled category is written as the name alone, exactly as before
+/// the others existed; a field that is absent before one that is not holds
+/// its place with a `null`. A tag's record is laid out the same way.
+pub fn category_fields(name: &str, style: &CategoryStyle, state: &CategoryState) -> Vec<RdxValue> {
     let mut fields = vec![RdxValue::Str(name.to_string())];
-    if !style.is_empty() {
+    let visible = *state == CategoryState::Visible;
+    if !style.is_empty() || !visible {
         fields.push(opt_str_value(style.color.as_deref()));
         fields.push(opt_str_value(style.icon.as_deref()));
     }
+    if !visible {
+        let (word, into) = match state {
+            CategoryState::Visible => unreachable!(),
+            CategoryState::Hidden => (HIDDEN, None),
+            CategoryState::Merged(into) => (MERGED, Some(hex_encode(into))),
+            CategoryState::Removed => (REMOVED, None),
+        };
+        fields.push(RdxValue::Str(word.into()));
+        fields.push(opt_str_value(into.as_deref()));
+    }
     fields
 }
+
+const HIDDEN: &str = "hidden";
+const MERGED: &str = "merged";
+const REMOVED: &str = "removed";
 
 /// The style of a category record, whose colour is at `pos` and icon after
 /// it. Fields that are absent, `null` or empty are no style.
@@ -544,6 +560,21 @@ pub fn child_category_style(rec: &RdxElement, pos: usize) -> CategoryStyle {
     CategoryStyle {
         color: field(pos),
         icon: field(pos + 1),
+    }
+}
+
+/// The state of a category record, at `pos`, and the merge's target after
+/// it. Absent is visible; so is a word this version does not know, which a
+/// later one may write. A merge without a target is a removal.
+pub fn child_category_state(rec: &RdxElement, pos: usize) -> CategoryState {
+    match child_opt_str(rec, pos).as_deref() {
+        Some(HIDDEN) => CategoryState::Hidden,
+        Some(MERGED) => match child_opt_str(rec, pos + 1).filter(|into| !into.is_empty()) {
+            Some(into) => CategoryState::Merged(hex_decode(&into)),
+            None => CategoryState::Removed,
+        },
+        Some(REMOVED) => CategoryState::Removed,
+        _ => CategoryState::Visible,
     }
 }
 
@@ -800,6 +831,7 @@ mod tests {
             &styled.id,
             "Food",
             &style(Some("#4c8df6"), None),
+            &CategoryState::Visible,
         )
         .unwrap();
         assert_eq!(find(&store, &styled.id).style, style(Some("#4c8df6"), None));
@@ -808,6 +840,7 @@ mod tests {
             &styled.id,
             "Groceries",
             &CategoryStyle::default(),
+            &CategoryState::Visible,
         )
         .unwrap();
         let renamed = find(&store, &styled.id);
@@ -975,6 +1008,95 @@ mod tests {
 
         std::fs::remove_dir_all(&da).ok();
         std::fs::remove_dir_all(&db).ok();
+    }
+
+    #[test]
+    fn a_category_state_is_two_trailing_fields_and_absent_is_visible() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(dir.path(), 7).unwrap();
+        // As every earlier version wrote it: the key and the name.
+        store
+            .upsert(CATEGORIES_IDX, "aa", vec![RdxValue::Str("Old".into())])
+            .unwrap();
+        let read = |store: &Store, id: &[u8]| {
+            Category::read_all(store)
+                .unwrap()
+                .into_iter()
+                .find(|c| c.id == id)
+                .unwrap()
+        };
+        assert_eq!(read(&store, &[0xaa]).state, CategoryState::Visible);
+
+        let food = Category::create(&mut store, "Food").unwrap();
+        let length = |store: &Store, id: &[u8]| {
+            store
+                .records(CATEGORIES_IDX)
+                .into_iter()
+                .find(|rec| child_str(rec, 0) == hex_encode(id))
+                .and_then(|rec| rec.value.children().map(|c| c.len()))
+                .unwrap()
+        };
+        // Visible and unstyled: the name alone, as before.
+        assert_eq!(length(&store, &food.id), 2);
+        for state in [
+            CategoryState::Hidden,
+            CategoryState::Merged(vec![0xaa]),
+            CategoryState::Removed,
+            CategoryState::Visible,
+        ] {
+            Category::create_with_id(&mut store, &food.id, "Food", &food.style, &state).unwrap();
+            let reopened = Store::open(dir.path(), 7).unwrap();
+            let category = read(&reopened, &food.id);
+            assert_eq!(category.state, state);
+            assert_eq!(category.name, "Food");
+            assert!(category.style.is_empty());
+        }
+        assert_eq!(length(&store, &food.id), 2);
+        // The style and the state together.
+        let style = CategoryStyle {
+            color: Some("#e8853b".into()),
+            icon: None,
+        };
+        TopUpCategory::create_with_id(
+            &mut store,
+            &[0xbb],
+            "Salary",
+            &style,
+            &CategoryState::Hidden,
+        )
+        .unwrap();
+        let salary = &TopUpCategory::read_all(&store).unwrap()[0];
+        assert_eq!(
+            (&salary.style, &salary.state),
+            (&style, &CategoryState::Hidden)
+        );
+    }
+
+    #[test]
+    fn records_of_a_merged_category_are_shown_where_the_merges_lead() {
+        use crate::models::Redirects;
+        let (a, b, c, gone) = (vec![1], vec![2], vec![3], vec![4]);
+        let redirects = Redirects::new([
+            (a.clone(), CategoryState::Merged(b.clone())),
+            (b.clone(), CategoryState::Merged(c.clone())),
+            (c.clone(), CategoryState::Hidden),
+            (gone.clone(), CategoryState::Removed),
+        ]);
+        assert_eq!(redirects.resolve(&a), c);
+        assert!(redirects.is_live(&a));
+        assert!(!redirects.is_live(&gone));
+        // Unknown: itself, and not in the interface.
+        assert_eq!(redirects.resolve(&[9]), vec![9]);
+        assert!(!redirects.is_live(&[9]));
+        // A loop, or a target that is not there, stops.
+        let looped = Redirects::new([
+            (a.clone(), CategoryState::Merged(b.clone())),
+            (b.clone(), CategoryState::Merged(a.clone())),
+            (c.clone(), CategoryState::Merged(vec![9])),
+        ]);
+        assert_eq!(looped.resolve(&a), b);
+        assert!(!looped.is_live(&a));
+        assert_eq!(looped.resolve(&c), c);
     }
 
     /// A record tuple `[key, fields...]` with every element stamped `stamp`.

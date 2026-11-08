@@ -2,8 +2,8 @@
 # size: 1240x800
 #
 # A record carries any number of tags, put on and taken off with the chips
-# at the end of its form. A tag deleted comes off every record it was on,
-# and the records stay.
+# at the end of its form. A tag deleted with nothing in its place comes off
+# every record it was on, and the records stay.
 wait:2500
 key:ctrl-n
 wait:900
@@ -27,7 +27,7 @@ wait:900
 expect:page-records=16
 key:escape
 wait:700
-# "Work": Edit tag…, Delete tag…, and Delete.
+# "Work": Edit tag…, Delete tag…, and Delete, taking it off.
 click:344,200
 wait:900
 expect:page-records=11
@@ -36,7 +36,9 @@ wait:900
 expect:dialog=open
 click:475,631
 wait:900
-click:725,220
+expect:dialog=open
+shot:tr-delete
+click:725,294
 wait:900
 # The page of a tag that is gone goes back to the tags.
 expect:page=tags

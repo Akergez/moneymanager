@@ -12,19 +12,26 @@
 //!
 //! A tag is drawn like a category and lives beside it, but a record is in
 //! one category and carries any number of tags.
+//!
+//! A hidden category or tag is listed after the others, under Hidden: it is
+//! not offered for a new record, but its records are still in it. Its page
+//! shows it again, or deletes it ([`delete_dialog`]).
 
 mod category_dialog;
+mod delete_dialog;
 
 use std::rc::Rc;
 
 use gpui_adaptive::{
-    ActiveColors as _, Collection, Command, Empty, Icon, ListRow, Sizable as _, Stack, TileSize,
+    ActiveColors as _, Collection, Command, Empty, Icon, ListRow, SectionHeader, Sizable as _,
+    Stack, TileSize,
 };
 use gpui_kit::prelude::*;
 use gpui_kit::{App, Context, Entity, SharedString, Subscription, Window, div};
 use money_core::store::hex_encode;
 
 pub use category_dialog::{Kind, open_category_dialog, open_tag_dialog};
+pub use delete_dialog::open_delete_dialog;
 
 use crate::book::{Book, CategoryInfo, CategoryLook, Filter, Mode};
 use crate::ui::{self, Lucide};
@@ -124,6 +131,7 @@ impl CategoriesView {
                 .child(count.to_string())
                 .child(Icon::new(Lucide::ChevronRight).small().text_color(muted)),
         )
+        .muted(item.hidden)
         .on_activate(move |window, cx| open(mode, filter.clone(), window, cx))
     }
 }
@@ -159,25 +167,31 @@ impl Render for CategoriesView {
                 .into_any_element();
         }
         let entries = self.book.read(cx).entries(self.mode);
-        let rows: Vec<ListRow> = items
-            .into_iter()
-            .map(|item| {
-                let count = entries
-                    .iter()
-                    .filter(|entry| match kind {
-                        Kind::Category => entry.category_id == item.id,
-                        Kind::Tag => entry.tags.contains(&item.id),
-                    })
-                    .count();
-                self.render_item(item, count, cx)
-            })
-            .collect();
+        let (hidden, shown): (Vec<CategoryInfo>, Vec<CategoryInfo>) =
+            items.into_iter().partition(|item| item.hidden);
+        let rows = |items: Vec<CategoryInfo>| -> Vec<ListRow> {
+            items
+                .into_iter()
+                .map(|item| {
+                    let count = entries
+                        .iter()
+                        .filter(|entry| match kind {
+                            Kind::Category => entry.category_id == item.id,
+                            Kind::Tag => entry.tags.contains(&item.id),
+                        })
+                        .count();
+                    self.render_item(item, count, cx)
+                })
+                .collect()
+        };
         let id = match kind {
             Kind::Category => "categories",
             Kind::Tag => "tags",
         };
-        Stack::new()
-            .child(Collection::new(id).children(rows))
-            .into_any_element()
+        let mut collection = Collection::new(id).children(rows(shown));
+        if !hidden.is_empty() {
+            collection = collection.section(SectionHeader::new("Hidden"), rows(hidden));
+        }
+        Stack::new().child(collection).into_any_element()
     }
 }

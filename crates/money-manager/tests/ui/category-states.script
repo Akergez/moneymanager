@@ -1,0 +1,79 @@
+# mode: demo
+# size: 1240x800
+#
+# A category hidden, merged into another, and removed. A hidden one is
+# still listed, under Hidden, but not offered for a new expense; a deleted
+# one goes, and its records go into the chosen category or are shown
+# uncategorized. No record is rewritten.
+wait:2500
+key:ctrl-2
+wait:600
+expect:categories=6
+# "Healthcare", the third by name: hidden from its page's menu.
+click:360,232
+wait:900
+expect:page=records
+click:1212,58
+wait:600
+click:1130,93
+wait:600
+expect:page=records
+key:escape
+wait:700
+expect:page=categories
+expect:categories=6
+shot:cs-hidden
+# Not offered for a new expense.
+key:ctrl-1
+wait:600
+key:ctrl-n
+wait:900
+expect:dialog=open
+shot:cs-hidden-form
+key:escape
+wait:600
+key:ctrl-2
+wait:600
+# "Entertainment", the first: deleted, its records moved.
+click:360,168
+wait:900
+click:1212,58
+wait:600
+click:1140,121
+wait:900
+expect:dialog=open
+shot:cs-delete
+click:620,246
+wait:600
+click:476,313
+wait:600
+click:725,294
+wait:900
+# Its page is gone; its five records are in "Food & dining" now.
+expect:page=categories
+expect:categories=5
+expect:records=44
+click:360,168
+wait:900
+expect:page-records=21
+key:escape
+wait:700
+# "Shopping", now the second: deleted, its records left uncategorized.
+click:360,200
+wait:900
+click:1212,58
+wait:600
+click:1140,121
+wait:900
+expect:dialog=open
+click:725,294
+wait:900
+expect:page=categories
+expect:categories=4
+expect:records=44
+shot:cs-after
+click:97,96
+wait:700
+expect:screen=transactions
+shot:cs-uncategorized
+quit

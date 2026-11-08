@@ -1,9 +1,9 @@
 use uuid::Uuid;
 
-use crate::models::{CategoryStyle, TopUpCategory};
+use crate::models::{CategoryState, CategoryStyle, TopUpCategory};
 use crate::store::{
-    Store, TOP_UP_CATEGORIES_IDX, category_fields, child_category_style, child_str, hex_decode,
-    hex_encode,
+    Store, TOP_UP_CATEGORIES_IDX, category_fields, child_category_state, child_category_style,
+    child_str, hex_decode, hex_encode,
 };
 
 impl TopUpCategory {
@@ -18,26 +18,28 @@ impl TopUpCategory {
         style: &CategoryStyle,
     ) -> Result<TopUpCategory, String> {
         let id = Uuid::new_v4().as_bytes().to_vec();
-        Self::create_with_id(store, &id, name, style)?;
+        Self::create_with_id(store, &id, name, style, &CategoryState::Visible)?;
         Ok(TopUpCategory {
             id,
             name: name.to_string(),
             style: style.clone(),
+            state: CategoryState::Visible,
         })
     }
 
     /// Insert (or overwrite) a top-up category with a caller-supplied id. The
-    /// record is written whole: a style left out here is a style removed.
+    /// record is written whole: its style and state go with it.
     pub fn create_with_id(
         store: &mut Store,
         id: &[u8],
         name: &str,
         style: &CategoryStyle,
+        state: &CategoryState,
     ) -> Result<(), String> {
         store.upsert(
             TOP_UP_CATEGORIES_IDX,
             &hex_encode(id),
-            category_fields(name, style),
+            category_fields(name, style, state),
         )
     }
 
@@ -49,6 +51,7 @@ impl TopUpCategory {
                 id: hex_decode(&child_str(rec, 0)),
                 name: child_str(rec, 1),
                 style: child_category_style(rec, 2),
+                state: child_category_state(rec, 4),
             })
             .collect())
     }

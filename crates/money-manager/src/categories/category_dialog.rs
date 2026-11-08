@@ -5,8 +5,8 @@ use gpui_adaptive::color_field::{parse_hex, to_hex};
 use gpui_adaptive::prim::{key_pressable, row, testable};
 use gpui_adaptive::{
     ActiveColors as _, ActiveScale as _, ColorField, ColorFieldEvent, ColorFieldState, Command,
-    Confirm, FieldEvent, Fields, Form, Icon, Labelled, Note, Notice, Purpose, TextField,
-    TextFieldState, TileSize, Tone,
+    FieldEvent, Fields, Form, Icon, Labelled, Note, Purpose, TextField, TextFieldState, TileSize,
+    Tone,
 };
 use gpui_kit::prelude::*;
 use gpui_kit::{
@@ -259,8 +259,8 @@ pub fn open_category_dialog(
     open_form(book, mode, Kind::Category, category, window, cx);
 }
 
-/// Opens the form for a new tag of `mode`, or for `tag`, which is also
-/// where a tag is deleted from.
+/// Opens the form for a new tag of `mode`, or for `tag`. An existing
+/// category or tag is also deleted from its form.
 pub fn open_tag_dialog(
     book: &Entity<Book>,
     mode: Mode,
@@ -284,13 +284,17 @@ fn open_form(
         Some(_) => (format!("Edit {of} {noun}"), "Save"),
         None => (format!("New {of} {noun}"), "Add"),
     };
-    // A category is never deleted here: every record in it would be left
-    // in none. A tag only comes off the records it is on.
-    let delete = editing.clone().filter(|_| kind == Kind::Tag).map(|tag| {
+    // Deleting asks, in a form of its own, what becomes of the records.
+    let delete = editing.clone().map(|item| {
         let book = book.clone();
-        Command::new("delete-tag", "Delete tag…")
-            .destructive()
-            .on_trigger(move |window, cx| confirm_delete_tag(&book, mode, tag.clone(), window, cx))
+        Command::new(
+            SharedString::from(format!("delete-{noun}")),
+            format!("Delete {noun}…"),
+        )
+        .destructive()
+        .on_trigger(move |window, cx| {
+            super::delete_dialog::open_delete_dialog(&book, mode, kind, item.clone(), window, cx)
+        })
     });
     let form = cx.new(|cx| CategoryForm::new(book.clone(), mode, kind, editing, window, cx));
     let name = form.read(cx).name.focus_handle(cx);
@@ -305,42 +309,4 @@ fn open_form(
         None => opened,
     }
     .open(window, cx);
-}
-
-/// Asks before deleting a tag: it comes off every record, on every device.
-fn confirm_delete_tag(
-    book: &Entity<Book>,
-    mode: Mode,
-    tag: CategoryInfo,
-    window: &mut Window,
-    cx: &mut App,
-) {
-    let on = book
-        .read(cx)
-        .entries(mode)
-        .iter()
-        .filter(|entry| entry.tags.contains(&tag.id))
-        .count();
-    let body = match on {
-        0 => "No record carries it. This can’t be undone.".to_string(),
-        1 => "It comes off the 1 record that carries it; the record stays. This can’t be undone."
-            .to_string(),
-        n => format!(
-            "It comes off the {n} records that carry it; the records stay. This can’t be undone."
-        ),
-    };
-    let book = book.clone();
-    Confirm::new("delete-tag", format!("Delete the tag “{}”?", tag.name))
-        .body(body)
-        .confirm(
-            Command::new("confirm-delete-tag", "Delete")
-                .destructive()
-                .on_trigger(move |window, cx| {
-                    let deleted = book.update(cx, |book, cx| book.delete_tag(mode, &tag.id, cx));
-                    if let Err(error) = deleted {
-                        Notice::error(error).push(window, cx);
-                    }
-                }),
-        )
-        .open(window, cx);
 }

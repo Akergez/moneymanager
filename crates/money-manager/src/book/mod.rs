@@ -21,7 +21,9 @@ use std::path::Path;
 use chrono::NaiveDate;
 use gpui_kit::{AppContext, Context, SharedString};
 use money_core::ledger::{self, AccountLedger, AccountSummary};
-use money_core::models::{Account, Category, Expense, TopUp, TopUpCategory, Transfer};
+use money_core::models::{
+    Account, Category, CategoryState, Expense, Redirects, TopUp, TopUpCategory, Transfer,
+};
 use money_core::store::{Store, hex_encode};
 use money_core::tags::{Tag, TagKind};
 
@@ -63,7 +65,33 @@ pub struct CategoryInfo {
     pub name: SharedString,
     /// Its colour and icon, as the ledger has them.
     pub style: CategoryStyle,
+    /// Kept out of the choice for a new record, but listed, and its records
+    /// shown in it.
+    pub hidden: bool,
 }
+
+impl CategoryInfo {
+    fn of(id: &[u8], name: &str, style: &CategoryStyle, state: &CategoryState) -> Option<Self> {
+        state.is_live().then(|| CategoryInfo {
+            id: id.to_vec(),
+            name: name.to_string().into(),
+            style: style.clone(),
+            hidden: *state == CategoryState::Hidden,
+        })
+    }
+
+    /// The state it is in, which a rewrite of its name or style keeps.
+    fn state(&self) -> CategoryState {
+        match self.hidden {
+            true => CategoryState::Hidden,
+            false => CategoryState::Visible,
+        }
+    }
+}
+
+/// What a record in a removed category, or in one the ledger does not have,
+/// is shown as: every one of them alike.
+pub const UNNAMED_CATEGORY: &str = "Uncategorized";
 
 pub struct Book {
     /// Gone while a sync has it.
@@ -217,14 +245,33 @@ impl Book {
         self.expense_categories.sort_by(|a, b| a.name.cmp(&b.name));
         self.income_categories = TopUpCategory::read_all(store)?;
         self.income_categories.sort_by(|a, b| a.name.cmp(&b.name));
+        // A record of a merged category is shown in the one it went into,
+        // as if it were there: lists, counts, charts and edits all see it so.
+        // The record itself is not rewritten.
+        let expense_redirects = Redirects::new(
+            self.expense_categories
+                .iter()
+                .map(|c| (c.id.clone(), c.state.clone())),
+        );
+        let income_redirects = Redirects::new(
+            self.income_categories
+                .iter()
+                .map(|c| (c.id.clone(), c.state.clone())),
+        );
         self.expenses = Expense::read_all(store)?;
+        for expense in &mut self.expenses {
+            expense.category_id = expense_redirects.resolve(&expense.category_id);
+        }
         self.top_ups = TopUp::read_all(store)?;
+        for top_up in &mut self.top_ups {
+            top_up.category_id = income_redirects.resolve(&top_up.category_id);
+        }
         self.transfers = Transfer::read_all(store)?;
         for kind in [TagKind::Expense, TagKind::TopUp] {
             let mut tags = Tag::read_all(store, kind);
             tags.sort_by(|a, b| a.name.cmp(&b.name).then(a.id.cmp(&b.id)));
             let order = |id: &Vec<u8>| tags.iter().position(|tag| &tag.id == id);
-            let mut links = Tag::links(store, kind);
+            let mut links = Tag::shown_links(store, kind);
             for on in links.values_mut() {
                 on.sort_by_key(order);
             }
@@ -344,41 +391,31 @@ impl Book {
         entries
     }
 
-    /// The categories a person made, without the virtual transfer one.
+    /// The categories the interface has, hidden ones included, without the
+    /// virtual transfer one. A merged or removed category is not among them.
     pub fn categories(&self, mode: Mode) -> Vec<CategoryInfo> {
         match mode {
             Mode::Expense => self
                 .expense_categories
                 .iter()
-                .map(|c| CategoryInfo {
-                    id: c.id.clone(),
-                    name: c.name.clone().into(),
-                    style: c.style.clone(),
-                })
+                .filter_map(|c| CategoryInfo::of(&c.id, &c.name, &c.style, &c.state))
                 .collect(),
             Mode::Income => self
                 .income_categories
                 .iter()
-                .map(|c| CategoryInfo {
-                    id: c.id.clone(),
-                    name: c.name.clone().into(),
-                    style: c.style.clone(),
-                })
+                .filter_map(|c| CategoryInfo::of(&c.id, &c.name, &c.style, &c.state))
                 .collect(),
         }
     }
 
-    /// The tags of `mode`'s records, by name.
+    /// The tags of `mode`'s records the interface has, hidden ones
+    /// included, by name.
     pub fn tags(&self, mode: Mode) -> Vec<CategoryInfo> {
         self.tags
             .get(&tag_kind(mode))
             .into_iter()
             .flatten()
-            .map(|tag| CategoryInfo {
-                id: tag.id.clone(),
-                name: tag.name.clone().into(),
-                style: tag.style.clone(),
-            })
+            .filter_map(|tag| CategoryInfo::of(&tag.id, &tag.name, &tag.style, &tag.state))
             .collect()
     }
 
@@ -392,35 +429,24 @@ impl Book {
         self.categories(mode).into_iter().find(|c| c.id == id)
     }
 
-    /// A category's colour and icon. None for a transfer leg, for a category
-    /// deleted on another device, and for one nobody styled.
+    /// A category's colour and icon. None for a transfer leg, for a removed
+    /// category, so that every one of them looks alike, and for one nobody
+    /// styled.
     pub fn category_style(&self, mode: Mode, category_id: &[u8]) -> CategoryStyle {
-        let style = match mode {
-            Mode::Expense => self
-                .expense_categories
-                .iter()
-                .find(|c| c.id == category_id)
-                .map(|c| &c.style),
-            Mode::Income => self
-                .income_categories
-                .iter()
-                .find(|c| c.id == category_id)
-                .map(|c| &c.style),
-        };
-        style.cloned().unwrap_or_default()
+        self.category(mode, category_id)
+            .map(|c| c.style)
+            .unwrap_or_default()
     }
 
     /// What a record's category is called: a transfer leg is a transfer, and
-    /// a category that was deleted on another device is unknown.
+    /// a removed category, or one the ledger does not have, has no name.
     pub fn category_name(&self, mode: Mode, category_id: &[u8]) -> SharedString {
         if category_id == ledger::TRANSFER_CATEGORY_ID {
             return "Transfer".into();
         }
-        self.categories(mode)
-            .into_iter()
-            .find(|c| c.id == category_id)
+        self.category(mode, category_id)
             .map(|c| c.name)
-            .unwrap_or_else(|| "Unknown".into())
+            .unwrap_or_else(|| UNNAMED_CATEGORY.into())
     }
 
     pub fn sync_state(&self) -> &SyncState {
@@ -545,20 +571,89 @@ impl Book {
             return Err("Name is required.".to_string());
         }
         let mut saved = id.map(<[u8]>::to_vec);
+        // A hidden category stays hidden through a rename.
+        let state = id
+            .and_then(|id| self.category(mode, id))
+            .map_or(CategoryState::Visible, |c| c.state());
         self.write(cx, |store| {
             match (mode, id) {
                 (Mode::Expense, None) => {
                     saved = Some(Category::create_styled(store, name, style)?.id)
                 }
-                (Mode::Expense, Some(id)) => Category::create_with_id(store, id, name, style)?,
+                (Mode::Expense, Some(id)) => {
+                    Category::create_with_id(store, id, name, style, &state)?
+                }
                 (Mode::Income, None) => {
                     saved = Some(TopUpCategory::create_styled(store, name, style)?.id)
                 }
-                (Mode::Income, Some(id)) => TopUpCategory::create_with_id(store, id, name, style)?,
+                (Mode::Income, Some(id)) => {
+                    TopUpCategory::create_with_id(store, id, name, style, &state)?
+                }
             }
             Ok(())
         })?;
         Ok(saved.unwrap_or_default())
+    }
+
+    /// Hides a category, shows it again, merges it into another or removes
+    /// it. Its record stays, with its name and style; only the state
+    /// changes, and its records are not touched.
+    pub fn set_category_state(
+        &mut self,
+        mode: Mode,
+        id: &[u8],
+        state: CategoryState,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        let category = self
+            .category(mode, id)
+            .ok_or("That category is no longer there.")?;
+        self.check_merge(id, &state, self.category_ids(mode))?;
+        self.write(cx, |store| match mode {
+            Mode::Expense => {
+                Category::create_with_id(store, id, &category.name, &category.style, &state)
+            }
+            Mode::Income => {
+                TopUpCategory::create_with_id(store, id, &category.name, &category.style, &state)
+            }
+        })
+    }
+
+    /// The same for a tag: a merged one is shown on its records as the tag
+    /// it went into, a removed one not at all.
+    pub fn set_tag_state(
+        &mut self,
+        mode: Mode,
+        id: &[u8],
+        state: CategoryState,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        let tag = self.tag(mode, id).ok_or("That tag is no longer there.")?;
+        let ids = self.tags(mode).into_iter().map(|t| t.id).collect();
+        self.check_merge(id, &state, ids)?;
+        let kind = tag_kind(mode);
+        self.write(cx, |store| {
+            Tag::create_with_id(store, kind, id, &tag.name, &tag.style, &state)
+        })
+    }
+
+    fn category_ids(&self, mode: Mode) -> Vec<Vec<u8>> {
+        self.categories(mode).into_iter().map(|c| c.id).collect()
+    }
+
+    /// A merge goes into another one the interface has, of the same kind.
+    fn check_merge(
+        &self,
+        id: &[u8],
+        state: &CategoryState,
+        live: Vec<Vec<u8>>,
+    ) -> Result<(), String> {
+        match state {
+            CategoryState::Merged(into) if into == id || !live.contains(into) => {
+                Err("Choose another one to move the records to.".to_string())
+            }
+            _ => Ok(()),
+        }
     }
 
     /// Makes a tag, or rewrites one: its name, colour and icon together.
@@ -584,25 +679,18 @@ impl Book {
         }
         let kind = tag_kind(mode);
         let mut saved = id.map(<[u8]>::to_vec);
+        // A hidden tag stays hidden through a rename.
+        let state = id
+            .and_then(|id| self.tag(mode, id))
+            .map_or(CategoryState::Visible, |t| t.state());
         self.write(cx, |store| {
             match id {
                 None => saved = Some(Tag::create(store, kind, name, style)?.id),
-                Some(id) => Tag::create_with_id(store, kind, id, name, style)?,
+                Some(id) => Tag::create_with_id(store, kind, id, name, style, &state)?,
             }
             Ok(())
         })?;
         Ok(saved.unwrap_or_default())
-    }
-
-    /// Deletes a tag; the records it was on stay, without it.
-    pub fn delete_tag(
-        &mut self,
-        mode: Mode,
-        id: &[u8],
-        cx: &mut Context<Self>,
-    ) -> Result<(), String> {
-        let kind = tag_kind(mode);
-        self.write(cx, |store| Tag::delete(store, kind, id))
     }
 
     /// Moves the colours and icons an earlier version kept in the settings
@@ -627,13 +715,22 @@ impl Book {
             .collect();
         let moved = self.write(cx, |store| {
             for (mode, category, style) in &rewrites {
+                let state = category.state();
                 match mode {
-                    Mode::Expense => {
-                        Category::create_with_id(store, &category.id, &category.name, style)?
-                    }
-                    Mode::Income => {
-                        TopUpCategory::create_with_id(store, &category.id, &category.name, style)?
-                    }
+                    Mode::Expense => Category::create_with_id(
+                        store,
+                        &category.id,
+                        &category.name,
+                        style,
+                        &state,
+                    )?,
+                    Mode::Income => TopUpCategory::create_with_id(
+                        store,
+                        &category.id,
+                        &category.name,
+                        style,
+                        &state,
+                    )?,
                 }
             }
             Ok(())
@@ -907,6 +1004,7 @@ mod tests {
             id: vec![id],
             name: "Food".into(),
             style,
+            hidden: false,
         };
         let categories = [
             category(0xaa, CategoryStyle::default()),
@@ -988,6 +1086,109 @@ mod tests {
         assert_eq!(entry.tags, vec![b.id.clone(), a.id.clone()]);
         assert!(Filter::Tag(a.id.clone()).admits(entry));
         assert!(book.entries(Mode::Income).is_empty());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn hidden_merged_and_removed_categories_and_tags_are_shown_as_they_say() {
+        let dir = scratch("category-states");
+        let mut store = Store::open(&dir, 7).unwrap();
+        Account::ensure_default(&mut store, "RUB").unwrap();
+        let day = NaiveDate::from_ymd_opt(2026, 11, 7).unwrap();
+        let account = money_core::store::DEFAULT_ACCOUNT_ID;
+        let taxi = Category::create(&mut store, "Taxi").unwrap();
+        let transport = Category::create(&mut store, "Transport").unwrap();
+        let cafe = Category::create(&mut store, "Cafe").unwrap();
+        let ride = Expense::create(&mut store, &taxi.id, 10.0, None, day, &account).unwrap();
+        let lunch = Expense::create(&mut store, &cafe.id, 20.0, None, day, &account).unwrap();
+        let trip = Tag::create(&mut store, TagKind::Expense, "Trip", &Default::default()).unwrap();
+        let travel =
+            Tag::create(&mut store, TagKind::Expense, "Travel", &Default::default()).unwrap();
+        Tag::set_for_record(
+            &mut store,
+            TagKind::Expense,
+            &ride.id,
+            std::slice::from_ref(&trip.id),
+        )
+        .unwrap();
+        drop(store);
+        let mut book = Book::open(&dir, 7, None).unwrap();
+        let store = book.store.as_mut().unwrap();
+        let style = CategoryStyle::default();
+        // What the interface's commands write.
+        Category::create_with_id(
+            store,
+            &taxi.id,
+            "Taxi",
+            &style,
+            &CategoryState::Merged(transport.id.clone()),
+        )
+        .unwrap();
+        Category::create_with_id(store, &cafe.id, "Cafe", &style, &CategoryState::Removed).unwrap();
+        Category::create_with_id(
+            store,
+            &transport.id,
+            "Transport",
+            &style,
+            &CategoryState::Hidden,
+        )
+        .unwrap();
+        Tag::create_with_id(
+            store,
+            TagKind::Expense,
+            &trip.id,
+            "Trip",
+            &style,
+            &CategoryState::Merged(travel.id.clone()),
+        )
+        .unwrap();
+        book.reload().unwrap();
+
+        let categories = book.categories(Mode::Expense);
+        assert_eq!(categories.len(), 1);
+        assert!(categories[0].hidden);
+        let entries = book.entries(Mode::Expense);
+        let entry = |id: &[u8]| entries.iter().find(|e| e.id == id).unwrap().clone();
+        // The ride is shown in Transport, with Travel on it.
+        assert_eq!(entry(&ride.id).category_id, transport.id);
+        assert_eq!(entry(&ride.id).tags, vec![travel.id.clone()]);
+        assert_eq!(
+            book.category_name(Mode::Expense, &entry(&ride.id).category_id),
+            "Transport"
+        );
+        // The lunch keeps pointing at Cafe, shown without a name.
+        assert_eq!(entry(&lunch.id).category_id, cafe.id);
+        assert_eq!(
+            book.category_name(Mode::Expense, &cafe.id),
+            UNNAMED_CATEGORY
+        );
+        assert!(book.category_style(Mode::Expense, &cafe.id).is_empty());
+        // The records themselves were not rewritten.
+        let stored = Expense::read_all(book.store.as_ref().unwrap()).unwrap();
+        assert!(
+            stored
+                .iter()
+                .any(|e| e.id == ride.id && e.category_id == taxi.id)
+        );
+        assert_eq!(book.tags(Mode::Expense).len(), 1);
+
+        // A merge needs another live one to go into.
+        assert!(
+            book.check_merge(
+                &transport.id,
+                &CategoryState::Merged(cafe.id.clone()),
+                book.category_ids(Mode::Expense)
+            )
+            .is_err()
+        );
+        assert!(
+            book.check_merge(
+                &transport.id,
+                &CategoryState::Merged(transport.id.clone()),
+                book.category_ids(Mode::Expense)
+            )
+            .is_err()
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 }

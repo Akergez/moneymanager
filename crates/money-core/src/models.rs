@@ -24,11 +24,75 @@ impl CategoryStyle {
     }
 }
 
+/// Whether a category (or a tag) is offered, kept out of the way, or gone
+/// from the interface. It is never deleted from the ledger: its records keep
+/// pointing at it, and the state says how they are shown.
+///
+/// Stored after the colour and the icon (see
+/// [`crate::store::category_fields`]); a record without it, as every earlier
+/// version wrote, is [`CategoryState::Visible`].
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum CategoryState {
+    #[default]
+    Visible,
+    /// Listed, and its records shown in it, but not offered for a new one.
+    Hidden,
+    /// Gone from the interface; its records are shown in the category with
+    /// this id. They are not rewritten: one that arrives later from a device
+    /// that did not know of the merge goes there too.
+    Merged(Vec<u8>),
+    /// Gone from the interface; its records are shown without a category.
+    Removed,
+}
+
+impl CategoryState {
+    /// Still in the interface: offered, or hidden.
+    pub fn is_live(&self) -> bool {
+        matches!(self, CategoryState::Visible | CategoryState::Hidden)
+    }
+}
+
+/// Where records of a category are shown, the merges followed.
+#[derive(Clone, Debug, Default)]
+pub struct Redirects(std::collections::HashMap<Vec<u8>, CategoryState>);
+
+impl Redirects {
+    pub fn new(states: impl IntoIterator<Item = (Vec<u8>, CategoryState)>) -> Self {
+        Redirects(states.into_iter().collect())
+    }
+
+    /// The category a record in `id` is shown in: `id` itself, or where a
+    /// merge leads, through a merge of the merged-into one and on. A merge
+    /// into a category that is not there, or back into one passed, stops
+    /// where it is.
+    pub fn resolve(&self, id: &[u8]) -> Vec<u8> {
+        let mut at = id.to_vec();
+        let mut passed = vec![at.clone()];
+        while let Some(CategoryState::Merged(into)) = self.0.get(&at) {
+            if passed.contains(into) || !self.0.contains_key(into) {
+                break;
+            }
+            at = into.clone();
+            passed.push(at.clone());
+        }
+        at
+    }
+
+    /// Whether a record in `id` is shown in a category the interface has:
+    /// where it resolves to is visible or hidden.
+    pub fn is_live(&self, id: &[u8]) -> bool {
+        self.0
+            .get(&self.resolve(id))
+            .is_some_and(CategoryState::is_live)
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Category {
     pub id: Vec<u8>,
     pub name: String,
     pub style: CategoryStyle,
+    pub state: CategoryState,
 }
 
 #[derive(Clone, Debug)]
@@ -50,6 +114,7 @@ pub struct TopUpCategory {
     pub id: Vec<u8>,
     pub name: String,
     pub style: CategoryStyle,
+    pub state: CategoryState,
 }
 
 #[derive(Clone, Debug)]

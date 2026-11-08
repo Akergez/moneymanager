@@ -22,10 +22,10 @@ use std::collections::HashMap;
 use rdx_rs::RdxValue;
 use uuid::Uuid;
 
-use crate::models::CategoryStyle;
+use crate::models::{CategoryState, CategoryStyle};
 use crate::store::{
     EXPENSE_TAG_LINKS_IDX, EXPENSE_TAGS_IDX, Store, TOP_UP_TAG_LINKS_IDX, TOP_UP_TAGS_IDX,
-    category_fields, child_category_style, child_str, hex_decode, hex_encode,
+    category_fields, child_category_state, child_category_style, child_str, hex_decode, hex_encode,
 };
 
 /// Which records a tag is for.
@@ -52,12 +52,14 @@ impl TagKind {
 }
 
 /// A tag. Its record is laid out as a category's is: the name, then the
-/// optional colour and icon.
+/// optional colour and icon, then the state. A removed tag is not shown on
+/// the records it is on; a merged one is shown as the tag it went into.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Tag {
     pub id: Vec<u8>,
     pub name: String,
     pub style: CategoryStyle,
+    pub state: CategoryState,
 }
 
 /// What a link record says: that it is on.
@@ -76,23 +78,29 @@ impl Tag {
         style: &CategoryStyle,
     ) -> Result<Tag, String> {
         let id = Uuid::new_v4().as_bytes().to_vec();
-        Self::create_with_id(store, kind, &id, name, style)?;
+        Self::create_with_id(store, kind, &id, name, style, &CategoryState::Visible)?;
         Ok(Tag {
             id,
             name: name.to_string(),
             style: style.clone(),
+            state: CategoryState::Visible,
         })
     }
 
-    /// Inserts or rewrites a tag, whole.
+    /// Inserts or rewrites a tag, whole: its style and state go with it.
     pub fn create_with_id(
         store: &mut Store,
         kind: TagKind,
         id: &[u8],
         name: &str,
         style: &CategoryStyle,
+        state: &CategoryState,
     ) -> Result<(), String> {
-        store.upsert(kind.tags(), &hex_encode(id), category_fields(name, style))
+        store.upsert(
+            kind.tags(),
+            &hex_encode(id),
+            category_fields(name, style, state),
+        )
     }
 
     pub fn read_all(store: &Store, kind: TagKind) -> Vec<Tag> {
@@ -103,8 +111,33 @@ impl Tag {
                 id: hex_decode(&child_str(rec, 0)),
                 name: child_str(rec, 1),
                 style: child_category_style(rec, 2),
+                state: child_category_state(rec, 4),
             })
             .collect()
+    }
+
+    /// The tags on each record of `kind` as the interface shows them: a
+    /// merged tag as the one it went into, once, and a removed one not at
+    /// all.
+    pub fn shown_links(store: &Store, kind: TagKind) -> HashMap<Vec<u8>, Vec<Vec<u8>>> {
+        let redirects = crate::models::Redirects::new(
+            Self::read_all(store, kind)
+                .into_iter()
+                .map(|tag| (tag.id, tag.state)),
+        );
+        let mut links = Self::links(store, kind);
+        for tags in links.values_mut() {
+            let mut shown: Vec<Vec<u8>> = Vec::new();
+            for tag in tags.iter() {
+                let to = redirects.resolve(tag);
+                if redirects.is_live(&to) && !shown.contains(&to) {
+                    shown.push(to);
+                }
+            }
+            *tags = shown;
+        }
+        links.retain(|_, tags| !tags.is_empty());
+        links
     }
 
     /// Deletes a tag and takes it off every record it was on.
@@ -201,7 +234,7 @@ impl Tag {
         (
             kind.tags(),
             hex_encode(id),
-            category_fields(name, &CategoryStyle::default()),
+            category_fields(name, &CategoryStyle::default(), &CategoryState::Visible),
         )
     }
 }
@@ -284,6 +317,45 @@ mod tests {
             Tag::links(&reopened, TagKind::Expense)[&lunch.id],
             vec![work.id]
         );
+    }
+
+    #[test]
+    fn a_merged_tag_shows_as_its_target_once_and_a_removed_one_not_at_all() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(dir.path(), 7).unwrap();
+        let kind = TagKind::Expense;
+        let style = CategoryStyle::default();
+        let trip = Tag::create(&mut store, kind, "Trip", &style).unwrap();
+        let travel = Tag::create(&mut store, kind, "Travel", &style).unwrap();
+        let work = Tag::create(&mut store, kind, "Work", &style).unwrap();
+        let (one, two) = (vec![1u8], vec![2u8]);
+        Tag::set_for_record(
+            &mut store,
+            kind,
+            &one,
+            &[trip.id.clone(), travel.id.clone()],
+        )
+        .unwrap();
+        Tag::set_for_record(&mut store, kind, &two, std::slice::from_ref(&work.id)).unwrap();
+
+        let merged = CategoryState::Merged(travel.id.clone());
+        Tag::create_with_id(&mut store, kind, &trip.id, "Trip", &style, &merged).unwrap();
+        Tag::create_with_id(
+            &mut store,
+            kind,
+            &work.id,
+            "Work",
+            &style,
+            &CategoryState::Removed,
+        )
+        .unwrap();
+
+        let shown = Tag::shown_links(&store, kind);
+        assert_eq!(shown[&one], vec![travel.id.clone()]);
+        assert!(!shown.contains_key(&two));
+        // The links themselves are as they were.
+        assert_eq!(Tag::links(&store, kind)[&one].len(), 2);
+        assert_eq!(Tag::read_all(&store, kind).len(), 3);
     }
 
     #[test]
