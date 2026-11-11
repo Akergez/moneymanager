@@ -5,13 +5,19 @@
 //! desktops are variable. A phone has no family the renderer's fallbacks name
 //! at all. So the application carries static faces of Inter and points the
 //! theme at them (see `assets/fonts/README.md`).
+//!
+//! Not on Android: there gpui-mobile draws the phone's own (variable) font at
+//! every weight, and the interface is in it, as big and as bold as the phone
+//! is set to draw text.
 
 use std::borrow::Cow;
 
 use gpui_kit::App;
+#[cfg(not(target_os = "android"))]
 use gpui_adaptive::theme::Theme;
 
 /// The family the bundled UI faces belong to.
+#[cfg(not(target_os = "android"))]
 const UI_FAMILY: &str = "Inter";
 
 /// Registers the bundled fonts and points the theme at them. Call once, after
@@ -23,11 +29,13 @@ pub fn install(cx: &mut App) {
         Cow::Borrowed(include_bytes!("../assets/fonts/Inter-SemiBold.ttf")),
         Cow::Borrowed(include_bytes!("../assets/fonts/Inter-Bold.ttf")),
     ];
-    if let Err(error) = cx.text_system().add_fonts(fonts) {
+    match cx.text_system().add_fonts(fonts) {
         // Text still draws, in whatever the desktop has; it is bold that will
         // be missing, which is worth saying once.
-        tracing::warn!(%error, "could not load the bundled fonts");
-        return;
+        Err(error) => tracing::warn!(%error, "could not load the bundled fonts"),
+        #[cfg(not(target_os = "android"))]
+        Ok(()) => Theme::update(cx, |theme| theme.font_family = UI_FAMILY.into()),
+        #[cfg(target_os = "android")]
+        Ok(()) => {}
     }
-    Theme::update(cx, |theme| theme.font_family = UI_FAMILY.into());
 }

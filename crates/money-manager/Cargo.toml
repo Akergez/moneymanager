@@ -25,7 +25,7 @@ gpui-kit = "0.7.0"
 # components are what it is made of, not what this crate calls; see
 # `tests/design_system.rs`. To work on it beside the application, swap this
 # for the path variant below.
-gpui-adaptive = { git = "https://github.com/Akergez/gpui-mobile-components", tag = "v0.4.8" }
+gpui-adaptive = { git = "https://github.com/Akergez/gpui-mobile-components", tag = "v0.4.9" }
 # gpui-adaptive = { path = "../../../gpui-mobile-components/crates/gpui-adaptive" }
 # The theme's colours: a Material You scheme made from the system's colour.
 # Cargo finds each crate by name within the checkout, and Cargo.lock pins
@@ -50,7 +50,7 @@ uuid = { version = "1.11", features = ["v4"] }
 # android/app/build.gradle.kts, at the same version.
 # To work on it beside the application, swap this for the path variant below
 # and build the package with -PglueLocal (android/settings.gradle.kts).
-gpui-android-glue = { git = "https://github.com/Akergez/gpui-android-glue", tag = "v0.4.5" }
+gpui-android-glue = { git = "https://github.com/Akergez/gpui-android-glue", tag = "v0.4.6" }
 # gpui-android-glue = { path = "../../../gpui-android-glue" }
 
 [target.'cfg(target_os = "android")'.dependencies]
@@ -59,7 +59,7 @@ tracing = { workspace = true, features = ["log"] }
 # The deep links the Tresse server's connect page returns through
 # (packages::deeplink). The same revision gpui-android-glue builds against, so
 # one copy of the platform ends up in the library.
-gpui-mobile = { package = "gpui-pre-mobile", git = "https://github.com/Akergez/gpui-mobile", rev = "dda3bf3635142249a5384ba603929bf4a3db284f" }
+gpui-mobile = { package = "gpui-pre-mobile", git = "https://github.com/Akergez/gpui-mobile", rev = "d924245f173b80ebc8bcc4da5568fc97d3c64c43" }
 
 [dev-dependencies]
 # The #[gpui_kit::test] harness the connect-flow test renders a window with.
