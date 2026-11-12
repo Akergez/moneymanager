@@ -362,12 +362,7 @@ impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let env = Env::of(window, cx);
         self.width = env.width();
-        let at_root = self.navigator.read(cx).is_at_root();
         let this = cx.entity();
-        let pages = Navigator::new("pages", &self.navigator, move |place, page, window, cx| {
-            let env = Env::of(window, cx);
-            this.update(cx, |this, cx| this.render_place(place, page, env, cx))
-        });
         let workspace = cx.entity().downgrade();
         let sections = Section::ALL
             .into_iter()
@@ -382,13 +377,18 @@ impl Render for Workspace {
                 },
             )
             .primary(self.new_command(cx))
-            .bar_visible(at_root)
             .on_select(move |key, _, cx| {
                 if let Some(section) = Section::ALL.into_iter().find(|s| s.name() == key.as_ref()) {
                     workspace.update(cx, |this, cx| this.show(section, cx)).ok();
                 }
-            })
-            .content(pages);
+            });
+        let bar = sections.bar(window, cx);
+        let pages = Navigator::new("pages", &self.navigator, move |place, page, window, cx| {
+            let env = Env::of(window, cx);
+            this.update(cx, |this, cx| this.render_place(place, page, env, cx))
+        })
+        .bar(bar);
+        let content = sections.content(pages);
 
         div()
             .id("workspace")
@@ -426,7 +426,7 @@ impl Render for Workspace {
             .on_action(
                 cx.listener(|this, _: &OpenSettings, window, cx| this.open_settings(window, cx)),
             )
-            .child(sections)
+            .child(content)
     }
 }
 
