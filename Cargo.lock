@@ -4341,7 +4341,7 @@ dependencies = [
 
 [[package]]
 name = "money-core"
-version = "2.9.9"
+version = "2.9.10"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -4358,7 +4358,7 @@ dependencies = [
 
 [[package]]
 name = "money-manager"
-version = "2.9.9"
+version = "2.9.10"
 dependencies = [
  "chrono",
  "dirs 6.0.0",
@@ -4379,7 +4379,7 @@ dependencies = [
 
 [[package]]
 name = "money-tresse"
-version = "2.9.9"
+version = "2.9.10"
 dependencies = [
  "libc",
  "rdx-rs",

@@ -38,10 +38,6 @@ install -Dm644 "data/icons/hicolor/scalable/apps/$app_id.svg" \
 install -Dm644 "data/icons/hicolor/symbolic/apps/$app_id-symbolic.svg" \
   "$prefix/share/icons/hicolor/symbolic/apps/$app_id-symbolic.svg"
 install -Dm644 LICENSE "$prefix/share/licenses/money-manager/LICENSE"
-# The font is compiled into the binary, and its licence asks to travel with
-# it.
-install -Dm644 crates/money-manager/assets/fonts/Inter-LICENSE.txt \
-  -t "$prefix/share/licenses/money-manager"
 
 mkdir -p dist
 # Fixed owner and order, so the same build packs to the same bytes.

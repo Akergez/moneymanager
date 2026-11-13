@@ -90,7 +90,6 @@ trap 'rm -rf -- "$stage"' EXIT
 mkdir -p -- "$stage/$name"
 cp -- "${CARGO_TARGET_DIR:-target}/$target/$profile/money-manager.exe" "$stage/$name/"
 cp -- LICENSE "$stage/$name/LICENSE.txt"
-cp -- crates/money-manager/assets/fonts/Inter-LICENSE.txt "$stage/$name/"
 
 mkdir -p dist
 rm -f -- "dist/$name.zip"
