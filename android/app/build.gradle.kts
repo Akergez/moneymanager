@@ -104,7 +104,7 @@ dependencies {
     // The Java half of gpui-android-glue: the classes gpui-mobile and the
     // glue call by name, and the androidx libraries they use. The same
     // version as the crate in crates/money-manager/Cargo.toml.
-    implementation("com.akergez.gpui:android-glue:0.4.8")
+    implementation("com.akergez.gpui:android-glue:0.4.9")
 }
 
 // Gradle packs whatever library is in jniLibs; it does not build it. An APK
