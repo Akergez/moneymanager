@@ -433,6 +433,5 @@ The new Tresse repository cannot sync with the old chunk protocol.
 
 ## License
 
-GPL-3.0; see [LICENSE](LICENSE). The bundled Inter font is under the SIL Open
-Font License 1.1 (`crates/money-manager/assets/fonts/Inter-LICENSE.txt`). The
-icons are [Lucide](https://lucide.dev), ISC.
+GPL-3.0; see [LICENSE](LICENSE). The icons are [Lucide](https://lucide.dev),
+ISC.

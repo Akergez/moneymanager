@@ -24,7 +24,6 @@ mod appearance;
 mod book;
 mod categories;
 mod charts;
-mod fonts;
 mod onboarding;
 mod paths;
 mod script;
@@ -88,7 +87,6 @@ fn start(cx: &mut gpui_kit::App) {
     #[cfg(target_os = "android")]
     sync_server::install_deep_links();
     sync_server::SyncConnect::install(cx);
-    fonts::install(cx);
     appearance::init(cx);
     themes::load(cx);
     appearance::apply(None, cx);

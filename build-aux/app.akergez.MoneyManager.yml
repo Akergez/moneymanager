@@ -40,11 +40,6 @@ modules:
       - install -Dm755 target/dist/money-manager /app/bin/money-manager
       - install -Dm644 data/app.akergez.MoneyManager.desktop /app/share/applications/app.akergez.MoneyManager.desktop
       - install -Dm644 data/app.akergez.MoneyManager.metainfo.xml /app/share/metainfo/app.akergez.MoneyManager.metainfo.xml
-      # The font is compiled into the binary, and its licence asks to travel
-      # with it.
-      - install -Dm644 LICENSE
-        crates/money-manager/assets/fonts/Inter-LICENSE.txt
-        -t /app/share/licenses/app.akergez.MoneyManager
       # The icon ships rasterized. Both `flatpak build-export` and
       # appstreamcli load icons through glycin, which has no SVG loader in the
       # images this is built on, so an exported SVG fails the build outright. The

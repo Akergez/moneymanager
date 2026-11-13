@@ -54,6 +54,10 @@ jni_libs=android/app/src/main/jniLibs
 rm -rf -- "$jni_libs"
 cargo ndk -t arm64-v8a --platform 26 -o "$jni_libs" \
   build --profile "$profile" --locked -p money-manager --lib
+# The commit the library was built from, so Gradle can refuse to pack one left
+# from another commit (android/app/build.gradle.kts checks it).
+git -C "$root" rev-parse HEAD > "$jni_libs/.rust-revision" 2>/dev/null \
+  || rm -f "$jni_libs/.rust-revision"
 
 (cd android && MONEY_MANAGER_VERSION=$version ./gradlew --console=plain --quiet assembleRelease)
 

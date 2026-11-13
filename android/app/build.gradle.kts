@@ -106,3 +106,36 @@ dependencies {
     // version as the crate in crates/money-manager/Cargo.toml.
     implementation("com.akergez.gpui:android-glue:0.4.8")
 }
+
+// Gradle packs whatever library is in jniLibs; it does not build it. An APK
+// built after a Rust change without rebuilding the library would carry the
+// old one, and the interface would behave as the old code did — the system's
+// font size and weight among it. The build script stamps the library with the
+// commit it was built from; refuse to pack one stamped with another commit (or
+// with none). A tree without git (a tarball) is not checked.
+val rustLibrary = file("src/main/jniLibs/arm64-v8a/libmoney_manager.so")
+val rustRevision = file("src/main/jniLibs/.rust-revision")
+tasks.register("checkRustLibrary") {
+    doLast {
+        val head = try {
+            val process = ProcessBuilder("git", "rev-parse", "HEAD")
+                .directory(rootDir.parentFile)
+                .redirectErrorStream(true)
+                .start()
+            val output = process.inputStream.bufferedReader().readText().trim()
+            if (process.waitFor() == 0) output else null
+        } catch (_: Exception) {
+            null
+        } ?: return@doLast
+        if (!rustLibrary.isFile || !rustRevision.isFile || rustRevision.readText().trim() != head) {
+            throw GradleException(
+                "The Rust library in jniLibs is missing or was not built from this commit. " +
+                    "Gradle does not build it; run build-aux/build-android.sh " +
+                    "(or cargo ndk ... --platform 26 and stamp it) before packing the APK."
+            )
+        }
+    }
+}
+tasks.named("preBuild") {
+    dependsOn("checkRustLibrary")
+}
