@@ -59,7 +59,7 @@ tracing = { workspace = true, features = ["log"] }
 # The deep links the Tresse server's connect page returns through
 # (packages::deeplink). The same revision gpui-android-glue builds against, so
 # one copy of the platform ends up in the library.
-gpui-mobile = { package = "gpui-pre-mobile", git = "https://github.com/Akergez/gpui-mobile", rev = "d924245f173b80ebc8bcc4da5568fc97d3c64c43" }
+gpui-mobile = { package = "gpui-pre-mobile", git = "https://github.com/Akergez/gpui-mobile", rev = "d69470c6f6de0cc005797f8db0553082066eb857" }
 
 [dev-dependencies]
 # The #[gpui_kit::test] harness the connect-flow test renders a window with.
