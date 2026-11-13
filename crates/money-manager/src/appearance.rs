@@ -12,6 +12,7 @@
 
 use gpui_adaptive_colors::{AdaptiveColors, Color, Options, Seed, Source};
 use gpui_adaptive::theme::{Theme, ThemeMode};
+use gpui_adaptive::ActiveScale as _;
 use gpui_kit::{App, Pixels, Window};
 
 use crate::settings::Settings;
@@ -106,6 +107,13 @@ pub fn init(cx: &mut App) {
         }
     })
     .detach();
+    // The desktop's text may come after the first frame too (see
+    // `gpui_android_glue::font`); the sizes are put on when it does.
+    cx.observe_global::<gpui_android_glue::DesktopText>(|cx| {
+        apply_size(cx);
+        cx.refresh_windows();
+    })
+    .detach();
 }
 
 /// Light, dark, or whatever the system is.
@@ -151,6 +159,12 @@ impl ThemeChoice {
 /// this one factor on the rem scales text, controls, spacing and charts
 /// together; nothing is sized apart from it.
 ///
+/// On a desktop the rem is calibrated so that Regular draws running text at
+/// the size the desktop's own text is drawn at ([`apply_size`]); Compact and
+/// Large are a step either side of it. On a phone the system has already
+/// scaled everything to be read at the distance it is held, and Compact is
+/// that size.
+///
 /// It stops at Large. The component library keeps a few sizes of its own in
 /// pixels — the title bar's height, a table row's, the collapsed sidebar's
 /// width — and past this factor text no longer fits inside them.
@@ -192,10 +206,11 @@ impl InterfaceSize {
             .unwrap_or_else(Self::for_platform)
     }
 
-    /// The size nobody has chosen yet. A phone is held closer than a monitor
-    /// stands, and its system has already scaled everything to be read at
-    /// that distance: the library's own size is the right one there, and a
-    /// step up from it is too much.
+    /// The size nobody has chosen yet. On a desktop it is Regular: the
+    /// desktop's own text size, which the rem is calibrated to. A phone is
+    /// held closer than a monitor stands, and its system has already scaled
+    /// everything to be read at that distance: there Compact is the right
+    /// size, and a step up from it is too much.
     pub fn for_platform() -> Self {
         if cfg!(target_os = "android") {
             InterfaceSize::Compact
@@ -204,9 +219,9 @@ impl InterfaceSize {
         }
     }
 
-    /// The factor on the component library's own rem. Compact is the
-    /// library's size, which is small for a list of amounts read at arm's
-    /// length; Regular is a step up from it.
+    /// The factor on the rem. On a desktop the rem is calibrated so that
+    /// Regular is the desktop's text size ([`apply_size`]); on a phone
+    /// Compact is. The steps either way are the application's own.
     pub fn factor(self) -> f32 {
         match self {
             InterfaceSize::Compact => 1.0,
@@ -236,9 +251,34 @@ pub fn set_interface_size(size: InterfaceSize, cx: &mut App) {
     cx.refresh_windows();
 }
 
-/// The rem the interface is drawn at: the library's, times the chosen size.
+/// The rem the interface is drawn at: the base, times the chosen size.
 pub fn rem(cx: &App) -> Pixels {
-    library_sizes(cx).0 * interface_size(cx).factor()
+    base_sizes(cx).0 * interface_size(cx).factor()
+}
+
+/// The rem and monospace size before the chosen factor: the library's own,
+/// except that on a desktop the rem is calibrated so that the default size
+/// draws running text at the size the desktop's own text is drawn at.
+fn base_sizes(cx: &App) -> (Pixels, Pixels) {
+    let (library, library_mono) = library_sizes(cx);
+    let Some(text) = gpui_android_glue::desktop_text(cx) else {
+        return (library, library_mono);
+    };
+    // The skin draws running text at this fraction of a rem, and `for_platform`
+    // is the size nobody has chosen yet: the one calibrated to the desktop's.
+    let body = cx.scale().body.0;
+    let default = InterfaceSize::for_platform().factor();
+    (
+        text.size.map_or(library, |size| rem_for(size, body, default)),
+        text.mono_size.map_or(library_mono, |size| size / default),
+    )
+}
+
+/// The rem that draws text of `size` at the default interface size: `body`
+/// is the fraction of a rem the skin draws running text at, and `default`
+/// the default size's factor on the rem.
+fn rem_for(size: Pixels, body: f32, default: f32) -> Pixels {
+    size / (body * default)
 }
 
 fn library_sizes(cx: &App) -> (Pixels, Pixels) {
@@ -251,7 +291,7 @@ fn library_sizes(cx: &App) -> (Pixels, Pixels) {
 /// Makes the theme's sizes say what the settings say. The window takes its
 /// rem from the theme on every frame, so this is all it takes.
 fn apply_size(cx: &mut App) {
-    let (font, mono) = library_sizes(cx);
+    let (font, mono) = base_sizes(cx);
     let factor = interface_size(cx).factor();
     let theme = Theme::global_mut(cx);
     theme.font_size = font * factor;
@@ -300,6 +340,18 @@ mod tests {
         for choice in ThemeChoice::ALL {
             assert_eq!(ThemeChoice::parse(choice.stored()), choice);
         }
+    }
+
+    #[test]
+    fn the_default_size_draws_text_at_the_desktop_size() {
+        let desktop = gpui_kit::px(10.0 * 96.0 / 72.0);
+        let body = 0.8125;
+        let factor = InterfaceSize::Regular.factor();
+        let rem = rem_for(desktop, body, factor);
+        let drawn = rem * body * factor;
+        assert!((f32::from(drawn) - f32::from(desktop)).abs() < 0.0001);
+        assert!(rem * body * InterfaceSize::Compact.factor() < drawn);
+        assert!(rem * body * InterfaceSize::Large.factor() > drawn);
     }
 
     #[test]
