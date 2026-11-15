@@ -2424,8 +2424,8 @@ dependencies = [
 
 [[package]]
 name = "gpui-adaptive"
-version = "0.5.5"
-source = "git+https://github.com/Akergez/gpui-mobile-components?tag=v0.5.5#55db0af0726244e3a187c506b2b3ffe31598f5d8"
+version = "0.5.6"
+source = "git+https://github.com/Akergez/gpui-mobile-components?tag=v0.5.6#9cfe9837c3662f102ca1d41739c66acbb6edadcb"
 dependencies = [
  "chrono",
  "gpui-adaptive-colors",
@@ -2446,8 +2446,8 @@ dependencies = [
 
 [[package]]
 name = "gpui-android-glue"
-version = "0.5.0"
-source = "git+https://github.com/Akergez/gpui-android-glue?tag=v0.5.0#ff4752ecb0009b0f8390887aff3c5d1b2e23a0bb"
+version = "0.5.1"
+source = "git+https://github.com/Akergez/gpui-android-glue?tag=v0.5.1#68d88f66c4d2296d3db9eed91407fc0903548959"
 dependencies = [
  "android-activity",
  "android_logger",
@@ -2835,7 +2835,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-mobile"
 version = "0.1.0"
-source = "git+https://github.com/Akergez/gpui-mobile?rev=d69470c6f6de0cc005797f8db0553082066eb857#d69470c6f6de0cc005797f8db0553082066eb857"
+source = "git+https://github.com/Akergez/gpui-mobile?rev=a331bf40413d50b35be5e1b181bc7f4c26b5ea6e#a331bf40413d50b35be5e1b181bc7f4c26b5ea6e"
 dependencies = [
  "android-activity",
  "android_logger",
@@ -4341,7 +4341,7 @@ dependencies = [
 
 [[package]]
 name = "money-core"
-version = "3.0.2"
+version = "3.0.3"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -4358,7 +4358,7 @@ dependencies = [
 
 [[package]]
 name = "money-manager"
-version = "3.0.2"
+version = "3.0.3"
 dependencies = [
  "chrono",
  "dirs 6.0.0",
@@ -4379,7 +4379,7 @@ dependencies = [
 
 [[package]]
 name = "money-tresse"
-version = "3.0.2"
+version = "3.0.3"
 dependencies = [
  "libc",
  "rdx-rs",
