@@ -2424,8 +2424,8 @@ dependencies = [
 
 [[package]]
 name = "gpui-adaptive"
-version = "0.5.7"
-source = "git+https://github.com/Akergez/gpui-mobile-components?tag=v0.5.7#74cf977c8b3071d8db59d881cbe1f11e7ea54ec2"
+version = "0.5.8"
+source = "git+https://github.com/Akergez/gpui-mobile-components?tag=v0.5.8#16210c3ae797389da7915f2ff9a54e1ea8aac7cd"
 dependencies = [
  "chrono",
  "gpui-adaptive-colors",
@@ -2446,8 +2446,8 @@ dependencies = [
 
 [[package]]
 name = "gpui-android-glue"
-version = "0.5.2"
-source = "git+https://github.com/Akergez/gpui-android-glue?tag=v0.5.2#e894c2eed8333ba6cdb15d71f93e26d1a91824d7"
+version = "0.5.3"
+source = "git+https://github.com/Akergez/gpui-android-glue?tag=v0.5.3#d9a3c0a4f7a2c67ae47db08b8c6b69f922bcb3e0"
 dependencies = [
  "android-activity",
  "android_logger",
@@ -4341,7 +4341,7 @@ dependencies = [
 
 [[package]]
 name = "money-core"
-version = "3.0.4"
+version = "3.0.5"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -4358,7 +4358,7 @@ dependencies = [
 
 [[package]]
 name = "money-manager"
-version = "3.0.4"
+version = "3.0.5"
 dependencies = [
  "chrono",
  "dirs 6.0.0",
@@ -4379,7 +4379,7 @@ dependencies = [
 
 [[package]]
 name = "money-tresse"
-version = "3.0.4"
+version = "3.0.5"
 dependencies = [
  "libc",
  "rdx-rs",
