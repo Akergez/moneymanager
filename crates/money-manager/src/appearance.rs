@@ -169,6 +169,7 @@ impl ThemeChoice {
 /// pixels — the title bar's height, a table row's, the collapsed sidebar's
 /// width — and past this factor text no longer fits inside them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(target_os = "android", allow(dead_code))]
 pub enum InterfaceSize {
     Compact,
     #[default]
@@ -176,6 +177,7 @@ pub enum InterfaceSize {
     Large,
 }
 
+#[cfg_attr(target_os = "android", allow(dead_code))]
 impl InterfaceSize {
     pub const ALL: [InterfaceSize; 3] = [
         InterfaceSize::Compact,
@@ -236,15 +238,27 @@ impl InterfaceSize {
 static LIBRARY_SIZES: std::sync::OnceLock<(Pixels, Pixels)> = std::sync::OnceLock::new();
 
 pub fn interface_size(cx: &App) -> InterfaceSize {
-    // A scenario's click coordinates are for one size; `MONEY_MANAGER_UI_SIZE`
-    // pins it whatever the settings say.
-    std::env::var("MONEY_MANAGER_UI_SIZE")
-        .ok()
-        .or_else(|| Settings::global(cx).interface_size())
-        .map(|stored| InterfaceSize::parse(&stored))
-        .unwrap_or_else(InterfaceSize::for_platform)
+    // A phone's font size setting is already in the window's scale; an
+    // application zoom on top of it would make the text larger than the
+    // system's.
+    #[cfg(target_os = "android")]
+    {
+        let _ = cx;
+        return InterfaceSize::Compact;
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        // A scenario's click coordinates are for one size;
+        // `MONEY_MANAGER_UI_SIZE` pins it whatever the settings say.
+        std::env::var("MONEY_MANAGER_UI_SIZE")
+            .ok()
+            .or_else(|| Settings::global(cx).interface_size())
+            .map(|stored| InterfaceSize::parse(&stored))
+            .unwrap_or_else(InterfaceSize::for_platform)
+    }
 }
 
+#[cfg(not(target_os = "android"))]
 pub fn set_interface_size(size: InterfaceSize, cx: &mut App) {
     Settings::update(cx, |settings| settings.set_interface_size(size.stored()));
     apply_size(cx);

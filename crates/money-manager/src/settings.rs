@@ -211,10 +211,12 @@ impl Settings {
 
     /// How large the interface is drawn, as the stored name of a
     /// [`crate::appearance::InterfaceSize`].
+    #[cfg(not(target_os = "android"))]
     pub fn interface_size(&self) -> Option<String> {
         self.get("interface_size")
     }
 
+    #[cfg(not(target_os = "android"))]
     pub fn set_interface_size(&mut self, size: &str) {
         self.set("interface_size", Some(size));
     }

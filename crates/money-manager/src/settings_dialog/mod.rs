@@ -21,7 +21,9 @@ use gpui_kit::prelude::*;
 use gpui_kit::{App, AppContext, ClipboardItem, Context, Entity, SharedString, Window, rems};
 use money_core::remote::RemoteConfig;
 
-use crate::appearance::{self, ColorChoice, InterfaceSize, SEEDS, ThemeChoice};
+use crate::appearance::{self, ColorChoice, SEEDS, ThemeChoice};
+#[cfg(not(target_os = "android"))]
+use crate::appearance::InterfaceSize;
 use crate::book::Book;
 use crate::onboarding::{RemoteFields, Tab, describe_remote};
 use crate::settings::Settings;
@@ -260,6 +262,7 @@ impl SettingsForm {
 
     fn render_appearance(&self, cx: &mut Context<Self>) -> Fields {
         let current = appearance::theme_choice(cx);
+        #[cfg(not(target_os = "android"))]
         let size = appearance::interface_size(cx);
         let themes = ThemeChoice::ALL
             .iter()
@@ -272,6 +275,7 @@ impl SettingsForm {
                     appearance::set_theme_choice(*choice, window, cx);
                 }
             });
+        #[cfg(not(target_os = "android"))]
         let sizes = InterfaceSize::ALL
             .iter()
             .fold(
@@ -286,7 +290,7 @@ impl SettingsForm {
                     appearance::set_interface_size(*size, cx);
                 }
             });
-        Fields::new()
+        let fields = Fields::new()
             .child(Text::title("Appearance"))
             .child(
                 Setting::new("Theme")
@@ -298,12 +302,16 @@ impl SettingsForm {
                     .detail("System follows the desktop's accent color")
                     .below(color_choices(appearance::color_choice(cx))),
             )
-            .children(self.themes.render(cx))
-            .child(
-                Setting::new("Size")
-                    .detail("Text, controls and charts together")
-                    .control(sizes),
-            )
+            .children(self.themes.render(cx));
+        // A phone has its own font size setting; the application does not put
+        // a second one beside it.
+        #[cfg(not(target_os = "android"))]
+        let fields = fields.child(
+            Setting::new("Size")
+                .detail("Text, controls and charts together")
+                .control(sizes),
+        );
+        fields
     }
 
     /// Where the ledger syncs now, and whether the form holds a change of
