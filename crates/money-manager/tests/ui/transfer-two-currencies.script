@@ -1,0 +1,28 @@
+# mode: demo
+# size: 1240x800
+#
+# Accounts in different currencies keep two amounts: what left one is not what
+# arrived in the other, and the rate between them is what the two imply.
+wait:2500
+expect:accounts=2
+click:850,58
+wait:700
+click:860,158
+wait:900
+expect:dialog=open
+type:100
+click:620,365
+type:9200
+wait:300
+# The rate line has grown the form: the button sits lower than before it.
+click:725,571
+wait:900
+expect:dialog=closed
+expect:balance=1 054 137.45 ₽
+click:850,58
+wait:700
+click:920,92
+wait:700
+expect:account=Savings
+expect:balance=10 916.50 $
+quit

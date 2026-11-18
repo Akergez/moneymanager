@@ -75,11 +75,13 @@ pub fn ledger_for(
         .collect();
 
     for tr in transfers {
-        let rate = format_rate(
-            tr.rate(),
+        let (from_currency, to_currency) = (
             currency_of(accounts, &tr.from_account_id),
             currency_of(accounts, &tr.to_account_id),
         );
+        // Within one currency there is no rate worth writing down.
+        let rate = (from_currency != to_currency)
+            .then(|| format_rate(tr.rate(), from_currency, to_currency));
         if tr.from_account_id == account.id {
             // Outbound leg: this account pays out `amount_from`.
             let counterparty = account_name(accounts, &tr.to_account_id);
@@ -87,7 +89,12 @@ pub fn ledger_for(
                 id: tr.id.clone(),
                 category_id: TRANSFER_CATEGORY_ID.to_vec(),
                 amount: tr.amount_from,
-                comment: Some(leg_comment("→", counterparty, &rate, tr.comment.as_deref())),
+                comment: Some(leg_comment(
+                    "→",
+                    counterparty,
+                    rate.as_deref(),
+                    tr.comment.as_deref(),
+                )),
                 date: tr.date,
                 account_id: account.id.clone(),
                 transfer: Some(TransferLeg {
@@ -102,7 +109,12 @@ pub fn ledger_for(
                 id: tr.id.clone(),
                 category_id: TRANSFER_CATEGORY_ID.to_vec(),
                 amount: tr.amount_to,
-                comment: Some(leg_comment("←", counterparty, &rate, tr.comment.as_deref())),
+                comment: Some(leg_comment(
+                    "←",
+                    counterparty,
+                    rate.as_deref(),
+                    tr.comment.as_deref(),
+                )),
                 date: tr.date,
                 account_id: account.id.clone(),
                 transfer: Some(TransferLeg {
@@ -198,10 +210,13 @@ pub fn format_rate_both(rate: f64, from_currency: &str, to_currency: &str) -> St
 }
 
 /// Comment shown on a transfer leg: "→ Card USD (1 RUB = 0.0108 USD) · note".
-fn leg_comment(arrow: &str, counterparty: &str, rate: &str, note: Option<&str>) -> String {
-    match note {
-        Some(n) => format!("{arrow} {counterparty} ({rate}) · {n}"),
-        None => format!("{arrow} {counterparty} ({rate})"),
+/// A transfer within one currency has no rate, so the brackets are left out.
+fn leg_comment(arrow: &str, counterparty: &str, rate: Option<&str>, note: Option<&str>) -> String {
+    match (rate, note) {
+        (Some(rate), Some(n)) => format!("{arrow} {counterparty} ({rate}) · {n}"),
+        (Some(rate), None) => format!("{arrow} {counterparty} ({rate})"),
+        (None, Some(n)) => format!("{arrow} {counterparty} · {n}"),
+        (None, None) => format!("{arrow} {counterparty}"),
     }
 }
 
@@ -377,6 +392,27 @@ mod tests {
                 total_out: 0.0
             }
         );
+    }
+
+    #[test]
+    fn a_transfer_within_one_currency_says_no_rate() {
+        let (a1, a2) = (id(1), id(2));
+        let mut tr = transfer(&a1, &a2, 250.0, 250.0);
+        tr.comment = Some("savings".into());
+        let accounts = vec![
+            account(a1.clone(), "Wallet", "RUB", 0.0),
+            account(a2.clone(), "Cash", "RUB", 0.0),
+        ];
+
+        let l1 = ledger_for(&accounts[0], &accounts, &[], &[], &[tr.clone()]);
+        assert_eq!(l1.expenses[0].comment.as_deref(), Some("→ Cash · savings"));
+        let l2 = ledger_for(&accounts[1], &accounts, &[], &[], &[tr]);
+        assert_eq!(l2.top_ups[0].comment.as_deref(), Some("← Wallet · savings"));
+
+        // Without a note the counterparty stands alone.
+        let bare = transfer(&a1, &a2, 250.0, 250.0);
+        let l1 = ledger_for(&accounts[0], &accounts, &[], &[], &[bare]);
+        assert_eq!(l1.expenses[0].comment.as_deref(), Some("→ Cash"));
     }
 
     #[test]

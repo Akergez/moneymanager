@@ -1,8 +1,9 @@
 //! The transfer dialog: what left one account and what arrived in another.
 //!
-//! The two amounts are entered separately because the accounts may be in
-//! different currencies; the rate is whatever the two imply, and is shown
-//! back as they are typed so a slipped digit is seen before it is saved.
+//! When the accounts are in different currencies the two amounts are entered
+//! separately; the rate is whatever the two imply, and is shown back as they
+//! are typed so a slipped digit is seen before it is saved. Accounts in one
+//! currency move the same amount, so there is one field for it.
 
 use gpui_adaptive::{
     Choice, ChoiceEvent, ChoiceOption, ChoiceState, DateField, DateFieldState, FieldEvent, Fields,
@@ -108,8 +109,29 @@ impl TransferForm {
         (currency(&self.from), currency(&self.to))
     }
 
+    /// The two chosen accounts move the same money, so one amount is enough.
+    fn one_amount(&self, cx: &App) -> bool {
+        let (from, to) = self.currencies(cx);
+        !from.is_empty() && from == to
+    }
+
+    /// The field one amount is typed in: the sent one, unless it is empty and
+    /// the received one is not — the accounts were switched to one currency
+    /// after that was typed.
+    fn amount_field(&self, cx: &App) -> &Entity<TextFieldState> {
+        let empty = |field: &Entity<TextFieldState>| field.read(cx).value(cx).trim().is_empty();
+        if empty(&self.amount_from) && !empty(&self.amount_to) {
+            &self.amount_to
+        } else {
+            &self.amount_from
+        }
+    }
+
     /// "1 USD = 92.35 RUB · 1 RUB = 0.0108 USD", once both amounts are in.
     fn rate(&self, cx: &App) -> Option<String> {
+        if self.one_amount(cx) {
+            return None;
+        }
         let sent = parse_amount(&self.amount_from.read(cx).value(cx)).filter(|v| *v > 0.0)?;
         let received = parse_amount(&self.amount_to.read(cx).value(cx)).filter(|v| *v > 0.0)?;
         let (from, to) = self.currencies(cx);
@@ -121,11 +143,28 @@ impl TransferForm {
         else {
             return Err("Choose both accounts.".to_string());
         };
+        if self.one_amount(cx) {
+            let amount = parse_amount(&self.amount_field(cx).read(cx).value(cx))
+                .filter(|value| *value > 0.0)
+                .ok_or_else(|| "The amount must be a number greater than 0.".to_string())?;
+            return self.draft(from, to, amount, amount, cx);
+        }
         let amount = |input: &Entity<TextFieldState>| {
             parse_amount(&input.read(cx).value(cx))
                 .ok_or_else(|| "Both amounts must be numbers greater than 0.".to_string())
         };
         let (amount_from, amount_to) = (amount(&self.amount_from)?, amount(&self.amount_to)?);
+        self.draft(from, to, amount_from, amount_to, cx)
+    }
+
+    fn draft(
+        &self,
+        from: Vec<u8>,
+        to: Vec<u8>,
+        amount_from: f64,
+        amount_to: f64,
+        cx: &App,
+    ) -> Result<TransferDraft, String> {
         let date = self
             .date
             .read(cx)
@@ -166,16 +205,32 @@ fn chosen_account(choice: &Entity<ChoiceState>, cx: &App) -> Option<Vec<u8>> {
 impl Render for TransferForm {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let (from_currency, to_currency) = self.currencies(cx);
+        let one_amount = self.one_amount(cx);
         let rate = self.rate(cx);
         let received = TextField::new(&self.amount_to).label(format!("Amount received, {to_currency}"));
-        Fields::new()
-            .child(Choice::new(&self.from).label("From").id("transfer-from"))
-            .child(TextField::new(&self.amount_from).label(format!("Amount sent, {from_currency}")))
-            .child(Choice::new(&self.to).label("To").id("transfer-to"))
-            .child(match rate {
+        let fields = Fields::new()
+            .child(Choice::new(&self.from).label("From").id("transfer-from"));
+        // One currency changes hands as it is: the same amount leaves and
+        // arrives, so there is nothing else to type.
+        let fields = if one_amount {
+            fields.child(
+                TextField::new(self.amount_field(cx)).label(format!("Amount, {from_currency}")),
+            )
+        } else {
+            fields.child(
+                TextField::new(&self.amount_from).label(format!("Amount sent, {from_currency}")),
+            )
+        };
+        let fields = fields.child(Choice::new(&self.to).label("To").id("transfer-to"));
+        let fields = if one_amount {
+            fields
+        } else {
+            fields.child(match rate {
                 Some(rate) => received.help(rate),
                 None => received,
             })
+        };
+        fields
             .child(DateField::new(&self.date).label("Date"))
             .child(TextField::new(&self.comment).label("Comment"))
             .children(
@@ -195,7 +250,7 @@ pub fn open_transfer_dialog(book: &Entity<Book>, window: &mut Window, cx: &mut A
         return super::open_account_dialog(book, None, window, cx);
     }
     let form = cx.new(|cx| TransferForm::new(book.clone(), window, cx));
-    let amount = form.read(cx).amount_from.focus_handle(cx);
+    let amount = form.read(cx).amount_field(cx).focus_handle(cx);
     let saving = form.clone();
     Form::new("New transfer", form)
         .commit("Transfer", move |_, cx| saving.update(cx, |form, cx| form.submit(cx)))

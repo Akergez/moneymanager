@@ -1,0 +1,47 @@
+# mode: fresh
+# size: 1240x800
+#
+# Accounts in one currency move the same amount, so the transfer form has one
+# amount field: it is typed once and both legs carry it. (With two fields the
+# save would refuse an empty second one and the dialog would stay open.)
+wait:2000
+click:620,253
+wait:1500
+expect:stage=workspace
+# A second account, in the currency the first one already has.
+click:850,58
+wait:700
+click:860,158
+wait:900
+expect:dialog=open
+click:620,167
+key:ctrl-a
+type:Wallet
+click:620,233
+key:ctrl-a
+type:RUB
+click:725,399
+wait:900
+expect:dialog=closed
+expect:accounts=2
+expect:account=Wallet
+# "New transfer…", out of Wallet and into the account started with.
+click:850,58
+wait:700
+click:860,158
+wait:900
+expect:dialog=open
+type:250
+wait:300
+click:725,479
+wait:900
+expect:dialog=closed
+expect:balance=-250.00 ₽
+# The other side received the same amount.
+click:850,58
+wait:700
+click:920,119
+wait:700
+expect:account=Основной
+expect:balance=250.00 ₽
+quit
