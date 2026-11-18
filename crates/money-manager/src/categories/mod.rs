@@ -22,19 +22,61 @@ mod delete_dialog;
 
 use std::rc::Rc;
 
+use gpui_adaptive::prim::{key_pressable, testable};
 use gpui_adaptive::{
-    ActiveColors as _, Collection, Command, Empty, Icon, ListRow, SectionHeader, Sizable as _,
-    Stack, TileSize,
+    ActiveColors as _, ActiveScale as _, Collection, Command, Empty, Env, Icon, ListRow,
+    SectionHeader, Sizable as _, Stack, Text, TileSize, WidthClass,
 };
 use gpui_kit::prelude::*;
-use gpui_kit::{App, Context, Entity, SharedString, Subscription, Window, div};
+use gpui_kit::{
+    AnyElement, App, Context, Div, Entity, SharedString, Subscription, Window, div, rems,
+};
 use money_core::store::hex_encode;
 
 pub use category_dialog::{Kind, open_category_dialog, open_tag_dialog};
 pub use delete_dialog::open_delete_dialog;
 
 use crate::book::{Book, CategoryInfo, CategoryLook, Filter, Mode};
+use crate::settings::Settings;
 use crate::ui::{self, Lucide};
+
+/// How the Categories screen is drawn: the settings choose it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum View {
+    /// Rows, each its tile, its name and how many records it has.
+    List,
+    /// A grid of tiles with their names under them, as a record's form
+    /// offers the category it is in.
+    Icons,
+}
+
+impl View {
+    pub const ALL: [View; 2] = [View::List, View::Icons];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            View::List => "List",
+            View::Icons => "Icons",
+        }
+    }
+
+    /// What `settings.json` keeps.
+    pub fn stored(self) -> &'static str {
+        match self {
+            View::List => "list",
+            View::Icons => "icons",
+        }
+    }
+
+    /// The view chosen in the settings; a list, as the screen has always
+    /// been, when none is.
+    pub fn current(cx: &App) -> Self {
+        match Settings::global(cx).category_view().as_deref() {
+            Some("icons") => View::Icons,
+            _ => View::List,
+        }
+    }
+}
 
 /// Opens the page of the records a filter admits.
 pub type OpenRecords = Rc<dyn Fn(Mode, Filter, &mut Window, &mut App)>;
@@ -63,7 +105,10 @@ impl CategoriesView {
         open_records: OpenRecords,
         cx: &mut Context<Self>,
     ) -> Self {
-        let subscriptions = vec![cx.observe(&book, |_, _, cx| cx.notify())];
+        let subscriptions = vec![
+            cx.observe(&book, |_, _, cx| cx.notify()),
+            cx.observe_global::<Settings>(|_, cx| cx.notify()),
+        ];
         CategoriesView {
             book,
             mode,
@@ -134,10 +179,60 @@ impl CategoriesView {
         .muted(item.hidden)
         .on_activate(move |window, cx| open(mode, filter.clone(), window, cx))
     }
+
+    /// One category as a grid cell: its tile over its name, as the record
+    /// form offers it. A press opens its records, like a row.
+    fn render_icon(
+        &self,
+        item: CategoryInfo,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let (muted, hidden) = (cx.colors().muted, item.hidden);
+        let look = CategoryLook::of(&item.style, &item.id, &item.name, muted);
+        let (open, mode) = (self.open_records.clone(), self.mode);
+        let filter = match self.kind {
+            Kind::Category => Filter::Category(item.id.clone()),
+            Kind::Tag => Filter::Tag(item.id.clone()),
+        };
+        let scale = cx.scale();
+        let id = SharedString::from(format!("{}-{}", self.kind.noun(), hex_encode(&item.id)));
+        testable(
+            key_pressable(id, window, cx)
+                .flex_col()
+                .justify_center()
+                .gap_1()
+                .h(rems(5.))
+                .px_0p5()
+                .rounded(scale.radius_container)
+                .when(hidden, |cell| cell.opacity(0.55))
+                .child(ui::category_tile(look, TileSize::Medium))
+                .child(Text::small(item.name.clone()).clamp(2).center())
+                .on_click(
+                    cx.listener(move |_, _, window, cx| open(mode, filter.clone(), window, cx)),
+                ),
+        )
+    }
+
+    /// The categories as the record form offers them: a grid of tiles with
+    /// their names under them, three to a row on a phone.
+    fn render_icon_grid(
+        &self,
+        items: Vec<CategoryInfo>,
+        columns: u16,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        div().grid().grid_cols(columns).gap_1().children(
+            items
+                .into_iter()
+                .map(|item| self.render_icon(item, window, cx)),
+        )
+    }
 }
 
 impl Render for CategoriesView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let items = self.items(cx);
         let (of, kind) = (self.of(), self.kind);
         if items.is_empty() {
@@ -166,9 +261,33 @@ impl Render for CategoriesView {
                 )
                 .into_any_element();
         }
-        let entries = self.book.read(cx).entries(self.mode);
         let (hidden, shown): (Vec<CategoryInfo>, Vec<CategoryInfo>) =
             items.into_iter().partition(|item| item.hidden);
+        // The Tags screen keeps its rows: only the categories were asked
+        // for as icons.
+        if kind == Kind::Category && View::current(cx) == View::Icons {
+            let columns = match Env::of(window, cx).width() {
+                WidthClass::Compact => 3,
+                WidthClass::Medium => 4,
+                WidthClass::Expanded => 6,
+            };
+            let scale = cx.scale();
+            let mut grid = div()
+                .flex()
+                .flex_col()
+                .w_full()
+                .px(scale.space_m)
+                .pt(scale.space_s)
+                .pb(scale.space_m)
+                .child(self.render_icon_grid(shown, columns, window, cx));
+            if !hidden.is_empty() {
+                grid = grid
+                    .child(SectionHeader::new("Hidden"))
+                    .child(self.render_icon_grid(hidden, columns, window, cx));
+            }
+            return grid.into_any_element();
+        }
+        let entries = self.book.read(cx).entries(self.mode);
         let rows = |items: Vec<CategoryInfo>| -> Vec<ListRow> {
             items
                 .into_iter()

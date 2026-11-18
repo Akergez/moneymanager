@@ -33,7 +33,9 @@ storage on a server or in a bucket is not changed, so connect to a new one.
   and date (and the comment where there is room). One switch turns the screen
   from expenses to income. Sortable by column; a row opens the record.
 - **Categories** — expense and income categories, each with a colour and an
-  icon. A category's row opens the page of its records, where it is edited
+  icon, drawn as a list (the row says how many records it has) or, chosen in
+  **Settings → Appearance → Categories**, as a grid of icons with their names
+  under them. A category opens the page of its records, where it is edited
   and where **New expense…** makes a record in it. From that page a category
   is **hidden** (listed under Hidden, its records still in it, but not
   offered for a new record; **Show** brings it back) or **deleted**: its

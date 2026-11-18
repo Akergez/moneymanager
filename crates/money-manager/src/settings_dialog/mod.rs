@@ -25,6 +25,7 @@ use crate::appearance::{self, ColorChoice, SEEDS, ThemeChoice};
 #[cfg(not(target_os = "android"))]
 use crate::appearance::InterfaceSize;
 use crate::book::Book;
+use crate::categories::View;
 use crate::onboarding::{RemoteFields, Tab, describe_remote};
 use crate::settings::Settings;
 
@@ -290,6 +291,21 @@ impl SettingsForm {
                     appearance::set_interface_size(*size, cx);
                 }
             });
+        let view = View::current(cx);
+        let views = View::ALL
+            .iter()
+            .fold(
+                Segments::new("category-view", view.label()),
+                |segments, view| segments.segment(view.stored(), view.label()),
+            )
+            .on_change(|key, _, cx| {
+                if let Some(view) = View::ALL
+                    .into_iter()
+                    .find(|view| view.stored() == key.as_ref())
+                {
+                    Settings::update(cx, |settings| settings.set_category_view(view.stored()));
+                }
+            });
         let fields = Fields::new()
             .child(Text::title("Appearance"))
             .child(
@@ -301,6 +317,11 @@ impl SettingsForm {
                 Setting::new("Color")
                     .detail("System follows the desktop's accent color")
                     .below(color_choices(appearance::color_choice(cx))),
+            )
+            .child(
+                Setting::new("Categories")
+                    .detail("On the Categories screen: rows, or icons with their names under them")
+                    .control(views),
             )
             .children(self.themes.render(cx));
         // A phone has its own font size setting; the application does not put

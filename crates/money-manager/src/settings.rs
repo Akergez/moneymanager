@@ -221,6 +221,16 @@ impl Settings {
         self.set("interface_size", Some(size));
     }
 
+    /// How the Categories screen is drawn: `list`, or `icons` for a grid of
+    /// tiles with their names under them.
+    pub fn category_view(&self) -> Option<String> {
+        self.get("category_view")
+    }
+
+    pub fn set_category_view(&mut self, view: &str) {
+        self.set("category_view", Some(view));
+    }
+
     /// Whether the charts leave transfer legs out.
     pub fn hides_transfers(&self) -> bool {
         self.get("hide_transfers").unwrap_or(false)
@@ -337,12 +347,14 @@ mod tests {
         let mut settings = Settings::load(file.clone());
         settings.set_default_currency("EUR");
         settings.set_last_account("00ff");
+        settings.set_category_view("icons");
         settings.save().unwrap();
 
         let reloaded = Settings::load(file);
         assert_eq!(reloaded.source(), None);
         assert_eq!(reloaded.default_currency(), "EUR");
         assert_eq!(reloaded.last_account().as_deref(), Some("00ff"));
+        assert_eq!(reloaded.category_view().as_deref(), Some("icons"));
         assert!(!reloaded.has_legacy_config());
     }
 

@@ -1,0 +1,27 @@
+# mode: demo
+# size: 1240x800
+#
+# Settings chooses whether the Categories screen is a list or a grid of
+# icons with their names under them. The grid is chosen here; a category in
+# it opens the page of its records, as a row does.
+wait:2500
+key:ctrl-,
+wait:900
+expect:dialog=open
+# "Icons", beside "List" in Appearance.
+click:967,342
+wait:500
+key:escape
+wait:700
+expect:dialog=closed
+key:ctrl-2
+wait:800
+expect:screen=categories
+shot:category-icons
+# "Food & dining", the second of the six.
+click:497,195
+wait:800
+expect:page=records
+expect:page-records=16
+shot:category-icons-records
+quit

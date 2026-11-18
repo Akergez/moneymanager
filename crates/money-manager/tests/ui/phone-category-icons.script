@@ -1,0 +1,30 @@
+# mode: demo
+# size: 400x800
+# input: touch
+#
+# On a phone the Categories screen is a grid of icons three to a row when
+# Settings says so, and a press on one opens its records.
+wait:2500
+key:ctrl-,
+wait:1000
+expect:sheet=open
+# "Icons", in the Categories row of Appearance.
+click:268,604
+wait:400
+key:escape
+wait:900
+expect:sheet=closed
+click:150,760
+wait:800
+expect:screen=categories
+shot:phone-category-icons
+# "Food & dining", the second of the six.
+click:200,245
+wait:900
+expect:page=records
+expect:page-records=16
+shot:phone-category-icons-records
+key:escape
+wait:800
+expect:screen=categories
+quit
