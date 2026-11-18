@@ -27,9 +27,17 @@ impl Workspace {
                 let balance = format_money(book.summary(&account.id).balance, &account.currency);
                 format!("{} · {balance}", account.name)
             }
-            None => "No account".to_string(),
+            None => "All accounts".to_string(),
         };
         let current = book.current_account().cloned();
+        let all_selected = book.shows_all_accounts();
+        let all_handle = self.book.clone();
+        let all = Command::new("all-accounts", "All accounts")
+            .icon(Lucide::Layers)
+            .checked(all_selected)
+            .on_trigger(move |_, cx| {
+                all_handle.update(cx, |book, cx| book.select_account(None, cx))
+            });
         let accounts: Vec<Command> = book
             .visible_accounts()
             .map(|account| {
@@ -41,13 +49,16 @@ impl Workspace {
                     format!("{} · {balance}", account.name),
                 )
                 .checked(chosen)
-                .on_trigger(move |_, cx| handle.update(cx, |book, cx| book.select_account(&id, cx)))
+                .on_trigger(move |_, cx| {
+                    handle.update(cx, |book, cx| book.select_account(Some(&id), cx))
+                })
             })
             .collect();
         let (add, edit, manage) = (self.book.clone(), self.book.clone(), self.book.clone());
         Menu::new(Command::new("account", label).icon(Lucide::Wallet))
             .choice()
             .title("Accounts")
+            .command(all)
             .commands(accounts)
             .separator()
             .command(

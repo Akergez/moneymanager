@@ -108,9 +108,10 @@ pub struct Book {
     /// The tags on each record, by record id; each in the order of `tags`.
     links: HashMap<TagKind, HashMap<Vec<u8>, Vec<Vec<u8>>>>,
     summaries: HashMap<Vec<u8>, AccountSummary>,
-    /// The account every list and chart is about.
-    account: Vec<u8>,
-    /// That account's records, transfer legs included.
+    /// The account every list and chart is about; none is all of them.
+    account: Option<Vec<u8>>,
+    /// That account's records, transfer legs included; every visible
+    /// account's when none is chosen.
     ledger: AccountLedger,
     sync: SyncState,
 }
@@ -175,10 +176,11 @@ impl Book {
     }
 
     /// Opens the ledger in `dir`, creating an empty one if nothing is there.
-    /// The synced main account takes precedence over legacy selection memory.
+    /// Starts on all accounts, so a ledger about to be filled by its first
+    /// sync needs no account chosen before it.
     /// No account is made: a ledger about to be filled by its first sync must
     /// not get a fresh default account that would outrank the synced one.
-    pub fn open(dir: &Path, source: u64, last_account: Option<String>) -> Result<Self, String> {
+    pub fn open(dir: &Path, source: u64) -> Result<Self, String> {
         let store = Store::open(dir, source)?;
         let mut book = Book {
             store: Some(store),
@@ -192,9 +194,7 @@ impl Book {
             tags: HashMap::new(),
             links: HashMap::new(),
             summaries: HashMap::new(),
-            account: last_account
-                .map(|hex| money_core::store::hex_decode(&hex))
-                .unwrap_or_default(),
+            account: None,
             ledger: AccountLedger {
                 expenses: Vec::new(),
                 top_ups: Vec::new(),
@@ -202,10 +202,6 @@ impl Book {
             sync: SyncState::Idle,
         };
         book.reload()?;
-        if let Some(main) = book.account_preferences.main_id() {
-            book.account = main.to_vec();
-            book.reload()?;
-        }
         Ok(book)
     }
 
@@ -285,13 +281,11 @@ impl Book {
             &self.transfers,
         );
 
-        // A hidden or missing selection falls back to the resolved main account.
-        if !self.visible_accounts().any(|a| a.id == self.account) {
-            self.account = self
-                .account_preferences
-                .main_id()
-                .unwrap_or_default()
-                .to_vec();
+        // A hidden or missing selection falls back to all accounts.
+        if let Some(account) = &self.account
+            && !self.visible_accounts().any(|a| &a.id == account)
+        {
+            self.account = None;
         }
         self.ledger = match self.current_account() {
             Some(account) => ledger::ledger_for(
@@ -301,10 +295,26 @@ impl Book {
                 &self.top_ups,
                 &self.transfers,
             ),
-            None => AccountLedger {
-                expenses: Vec::new(),
-                top_ups: Vec::new(),
-            },
+            // Every visible account, one after another: the lists and the
+            // charts then read across all of them.
+            None => {
+                let mut ledger = AccountLedger {
+                    expenses: Vec::new(),
+                    top_ups: Vec::new(),
+                };
+                for account in self.visible_accounts() {
+                    let one = ledger::ledger_for(
+                        account,
+                        &self.accounts,
+                        &self.expenses,
+                        &self.top_ups,
+                        &self.transfers,
+                    );
+                    ledger.expenses.extend(one.expenses);
+                    ledger.top_ups.extend(one.top_ups);
+                }
+                ledger
+            }
         };
         Ok(())
     }
@@ -362,12 +372,63 @@ impl Book {
     }
 
     pub fn current_account(&self) -> Option<&Account> {
-        self.accounts.iter().find(|a| a.id == self.account)
+        let id = self.account.as_ref()?;
+        self.accounts.iter().find(|a| &a.id == id)
     }
 
-    /// The currency amounts on screen are in.
+    /// Whether every screen is about all visible accounts rather than one.
+    pub fn shows_all_accounts(&self) -> bool {
+        self.account.is_none()
+    }
+
+    /// The account a new record or transfer starts on: the one the screens
+    /// are about, or the main account when they are about all of them.
+    pub fn entry_account(&self) -> Option<&Account> {
+        self.current_account().or_else(|| self.main_account())
+    }
+
+    pub fn account(&self, id: &[u8]) -> Option<&Account> {
+        self.accounts.iter().find(|a| a.id == id)
+    }
+
+    /// The currency amounts on a record of `account_id` are in.
+    pub fn account_currency(&self, account_id: &[u8]) -> &str {
+        self.account(account_id).map_or("", |a| a.currency.as_str())
+    }
+
+    /// A record's account name; an account the ledger no longer has has none.
+    pub fn account_name(&self, account_id: &[u8]) -> SharedString {
+        self.account(account_id)
+            .map(|a| a.name.clone())
+            .unwrap_or_default()
+            .into()
+    }
+
+    /// The currencies of the visible accounts, each once, for a choice of
+    /// which one totals are in.
+    pub fn currencies(&self) -> Vec<&str> {
+        let mut currencies: Vec<&str> = Vec::new();
+        for currency in self.visible_accounts().map(|a| a.currency.as_str()) {
+            if !currencies.contains(&currency) {
+                currencies.push(currency);
+            }
+        }
+        currencies.sort_unstable();
+        currencies
+    }
+
+    /// The currency amounts on screen are in: the chosen account's, or the
+    /// one currency every visible account keeps its money in. With several
+    /// of them and no account chosen there is no single one, and amounts
+    /// are written with their own.
     pub fn currency(&self) -> &str {
-        self.current_account().map_or("", |a| a.currency.as_str())
+        if let Some(account) = self.current_account() {
+            return account.currency.as_str();
+        }
+        match self.currencies().as_slice() {
+            [only] => only,
+            _ => "",
+        }
     }
 
     pub fn summary(&self, account_id: &[u8]) -> AccountSummary {
@@ -464,22 +525,27 @@ impl Book {
 
     // ------------------------------------------------------------ writing
 
-    pub fn select_account(&mut self, account_id: &[u8], cx: &mut Context<Self>) {
-        if self.account == account_id || !self.visible_accounts().any(|a| a.id == account_id) {
+    /// Makes every screen about one account, or about all of them with
+    /// `None`.
+    pub fn select_account(&mut self, account_id: Option<&[u8]>, cx: &mut Context<Self>) {
+        if self.account.as_deref() == account_id {
             return;
         }
-        self.account = account_id.to_vec();
-        let hex = hex_encode(account_id);
-        Settings::update(cx, |settings| settings.set_last_account(&hex));
+        if let Some(id) = account_id
+            && !self.visible_accounts().any(|a| a.id == id)
+        {
+            return;
+        }
+        self.account = account_id.map(<[u8]>::to_vec);
         if let Err(error) = self.reload() {
             tracing::error!(%error, "could not reload the ledger");
         }
         cx.notify();
     }
 
-    /// Records an expense or an income on the current account. With an `id`
-    /// it rewrites that record whole — every field, the account included, as
-    /// a CRDT update of a record has to.
+    /// Records an expense or an income on the account the form chose. With an
+    /// `id` it rewrites that record whole — every field, the account included,
+    /// as a CRDT update of a record has to.
     pub fn save_entry(
         &mut self,
         mode: Mode,
@@ -492,13 +558,17 @@ impl Book {
         if !(amount.is_finite() && amount > 0.0) {
             return Err("Amount must be greater than 0.".to_string());
         }
-        let account = self.account.clone();
+        if draft.account_id.is_empty() || self.account(&draft.account_id).is_none() {
+            return Err("Choose an account.".to_string());
+        }
+        let account = draft.account_id.clone();
         let tags = draft.tags.clone();
         // An edit that only changed the tags leaves the record as it was.
         let record_unchanged = id.is_some_and(|id| {
             self.entries(mode).iter().any(|entry| {
                 entry.id == id
                     && entry.category_id == draft.category_id
+                    && entry.account_id == draft.account_id
                     && entry.amount == amount
                     && entry.comment == draft.comment
                     && entry.date == date
@@ -918,9 +988,10 @@ mod tests {
     #[test]
     fn a_fresh_ledger_has_no_account_until_one_is_asked_for() {
         let dir = scratch("fresh");
-        let mut book = Book::open(&dir, 7, None).unwrap();
+        let mut book = Book::open(&dir, 7).unwrap();
         assert!(book.accounts().is_empty());
-        assert!(book.current_account().is_none());
+        assert!(book.shows_all_accounts());
+        assert!(book.entry_account().is_none());
 
         book.ensure_default_account("EUR").unwrap();
         assert_eq!(book.accounts().len(), 1);
@@ -933,39 +1004,68 @@ mod tests {
     }
 
     #[test]
-    fn the_main_account_is_opened_instead_of_the_last_viewed_account() {
-        let dir = scratch("last-account");
-        let other = {
+    fn all_accounts_is_the_default_and_the_main_account_is_where_a_record_goes() {
+        let dir = scratch("all-accounts");
+        let (first, second) = {
             let mut store = Store::open(&dir, 7).unwrap();
+            let first = money_core::store::DEFAULT_ACCOUNT_ID;
             Account::ensure_default(&mut store, "RUB").unwrap();
-            Account::create(&mut store, "Savings", "USD", 10.0)
+            let second = Account::create(&mut store, "Savings", "USD", 10.0)
                 .unwrap()
-                .id
+                .id;
+            let food = Category::create(&mut store, "Food").unwrap();
+            let day = NaiveDate::from_ymd_opt(2026, 11, 18).unwrap();
+            Expense::create(&mut store, &food.id, 5.0, None, day, &first).unwrap();
+            Expense::create(&mut store, &food.id, 7.0, None, day, &second).unwrap();
+            money_core::account_preferences::AccountPreferences::set_main(&mut store, &second)
+                .unwrap();
+            (first, second)
         };
-        let mut store = Store::open(&dir, 7).unwrap();
-        money_core::account_preferences::AccountPreferences::set_main(&mut store, &other).unwrap();
-        let book = Book::open(
-            &dir,
-            7,
-            Some(hex_encode(&money_core::store::DEFAULT_ACCOUNT_ID)),
-        )
-        .unwrap();
-        assert_eq!(book.current_account().unwrap().name, "Savings");
+        let mut book = Book::open(&dir, 7).unwrap();
 
-        // A stale local setting cannot override the synced main account.
-        let book = Book::open(&dir, 7, Some("abcd".to_string())).unwrap();
-        assert_eq!(book.current_account().unwrap().id, other);
+        // Every screen starts on all accounts: both records, neither
+        // currency claimed as the one on screen.
+        assert!(book.shows_all_accounts());
+        assert!(book.current_account().is_none());
+        assert_eq!(book.currency(), "");
+        assert_eq!(book.entries(Mode::Expense).len(), 2);
+        assert!(
+            book.entries(Mode::Expense)
+                .iter()
+                .any(|entry| entry.account_id == first)
+        );
+        assert!(
+            book.entries(Mode::Expense)
+                .iter()
+                .any(|entry| entry.account_id == second)
+        );
+        // A new record goes on the main account when no account is chosen.
+        assert_eq!(book.entry_account().unwrap().id, second);
+
+        // Choosing one narrows every list to it, and to its currency.
+        book.account = Some(first.to_vec());
+        book.reload().unwrap();
+        assert_eq!(book.currency(), "RUB");
+        let entries = book.entries(Mode::Expense);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].account_id, first);
+        assert_eq!(book.account_name(&first), SharedString::from("Основной"));
+
+        // Back to all of them.
+        book.account = None;
+        book.reload().unwrap();
+        assert_eq!(book.entries(Mode::Expense).len(), 2);
         std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
-    fn hiding_the_selected_account_switches_to_the_main_without_changing_transfers() {
+    fn hiding_the_selected_account_falls_back_to_all_of_them() {
         let dir = scratch("hidden-account");
         let mut store = Store::open(&dir, 7).unwrap();
         Account::ensure_default(&mut store, "RUB").unwrap();
         let other = Account::create(&mut store, "Savings", "USD", 0.0).unwrap();
-        let mut book = Book::open(&dir, 7, None).unwrap();
-        book.account = other.id.clone();
+        let mut book = Book::open(&dir, 7).unwrap();
+        book.account = Some(other.id.clone());
         money_core::account_preferences::AccountPreferences::set_hidden(
             book.store.as_mut().unwrap(),
             &other.id,
@@ -973,23 +1073,22 @@ mod tests {
         )
         .unwrap();
         book.reload().unwrap();
-        assert_eq!(
-            book.current_account().unwrap().id,
-            money_core::store::DEFAULT_ACCOUNT_ID
-        );
+        assert!(book.shows_all_accounts());
+        assert!(book.current_account().is_none());
         assert_eq!(book.accounts().len(), 2);
         assert_eq!(book.visible_accounts().count(), 1);
+        assert_eq!(book.currency(), "RUB");
         std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn a_named_first_account_is_preserved_after_reopening() {
         let dir = scratch("named-account");
-        let mut book = Book::open(&dir, 7, None).unwrap();
+        let mut book = Book::open(&dir, 7).unwrap();
         book.create_first_account("Cash", "EUR").unwrap();
-        let mut book = Book::open(&dir, 8, None).unwrap();
+        let mut book = Book::open(&dir, 8).unwrap();
         book.ensure_default_account("USD").unwrap();
-        assert_eq!(book.current_account().unwrap().name, "Cash");
+        assert_eq!(book.entry_account().unwrap().name, "Cash");
         assert_eq!(book.currency(), "EUR");
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -1037,7 +1136,7 @@ mod tests {
                 .unwrap()
                 .id
         };
-        let book = Book::open(&dir, 7, None).unwrap();
+        let book = Book::open(&dir, 7).unwrap();
         let taxi = &book.categories(Mode::Expense)[0];
         assert_eq!(taxi.style.icon.as_deref(), Some("car"));
         assert_eq!(
@@ -1067,18 +1166,27 @@ mod tests {
         let a = Tag::create(&mut store, TagKind::Expense, "B-trip", &Default::default()).unwrap();
         let b = Tag::create(&mut store, TagKind::Expense, "A-work", &Default::default()).unwrap();
         drop(store);
-        let mut book = Book::open(&dir, 7, None).unwrap();
+        let mut book = Book::open(&dir, 7).unwrap();
         let tags = book.tags(Mode::Expense);
         assert_eq!(tags[0].name.as_ref(), "A-work");
         let store = book.store.as_mut().unwrap();
         let draft = EntryDraft {
             category_id: food.id.clone(),
+            account_id: money_core::store::DEFAULT_ACCOUNT_ID.to_vec(),
             amount: 5.0,
             comment: None,
             date: NaiveDate::from_ymd_opt(2026, 11, 7).unwrap(),
             tags: vec![a.id.clone(), b.id.clone()],
         };
-        let made = Expense::create(store, &food.id, 5.0, None, draft.date, &book.account).unwrap();
+        let made = Expense::create(
+            store,
+            &food.id,
+            5.0,
+            None,
+            draft.date,
+            &draft.account_id,
+        )
+        .unwrap();
         Tag::set_for_record(store, TagKind::Expense, &made.id, &draft.tags).unwrap();
         book.reload().unwrap();
         let entry = &book.entries(Mode::Expense)[0];
@@ -1112,7 +1220,7 @@ mod tests {
         )
         .unwrap();
         drop(store);
-        let mut book = Book::open(&dir, 7, None).unwrap();
+        let mut book = Book::open(&dir, 7).unwrap();
         let store = book.store.as_mut().unwrap();
         let style = CategoryStyle::default();
         // What the interface's commands write.

@@ -1,12 +1,14 @@
 //! The record form: making an expense or an income, changing one, and the
 //! way to delete one.
 //!
-//! A new record is an amount and a category: the amount has the focus as the
-//! form opens, the category starts on that of the latest record and the
-//! categories are a grid of their tiles to change it with, and Add saves
-//! (Enter in the amount too, the keyboard's own key on a phone). Its day
-//! starts on that of the latest record, today and yesterday a press away and
-//! any other typed or picked; the comment stays folded until asked for, so
+//! A new record is an amount and a category, and — while the screens show
+//! all accounts — an account too: the amount has the focus as the
+//! form opens, the account starts on the main one, the category on that of
+//! the latest record and the categories are a grid of their tiles to change
+//! it with, and Add saves (Enter in the amount too, the keyboard's own key on
+//! a phone). With one account on screen there is no account to choose: the
+//! record is on it. Its day starts on that of the latest record, today and
+//! yesterday a press away and any other typed or picked; the comment stays folded until asked for, so
 //! none of these costs a press when it is not wanted. Tags are chips at
 //! the categories, any number of them on, and one more makes a tag. It is a
 //! [`Form`]: a dialog for a pointer, a sheet over the keyboard for a finger.
@@ -20,9 +22,9 @@
 
 use gpui_adaptive::prim::{column, key_pressable, row, testable};
 use gpui_adaptive::{
-    ActiveColors as _, ActiveScale as _, Chips, Command, Confirm, DateField, DateFieldEvent,
-    DateFieldState, Env, FieldEvent, Fields, Form, Icon, Labelled, Note, Notice, Purpose, Segments,
-    Text, TextField, TextFieldState, TileSize, Tone,
+    ActiveColors as _, ActiveScale as _, Chips, Choice, ChoiceEvent, ChoiceOption, ChoiceState,
+    Command, Confirm, DateField, DateFieldEvent, DateFieldState, Env, FieldEvent, Fields, Form, Icon,
+    Labelled, Note, Notice, Purpose, Segments, Text, TextField, TextFieldState, TileSize, Tone,
 };
 use gpui_kit::prelude::*;
 use gpui_kit::{
@@ -42,6 +44,11 @@ struct EntryForm {
     categories: Vec<CategoryInfo>,
     /// The chosen category: for a new record, the one Enter saves in.
     category: Option<Vec<u8>>,
+    /// The account to choose, while the screens show all of them. With one
+    /// account on screen there is nothing to choose and this is `None`.
+    account: Option<Entity<ChoiceState>>,
+    /// The account the record is on when there is nothing to choose.
+    fixed_account: Option<Vec<u8>>,
     /// The tags of `mode`, by name.
     tags: Vec<CategoryInfo>,
     /// The ones the record is to carry.
@@ -127,8 +134,53 @@ impl EntryForm {
         let commenting = editing
             .as_ref()
             .is_some_and(|entry| entry.comment.is_some());
+        // The account the record is on: the one the screens are about, or a
+        // choice when they are about all of them. An edited record keeps its
+        // own account, hidden or not.
+        let (account, fixed_account) = {
+            let book = book.read(cx);
+            let fixed = book.current_account().map(|account| account.id.clone());
+            let editing_account = editing
+                .as_ref()
+                .map(|entry| entry.account_id.clone())
+                .filter(|id| !id.is_empty());
+            if fixed.is_some() {
+                (None, editing_account.or(fixed))
+            } else if book.visible_accounts().count() <= 1 {
+                // One account: nothing to choose.
+                let only = editing_account.or_else(|| {
+                    book.visible_accounts()
+                        .next()
+                        .map(|account| account.id.clone())
+                });
+                (None, only)
+            } else {
+                let chosen = editing_account
+                    .clone()
+                    .or_else(|| book.entry_account().map(|account| account.id.clone()));
+                let options: Vec<ChoiceOption> = book
+                    .accounts()
+                    .iter()
+                    .filter(|account| {
+                        !book.is_account_hidden(&account.id)
+                            || editing_account.as_deref() == Some(account.id.as_slice())
+                    })
+                    .map(|account| {
+                        ChoiceOption::new(
+                            money_core::store::hex_encode(&account.id),
+                            format!("{} · {}", account.name, account.currency),
+                        )
+                    })
+                    .collect();
+                let key = chosen
+                    .as_deref()
+                    .map(|id| SharedString::from(money_core::store::hex_encode(id)));
+                let account = cx.new(|cx| ChoiceState::new(options, key, window, cx));
+                (Some(account), None)
+            }
+        };
 
-        let subscriptions = vec![
+        let mut subscriptions = vec![
             // Typing an amount again is fixing what was said wrong with it.
             cx.subscribe(&amount, |this, _, event: &FieldEvent, cx| {
                 if matches!(event, FieldEvent::Change) && this.error.take().is_some() {
@@ -179,12 +231,18 @@ impl EntryForm {
                 cx.notify();
             }),
         ];
+        if let Some(account) = &account {
+            // The amount is in the chosen account's currency.
+            subscriptions.push(cx.subscribe(account, |_, _, _: &ChoiceEvent, cx| cx.notify()));
+        }
         EntryForm {
             book,
             mode,
             editing,
             categories,
             category,
+            account,
+            fixed_account,
             tags,
             chosen_tags,
             making_tag: false,
@@ -222,6 +280,29 @@ impl EntryForm {
         cx.notify();
     }
 
+    /// The account the record is to be on: the chosen one, or the one the
+    /// screens are about.
+    fn account_id(&self, cx: &App) -> Option<Vec<u8>> {
+        self.account
+            .as_ref()
+            .and_then(|account| {
+                account
+                    .read(cx)
+                    .selected()
+                    .map(|key| money_core::store::hex_decode(key))
+            })
+            .or_else(|| self.fixed_account.clone())
+    }
+
+    /// The currency the amount is in: that of the account.
+    fn currency(&self, cx: &App) -> String {
+        let book = self.book.read(cx);
+        match self.account_id(cx) {
+            Some(id) => book.account_currency(&id).to_string(),
+            None => book.currency().to_string(),
+        }
+    }
+
     fn open_comment(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.commenting = true;
         self.comment
@@ -238,6 +319,7 @@ impl EntryForm {
             // change to the same record made on another device.
             let unchanged = self.editing.as_ref().is_some_and(|entry| {
                 entry.category_id == draft.category_id
+                    && entry.account_id == draft.account_id
                     && entry.amount == draft.amount
                     && entry.comment == draft.comment
                     && entry.date == draft.date
@@ -269,6 +351,10 @@ impl EntryForm {
             .filter(|amount| *amount > 0.0)
             .ok_or("Amount must be a number greater than 0.")?;
         let category_id = self.category.clone().ok_or("Choose a category.")?;
+        let account_id = self
+            .account_id(cx)
+            .filter(|id| !id.is_empty())
+            .ok_or("Choose an account.")?;
         let date = self
             .date
             .read(cx)
@@ -277,6 +363,7 @@ impl EntryForm {
         let comment = self.comment.read(cx).value(cx).trim().to_string();
         Ok(EntryDraft {
             category_id,
+            account_id,
             amount,
             comment: (!comment.is_empty()).then_some(comment),
             date,
@@ -451,9 +538,9 @@ impl EntryForm {
 
 impl Render for EntryForm {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let currency = self.book.read(cx).currency().to_string();
+        let currency = self.currency(cx);
         let form = cx.entity().downgrade();
-        Fields::new()
+        let fields = Fields::new()
             .child(
                 TextField::new(&self.amount)
                     .label("Amount")
@@ -463,7 +550,13 @@ impl Render for EntryForm {
                 self.error
                     .clone()
                     .map(|error| Note::new(error).tone(Tone::Danger)),
-            )
+            );
+        // With one account on screen the record is on it: nothing to choose.
+        let fields = match &self.account {
+            Some(account) => fields.child(Choice::new(account).label("Account").id("entry-account")),
+            None => fields,
+        };
+        fields
             .child(Labelled::new(
                 "Category",
                 self.render_categories(window, cx),
@@ -584,7 +677,10 @@ fn open_transfer_leg(
     window: &mut Window,
     cx: &mut App,
 ) {
-    let currency = book.read(cx).currency().to_string();
+    let currency = book
+        .read(cx)
+        .account_currency(&leg.account_id)
+        .to_string();
     let delete = {
         let (book, leg) = (book.clone(), leg.clone());
         Command::new("delete-transfer", "Delete transfer…")
@@ -638,7 +734,10 @@ fn confirm_delete(
     window: &mut Window,
     cx: &mut App,
 ) {
-    let currency = book.read(cx).currency().to_string();
+    let currency = book
+        .read(cx)
+        .account_currency(&entry.account_id)
+        .to_string();
     let amount = format_money(entry.amount, &currency);
     let (title, consequence) = if entry.is_transfer {
         (

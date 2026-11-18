@@ -161,15 +161,6 @@ impl Settings {
         self.set("default_currency", Some(currency));
     }
 
-    /// Hex id of the account last selected, restored on the next launch.
-    pub fn last_account(&self) -> Option<String> {
-        self.get("last_account")
-    }
-
-    pub fn set_last_account(&mut self, hex: &str) {
-        self.set("last_account", Some(hex));
-    }
-
     /// `system`, `light` or `dark`.
     pub fn theme(&self) -> Option<String> {
         self.get("theme")
@@ -315,7 +306,6 @@ mod tests {
         assert!(!reloaded.has_legacy_config());
         assert_eq!(reloaded.theme().as_deref(), Some("dark"));
         assert_eq!(reloaded.default_currency(), "EUR");
-        assert_eq!(reloaded.last_account().as_deref(), Some("aa"));
     }
 
     #[test]
@@ -346,14 +336,12 @@ mod tests {
         let file = scratch("reload");
         let mut settings = Settings::load(file.clone());
         settings.set_default_currency("EUR");
-        settings.set_last_account("00ff");
         settings.set_category_view("icons");
         settings.save().unwrap();
 
         let reloaded = Settings::load(file);
         assert_eq!(reloaded.source(), None);
         assert_eq!(reloaded.default_currency(), "EUR");
-        assert_eq!(reloaded.last_account().as_deref(), Some("00ff"));
         assert_eq!(reloaded.category_view().as_deref(), Some("icons"));
         assert!(!reloaded.has_legacy_config());
     }

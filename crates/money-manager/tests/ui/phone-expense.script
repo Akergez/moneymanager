@@ -9,14 +9,14 @@
 # by Escape, which is a phone's back.
 wait:2500
 expect:records=44
-expect:balance=1 054 237.45 ₽
+expect:balance=1 054 237.45 ₽ · 1 716.50 $
 click:350,660
 wait:1000
 expect:sheet=open
 type:42
 wait:300
 # "Food & dining": chosen, not saved.
-click:77,310
+click:77,420
 wait:500
 expect:sheet=open
 expect:records=44
@@ -25,7 +25,7 @@ click:351,90
 wait:1000
 expect:sheet=closed
 expect:records=45
-expect:balance=1 054 195.45 ₽
+expect:balance=1 054 195.45 ₽ · 1 716.50 $
 # The handle dragged a little springs back...
 click:350,660
 wait:1000

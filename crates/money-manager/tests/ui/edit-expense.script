@@ -17,7 +17,7 @@ key:enter
 wait:900
 expect:dialog=closed
 expect:records=44
-expect:balance=1 054 237.45 ₽
+expect:balance=1 054 237.45 ₽ · 1 716.50 $
 # The second row of the table.
 click:700,236
 wait:900

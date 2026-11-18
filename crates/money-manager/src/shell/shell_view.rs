@@ -57,10 +57,7 @@ impl Shell {
 
     /// Decides what this window is for. Runs once, right after it opens.
     pub(super) fn start(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let (last_account, currency) = {
-            let settings = Settings::global(cx);
-            (settings.last_account(), settings.default_currency())
-        };
+        let currency = Settings::global(cx).default_currency();
 
         let root = crate::paths::ledger_dir();
         // A rebuild of the storage that the app did not live to finish.
@@ -98,7 +95,7 @@ impl Shell {
             let source = crate::settings::new_source();
             // A ledger was set up here before. It always has its default
             // account, as the terminal version made sure of on every launch.
-            let opened = Book::open(&crate::paths::ledger_dir(), source, last_account).and_then(
+            let opened = Book::open(&crate::paths::ledger_dir(), source).and_then(
                 |mut book| {
                     book.ensure_default_account(&currency)?;
                     Ok(book)
@@ -159,7 +156,6 @@ impl Shell {
         let source = Settings::global(cx)
             .source()
             .unwrap_or_else(crate::settings::new_source);
-        let last_account = Settings::global(cx).last_account();
         let currency = Settings::global(cx).default_currency();
         cx.spawn_in(window, async move |shell, cx| {
             let result = cx
@@ -170,7 +166,7 @@ impl Shell {
                         money_core::store::migrate_legacy(&old, &root, source)?;
                     }
                     money_core::tresse::config::write_remote(&root, None)?;
-                    let mut book = Book::open(&root, crate::settings::new_source(), last_account)?;
+                    let mut book = Book::open(&root, crate::settings::new_source())?;
                     book.ensure_default_account(&currency)?;
                     if old.exists() {
                         let base = crate::paths::legacy_backup_dir();

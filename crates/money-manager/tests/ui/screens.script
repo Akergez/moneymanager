@@ -21,7 +21,7 @@ wait:500
 expect:categories=3
 key:ctrl-1
 wait:500
-expect:records=8
+expect:records=9
 key:ctrl-m
 wait:500
 expect:mode=expense

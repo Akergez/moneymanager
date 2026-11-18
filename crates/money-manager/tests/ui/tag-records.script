@@ -9,14 +9,14 @@ key:ctrl-n
 wait:900
 type:5
 # "Friends" on, then "Work" on and off again, then Add.
-click:459,604
+click:459,668
 wait:300
-click:553,604
+click:553,668
 wait:300
-click:553,604
+click:553,668
 wait:300
 shot:tr-form
-click:725,690
+click:725,738
 wait:900
 expect:dialog=closed
 expect:records=45

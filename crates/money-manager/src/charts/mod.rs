@@ -1,5 +1,7 @@
 //! All three charts on one screen: how much each month, where the chosen
 //! month's money went by category, and how that month built up day by day.
+//! Totals are in one currency: with accounts of several in view, the screen
+//! says which and a switch changes it.
 //!
 //! The screen holds only what a person chose on it — the month, whether the
 //! shares are of that month or of everything, and which categories the bars
@@ -91,6 +93,8 @@ struct Asked {
     chosen_in_bars: Chosen,
     chosen_in_line: Chosen,
     hide_transfers: bool,
+    /// The currency the figures are in.
+    currency: String,
     /// The bars end at this month and the line stops at this day.
     today: chrono::NaiveDate,
     months_at_least: usize,
@@ -121,6 +125,9 @@ pub struct ChartsView {
     chosen_in_bars: Chosen,
     /// The categories the running total is of; none is all of them.
     chosen_in_line: Chosen,
+    /// The currency the charts are in when the screens show accounts of
+    /// more than one and none is chosen.
+    currency: String,
     /// Where the bars are scrolled to.
     bars_scroll: ScrollHandle,
     /// Whether the chosen month still has to be brought into view: it can
@@ -138,6 +145,18 @@ impl ChartsView {
             }),
             cx.observe_global::<Settings>(|_, cx| cx.notify()),
         ];
+        // Totals have to be in one currency. One account, or accounts that
+        // keep one, answer it; otherwise it starts on the main account's.
+        let currency = {
+            let book = book.read(cx);
+            match book.currency() {
+                "" => book
+                    .main_account()
+                    .map(|account| account.currency.clone())
+                    .unwrap_or_default(),
+                currency => currency.to_string(),
+            }
+        };
         ChartsView {
             book,
             ledger: 0,
@@ -147,6 +166,7 @@ impl ChartsView {
             all_time: false,
             chosen_in_bars: Chosen::new(),
             chosen_in_line: Chosen::new(),
+            currency,
             bars_scroll: ScrollHandle::new(),
             reveal_month: true,
             _subscriptions: subscriptions,
@@ -164,14 +184,37 @@ impl ChartsView {
         }
     }
 
-    /// The records the charts are about: the account's, of the current
-    /// kind, with or without transfer legs.
+    /// Keeps the charts in a currency there is: the selected account's, the
+    /// one every account keeps, or — with several — the chosen one while it
+    /// is still there, the main account's otherwise.
+    fn sync_currency(&mut self, cx: &App) {
+        let book = self.book.read(cx);
+        let fixed = book.currency();
+        if !fixed.is_empty() {
+            if self.currency != fixed {
+                self.currency = fixed.to_string();
+            }
+            return;
+        }
+        let currencies = book.currencies();
+        if !currencies.iter().any(|currency| *currency == self.currency) {
+            self.currency = book
+                .main_account()
+                .map(|account| account.currency.clone())
+                .or_else(|| currencies.first().map(|currency| (*currency).to_string()))
+                .unwrap_or_default();
+        }
+    }
+
+    /// The records the charts are about: those of the current kind and the
+    /// currency the figures are in, with or without transfer legs.
     fn entries(&self, cx: &Context<Self>) -> Vec<Entry> {
         let hide_transfers = Settings::global(cx).hides_transfers();
-        self.book
-            .read(cx)
-            .entries(self.mode)
+        let book = self.book.read(cx);
+        let currency = self.currency.as_str();
+        book.entries(self.mode)
             .into_iter()
+            .filter(|entry| book.account_currency(&entry.account_id) == currency)
             .filter(|entry| !(hide_transfers && entry.is_transfer))
             .collect()
     }
@@ -207,6 +250,7 @@ impl ChartsView {
             chosen_in_bars: self.chosen_in_bars.clone(),
             chosen_in_line: self.chosen_in_line.clone(),
             hide_transfers: Settings::global(cx).hides_transfers(),
+            currency: self.currency.clone(),
             today: crate::today(),
             months_at_least: if compact {
                 MONTHS_AT_LEAST_ON_PHONE
@@ -287,13 +331,19 @@ impl ChartsView {
         cx.notify();
     }
 
-    /// "Expenses · Card": what the page's subtitle says.
+    /// "Expenses · Card": what the page's subtitle says. With several
+    /// currencies in the charts, which one they are of.
     pub fn detail(&self, cx: &App) -> String {
         let book = self.book.read(cx);
         let account = book
             .current_account()
-            .map_or(String::new(), |account| account.name.clone());
-        format!("{} · {account}", self.mode.title())
+            .map_or("All accounts".to_string(), |account| account.name.clone());
+        match book.currency() {
+            "" if !self.currency.is_empty() => {
+                format!("{} · {account} · {}", self.mode.title(), self.currency)
+            }
+            _ => format!("{} · {account}", self.mode.title()),
+        }
     }
 
     /// Which categories a chart is of: "All", and one chip for each category
@@ -329,6 +379,35 @@ impl ChartsView {
                 })
                 .ok();
             })
+    }
+
+    /// The currencies the accounts keep, when the screens show all of them
+    /// and there is more than one: the charts need to say which they total.
+    fn currency_switch(&self, cx: &mut Context<Self>) -> Option<Segments> {
+        let book = self.book.read(cx);
+        if !book.currency().is_empty() {
+            return None;
+        }
+        let currencies = book.currencies();
+        if currencies.len() < 2 {
+            return None;
+        }
+        let view = cx.entity().downgrade();
+        Some(
+            currencies
+                .into_iter()
+                .fold(
+                    Segments::new("chart-currency", self.currency.as_str()).fill(false),
+                    |segments, currency| segments.segment(currency.to_string(), currency),
+                )
+                .on_change(move |key, _, cx| {
+                    view.update(cx, |this, cx| {
+                        this.currency = key.to_string();
+                        cx.notify();
+                    })
+                    .ok();
+                }),
+        )
     }
 
     /// The month every chart is anchored to, and the way to another.
@@ -419,7 +498,7 @@ impl ChartsView {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let currency = self.book.read(cx).currency().to_string();
+        let currency = self.currency.clone();
         let total: f64 = shares.iter().map(|share| share.amount).sum();
         let view = cx.entity().downgrade();
         // Beside the card's title the group hugs its two segments: a full
@@ -650,6 +729,8 @@ fn chart_empty(message: &'static str) -> AnyElement {
 impl Render for ChartsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let compact = Env::of(window, cx).is_compact();
+        self.sync_currency(cx);
+        let switch = self.currency_switch(cx);
         let figures = self.figures(compact, cx);
         let Figures {
             shares,
@@ -679,12 +760,17 @@ impl Render for ChartsView {
         // none of the three has room to be read: the bars lose their
         // months, the shares their names, the line its days.
         let scale = cx.scale();
+        let header = row()
+            .justify_center()
+            .gap(scale.space_m)
+            .child(self.render_month_stepper(cx))
+            .children(switch);
         column()
             .w_full()
             .px(scale.space_m)
             .pb(scale.space_l)
             .gap(scale.space_l)
-            .child(row().justify_center().child(self.render_month_stepper(cx)))
+            .child(header)
             .child(bars)
             .child(by_category)
             .child(line)

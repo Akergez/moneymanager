@@ -1,4 +1,5 @@
-//! The list of an account's records, of one kind at a time.
+//! The list of records, of one account or of all of them, of one kind at a
+//! time.
 //!
 //! A table where there is room to compare columns, a list of rows on a phone:
 //! both are one [`Records`], drawn from the same [`EntryRow`]s, so the two
@@ -20,7 +21,7 @@ use std::rc::Rc;
 
 use gpui_adaptive::records::ScrollStrategy;
 use gpui_adaptive::{
-    ActiveColors as _, Column, ColumnRole, Command, Empty, Env, Pill, Record, Records,
+    ActiveColors as _, Column, ColumnRole, Command, Empty, Env, InputMode, Pill, Record, Records,
     RecordsScroll, WidthClass,
 };
 use gpui_kit::prelude::*;
@@ -35,6 +36,7 @@ use crate::ui::Lucide;
 
 const ID: &str = "id";
 const AMOUNT: &str = "amount";
+const ACCOUNT: &str = "account";
 const CATEGORY: &str = "category";
 const DATE: &str = "date";
 const COMMENT: &str = "comment";
@@ -43,11 +45,16 @@ const COMMENT: &str = "comment";
 #[derive(Debug, Clone)]
 pub(crate) struct EntryRow {
     pub entry: Entry,
+    /// The name of its account.
+    pub account: SharedString,
+    /// The currency of its account.
+    pub currency: String,
     pub category: SharedString,
     /// The colour and icon of its category, as the ledger has them.
     style: CategoryStyle,
     /// The amount, without a sign: the screen is of one kind of record, and
-    /// its heading already says which.
+    /// its heading already says which. Written with its currency when the
+    /// rows are not all in one.
     pub amount: SharedString,
     pub date: SharedString,
     pub short_id: SharedString,
@@ -56,12 +63,25 @@ pub(crate) struct EntryRow {
 }
 
 impl EntryRow {
-    fn new(entry: Entry, category: SharedString, style: CategoryStyle) -> Self {
+    fn new(
+        entry: Entry,
+        account: SharedString,
+        currency: String,
+        category: SharedString,
+        style: CategoryStyle,
+        displayed_in: &str,
+    ) -> Self {
+        let amount = match currency == displayed_in {
+            true => format_amount(entry.amount),
+            false => format_money(entry.amount, &currency),
+        };
         EntryRow {
             tags: Vec::new(),
+            account,
+            currency,
             category,
             style,
-            amount: format_amount(entry.amount).into(),
+            amount: amount.into(),
             date: entry.date.format("%Y-%m-%d").to_string().into(),
             short_id: entry.short_id().into(),
             entry,
@@ -216,6 +236,7 @@ impl TransactionsView {
         let mut rows: Vec<EntryRow> = {
             let book = self.book.read(cx);
             let tags = book.tags(mode);
+            let displayed_in = book.currency().to_string();
             book.entries(mode)
                 .into_iter()
                 .filter(|entry| {
@@ -226,12 +247,15 @@ impl TransactionsView {
                 .map(|entry| {
                     let category = book.category_name(mode, &entry.category_id);
                     let style = book.category_style(mode, &entry.category_id);
+                    let account = book.account_name(&entry.account_id);
+                    let currency = book.account_currency(&entry.account_id).to_string();
                     let on: Vec<CategoryInfo> = entry
                         .tags
                         .iter()
                         .filter_map(|id| tags.iter().find(|tag| &tag.id == id).cloned())
                         .collect();
-                    let mut row = EntryRow::new(entry, category, style);
+                    let mut row =
+                        EntryRow::new(entry, account, currency, category, style, &displayed_in);
                     row.tags = on;
                     row
                 })
@@ -255,14 +279,25 @@ impl TransactionsView {
         cx.notify();
     }
 
-    /// "12 records · 1 234.50 ₽": what the page's subtitle says.
-    pub fn detail(&self, cx: &App) -> String {
-        let book = self.book.read(cx);
-        let total: f64 = self.rows.iter().map(|row| row.entry.amount).sum();
+    /// "12 records · 1 234.50 ₽": what the page's subtitle says. With
+    /// records in several currencies, each currency's total of its own.
+    pub fn detail(&self, _: &App) -> String {
+        if self.rows.is_empty() {
+            return String::new();
+        }
+        let mut totals: std::collections::BTreeMap<&str, f64> =
+            std::collections::BTreeMap::new();
+        for row in self.rows.iter() {
+            *totals.entry(row.currency.as_str()).or_default() += row.entry.amount;
+        }
+        let money = totals
+            .into_iter()
+            .map(|(currency, total)| format_money(total, currency))
+            .collect::<Vec<_>>()
+            .join(" · ");
         match self.rows.len() {
-            0 => String::new(),
-            1 => format!("1 record · {}", format_money(total, book.currency())),
-            n => format!("{n} records · {}", format_money(total, book.currency())),
+            1 => format!("1 record · {money}"),
+            n => format!("{n} records · {money}"),
         }
     }
 
@@ -332,7 +367,7 @@ impl TransactionsView {
                 Lucide::List,
                 format!("No {} {what}", self.mode.title().to_lowercase()),
             )
-            .body("Records on this account are listed here as they are made.")
+            .body("Records on these accounts are listed here as they are made.")
             .action(
                 Command::new("first-record", format!("New {noun}…")).on_trigger(
                     move |window, cx| open_new_entry_in(&book, mode, &filter, window, cx),
@@ -344,7 +379,7 @@ impl TransactionsView {
             format!("No {} yet", self.mode.title().to_lowercase()),
         )
         .body(format!(
-            "Every {noun} you record on this account is listed here."
+            "Every {noun} you record is listed here, whichever account it is on."
         ))
         .action(
             Command::new("first-record", format!("New {noun}…"))
@@ -358,19 +393,34 @@ impl Render for TransactionsView {
         if self.rows.is_empty() {
             return self.render_empty().into_any_element();
         }
+        let env = Env::of(window, cx);
         // The comment comes and goes with the room for it.
-        let with_comments = Env::of(window, cx).width() == WidthClass::Expanded;
+        let with_comments = env.width() == WidthClass::Expanded;
+        // On a pointer with room for columns, each account has one; on a
+        // phone the account goes under the date.
+        let table = env.input() == InputMode::Pointer && env.width() != WidthClass::Compact;
+        let all_accounts = self.book.read(cx).shows_all_accounts();
+        let account_column = all_accounts && table;
         let records: Vec<Record> = self
             .rows
             .iter()
             .map(|row| {
                 let look = row.look(cx);
+                // On a phone the account goes under the date; with columns
+                // it has one of its own.
+                let date = match all_accounts && !table {
+                    true => SharedString::from(format!("{} · {}", row.date, row.account)),
+                    false => row.date.clone(),
+                };
                 let mut cells = vec![
                     row.short_id.clone(),
                     row.amount.clone(),
                     row.category.clone(),
-                    row.date.clone(),
+                    date,
                 ];
+                if account_column {
+                    cells.push(row.account.clone());
+                }
                 if with_comments {
                     cells.push(row.entry.comment.clone().unwrap_or_default().into());
                 }
@@ -408,6 +458,9 @@ impl Render for TransactionsView {
                     .sortable()
                     .role(ColumnRole::Subtitle),
             );
+        if account_column {
+            table = table.column(Column::new(ACCOUNT, "Account").grow(5.).muted());
+        }
         if with_comments {
             table = table.column(Column::new(COMMENT, "Comment").grow(6.).muted());
         }
@@ -446,14 +499,18 @@ mod tests {
             Entry {
                 id: vec![id],
                 category_id: vec![1],
+                account_id: Vec::new(),
                 amount,
                 comment: None,
                 date: NaiveDate::from_ymd_opt(2026, 10, day).unwrap(),
                 is_transfer: false,
                 tags: Vec::new(),
             },
+            "Основной".into(),
+            "RUB".into(),
             category.to_string().into(),
             Default::default(),
+            "RUB",
         )
     }
 

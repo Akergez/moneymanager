@@ -29,9 +29,10 @@ storage on a server or in a bucket is not changed, so connect to a new one.
 
 ## What it does
 
-- **Transactions** — the records of the current account: id, amount, category
-  and date (and the comment where there is room). One switch turns the screen
-  from expenses to income. Sortable by column; a row opens the record.
+- **Transactions** — the records of every account, or of the one chosen in
+  the account switcher: id, amount, category, date, account (and the comment
+  where there is room). One switch turns the screen from expenses to income.
+  Sortable by column; a row opens the record. Totals are written per currency.
 - **Categories** — expense and income categories, each with a colour and an
   icon, drawn as a list (the row says how many records it has) or, chosen in
   **Settings → Appearance → Categories**, as a grid of icons with their names
@@ -51,8 +52,14 @@ storage on a server or in a bucket is not changed, so connect to a new one.
   Expenses and income each have tags of their own; transfers have none.
 - **Charts** — one screen with all three: a pie by category (for the month or
   for all time), bars by month, and the running total through the chosen month.
+  Totals are in one currency: with accounts of several and all of them shown,
+  the screen says which, a switch away.
 - **Accounts** — chosen at the top of every screen, with the balance beside the
-  name. Each has a currency and an opening balance.
+  name. **All accounts** is the default: the records of every visible account,
+  each row with its own account and currency. Choosing one narrows every
+  screen to it. A new record asks which account when all are shown — it starts
+  on the main one — and needs no choice when the screens are already about
+  one. Each account has a currency and an opening balance.
 - **Transfers** — between two accounts, with the two amounts entered
   separately and the exchange rate derived from them. A transfer shows as an
   expense on one account and an income on the other; deleting either side
@@ -215,10 +222,11 @@ and the flatpak has no filesystem access at all.
 
 On Android both are under the application's internal data directory.
 
-`settings.json` contains interface preferences, `default_currency` and
-`last_account` (legacy selection memory). Account visibility and the main
-account are stored in the synced RDX ledger instead. Old `source` and `remote`
-keys are removed after conversion.
+`settings.json` contains interface preferences and `default_currency`.
+Account visibility and the main account are stored in the synced RDX ledger
+instead. Old `source` and `remote` keys are removed after conversion.
+An older `last_account` key is left alone and no longer used: the screens open
+on all accounts.
 Tresse configuration has one source of truth:
 
 - `tresse.toml` at the worktree root: tracked language and ignore rules;
@@ -310,7 +318,8 @@ The internal record schema is unchanged from the terminal version;
 **Accounts…** in the account menu lists every account, including hidden ones.
 **Hide** removes an account from the account menu and transfer selectors;
 **Show** restores it. History, transfers, balances and CSV exports stay intact.
-**Make main** chooses the account opened at startup and also shows it if hidden.
+**Make main** chooses the account a new record starts on when all accounts are
+shown, and also shows it if hidden.
 These choices sync with the ledger. Hiding the last visible account is refused.
 
 Visibility uses separate `hidden:<account-id>` records, so renaming an account

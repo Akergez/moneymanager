@@ -7,7 +7,7 @@ wait:2500
 expect:accounts=2
 click:850,58
 wait:700
-click:860,158
+click:860,187
 wait:900
 expect:dialog=open
 type:100
@@ -18,10 +18,10 @@ wait:300
 click:725,571
 wait:900
 expect:dialog=closed
-expect:balance=1 054 137.45 ₽
+expect:balance=1 054 137.45 ₽ · 10 916.50 $
 click:850,58
 wait:700
-click:920,92
+click:920,121
 wait:700
 expect:account=Savings
 expect:balance=10 916.50 $

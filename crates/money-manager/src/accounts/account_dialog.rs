@@ -75,7 +75,7 @@ impl AccountForm {
         let saved = self.book.update(cx, |book, cx| {
             let saved = book.save_account(id.as_deref(), &name, &currency, opening_balance, cx)?;
             if is_new {
-                book.select_account(&saved, cx);
+                book.select_account(Some(&saved), cx);
             }
             Ok::<_, String>(())
         });

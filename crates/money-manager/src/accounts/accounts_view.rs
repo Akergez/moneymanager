@@ -73,7 +73,7 @@ impl Render for AccountsView {
         });
         Fields::new()
             .child(Note::new(
-                "Hidden accounts keep their history and transfers. The main account opens at startup.",
+                "Hidden accounts keep their history and transfers. New records start on the main account.",
             ))
             .child(Collection::new("all-accounts").children(rows))
     }

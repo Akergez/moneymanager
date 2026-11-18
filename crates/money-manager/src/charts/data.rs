@@ -254,6 +254,7 @@ mod tests {
         Entry {
             id: vec![category, d as u8],
             category_id: vec![category],
+            account_id: Vec::new(),
             amount,
             comment: None,
             date: NaiveDate::from_ymd_opt(y, m, d).unwrap(),

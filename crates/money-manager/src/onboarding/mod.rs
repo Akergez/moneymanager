@@ -100,7 +100,7 @@ pub fn create_ledger(name: &str, currency: &str, cx: &mut App) -> Result<Entity<
         return Err("Currency is a three-letter code, like USD.".to_string());
     }
     let source = settings::new_source();
-    let mut book = Book::open(&crate::paths::ledger_dir(), source, None)?;
+    let mut book = Book::open(&crate::paths::ledger_dir(), source)?;
     book.create_first_account(name, &currency)?;
     Settings::update(cx, |settings| {
         settings.set_default_currency(&currency);
@@ -287,7 +287,7 @@ impl Onboarding {
             return;
         }
         let source = settings::new_source();
-        let book = match Book::open(&crate::paths::ledger_dir(), source, None) {
+        let book = match Book::open(&crate::paths::ledger_dir(), source) {
             Ok(book) => cx.new(|_| book),
             Err(error) => {
                 self.error = Some(error.into());

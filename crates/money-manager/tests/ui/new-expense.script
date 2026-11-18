@@ -8,7 +8,7 @@
 # show both.
 wait:2500
 expect:records=44
-expect:balance=1 054 237.45 ₽
+expect:balance=1 054 237.45 ₽ · 1 716.50 $
 key:ctrl-n
 wait:900
 expect:dialog=open
@@ -18,7 +18,7 @@ key:enter
 wait:900
 expect:dialog=closed
 expect:records=45
-expect:balance=1 054 111.95 ₽
+expect:balance=1 054 111.95 ₽ · 1 716.50 $
 key:ctrl-n
 wait:900
 expect:dialog=open
@@ -36,5 +36,5 @@ key:enter
 wait:900
 expect:dialog=closed
 expect:records=46
-expect:balance=1 054 101.95 ₽
+expect:balance=1 054 101.95 ₽ · 1 716.50 $
 quit

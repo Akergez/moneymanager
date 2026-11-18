@@ -1,6 +1,6 @@
 # mode: fresh
 # size: 1240x800
-# restart: wait:2000;expect:stage=workspace;expect:account=Cash;expect:main-account=Cash;expect:balance=0.00 €;quit
+# restart: wait:2000;expect:stage=workspace;expect:account=;expect:main-account=Cash;expect:balance=0.00 €;quit
 # A ledger started without sync gets its first account at once; its name
 # and currency are the account's own, changed like any other's, and they
 # survive reopening.
@@ -11,7 +11,12 @@ expect:stage=workspace
 expect:accounts=1
 click:850,58
 wait:500
-click:860,185
+click:920,121
+wait:500
+expect:account=Основной
+click:850,58
+wait:500
+click:860,221
 wait:800
 expect:dialog=open
 click:620,167

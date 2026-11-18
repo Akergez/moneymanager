@@ -45,7 +45,7 @@ impl TransferForm {
                 .collect();
             let keys: Vec<SharedString> = options.iter().map(|o| o.key().clone()).collect();
             let current = book
-                .current_account()
+                .entry_account()
                 .and_then(|current| accounts.iter().position(|a| a.id == current.id))
                 .unwrap_or(0);
             (options, keys, current)

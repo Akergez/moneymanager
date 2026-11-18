@@ -1,0 +1,63 @@
+# mode: demo
+# size: 1240x800
+#
+# Every screen starts on all accounts: the records of both, each with its
+# own account and currency. A new record chooses its account; with one
+# account on screen the form has nothing to choose and saves there.
+wait:2500
+expect:account=
+expect:records=44
+expect:balance=1 054 237.45 ₽ · 1 716.50 $
+shot:all-accounts
+# In the form, "Savings · USD" instead of the account it starts on.
+key:ctrl-n
+wait:900
+click:620,233
+wait:700
+click:620,275
+wait:500
+click:620,168
+wait:200
+type:12.50
+wait:300
+key:enter
+wait:900
+expect:dialog=closed
+expect:records=45
+expect:balance=1 054 237.45 ₽ · 1 704.00 $
+# Choosing an account on the screen narrows every list to it.
+click:850,58
+wait:700
+click:920,121
+wait:700
+expect:account=Savings
+expect:records=1
+expect:balance=1 704.00 $
+# A record made here is on Savings without choosing it again.
+key:ctrl-n
+wait:900
+type:10
+wait:300
+key:enter
+wait:900
+expect:dialog=closed
+expect:records=2
+expect:balance=1 694.00 $
+shot:all-accounts-savings
+# And back to all of them, expense and income alike.
+click:850,58
+wait:700
+click:920,92
+wait:700
+expect:account=
+expect:records=46
+expect:balance=1 054 237.45 ₽ · 1 694.00 $
+key:ctrl-m
+wait:500
+expect:mode=income
+expect:records=9
+key:ctrl-3
+wait:900
+expect:screen=charts
+shot:all-accounts-charts
+quit

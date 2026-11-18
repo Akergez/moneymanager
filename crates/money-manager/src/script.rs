@@ -33,11 +33,13 @@
 //! - `mode=expense|income`
 //! - `layout=compact|medium|expanded` — the width class the last frame was
 //!   drawn at
-//! - `account=<name>` — the account every screen is about
+//! - `account=<name>` — the account every screen is about; empty when it is
+//!   about all of them
 //! - `main-account=<name>`, `visible-accounts=<n>` — synced account preferences
 //! - `accounts=<n>`, `records=<n>`, `categories=<n>` — how many there are, the
 //!   last two of the current kind
-//! - `balance=<amount>` — the current account's, as the top bar writes it
+//! - `balance=<amount>` — the current account's, or every visible currency's
+//!   when all accounts are shown
 //! - `bars-chosen=<n>`, `line-chosen=<n>` — how many categories the monthly
 //!   bars and the running total are each narrowed to; 0 is all of them
 //! - `dialog=open|closed`, `sheet=open|closed` — the same: whether a form or
@@ -272,10 +274,24 @@ fn observe(what: &str, window: &mut Window, cx: &mut App) -> Option<String> {
         "categories" => book.categories(mode).len().to_string(),
         "bars-chosen" => workspace.charts().read(cx).chosen_counts().0.to_string(),
         "line-chosen" => workspace.charts().read(cx).chosen_counts().1.to_string(),
-        "balance" => book
-            .current_account()
-            .map(|account| format_money(book.summary(&account.id).balance, &account.currency))
-            .unwrap_or_default(),
+        "balance" => match book.current_account() {
+            Some(account) => format_money(book.summary(&account.id).balance, &account.currency),
+            // All accounts: each currency's total of its own, as the
+            // subtitle writes them.
+            None => {
+                let mut totals: std::collections::BTreeMap<&str, f64> =
+                    std::collections::BTreeMap::new();
+                for account in book.visible_accounts() {
+                    *totals.entry(account.currency.as_str()).or_default() +=
+                        book.summary(&account.id).balance;
+                }
+                totals
+                    .into_iter()
+                    .map(|(currency, total)| format_money(total, currency))
+                    .collect::<Vec<_>>()
+                    .join(" · ")
+            }
+        },
         "sync" => match book.sync_state() {
             SyncState::Idle => "idle",
             SyncState::Running => "running",

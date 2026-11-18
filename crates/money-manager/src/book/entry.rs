@@ -44,6 +44,8 @@ impl Mode {
 pub struct Entry {
     pub id: Vec<u8>,
     pub category_id: Vec<u8>,
+    /// The account the record is on; on a transfer leg, the side it is.
+    pub account_id: Vec<u8>,
     pub amount: f64,
     pub comment: Option<String>,
     pub date: NaiveDate,
@@ -73,10 +75,12 @@ impl Filter {
 }
 
 /// What a person filled in for an expense or an income, before it is a
-/// record: everything but the id and the account, which the book supplies.
+/// record: everything but the id, which the book supplies.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EntryDraft {
     pub category_id: Vec<u8>,
+    /// The account it is on, chosen in the form.
+    pub account_id: Vec<u8>,
     pub amount: f64,
     pub comment: Option<String>,
     pub date: NaiveDate,
@@ -146,6 +150,7 @@ impl From<&Expense> for Entry {
         Entry {
             id: expense.id.clone(),
             category_id: expense.category_id.clone(),
+            account_id: expense.account_id.clone(),
             amount: expense.amount,
             comment: expense.comment.clone(),
             date: expense.date,
@@ -160,6 +165,7 @@ impl From<&TopUp> for Entry {
         Entry {
             id: top_up.id.clone(),
             category_id: top_up.category_id.clone(),
+            account_id: top_up.account_id.clone(),
             amount: top_up.amount,
             comment: top_up.comment.clone(),
             date: top_up.date,
@@ -184,6 +190,7 @@ mod tests {
         let on = |day: u32, is_transfer: bool| Entry {
             id: vec![day as u8],
             category_id: Vec::new(),
+            account_id: Vec::new(),
             amount: 1.0,
             comment: None,
             date: NaiveDate::from_ymd_opt(2026, 9, day).unwrap(),
@@ -203,6 +210,7 @@ mod tests {
         let on = |day: u32, category: u8, is_transfer: bool| Entry {
             id: vec![day as u8],
             category_id: vec![category],
+            account_id: Vec::new(),
             amount: 1.0,
             comment: None,
             date: NaiveDate::from_ymd_opt(2026, 9, day).unwrap(),
@@ -219,6 +227,7 @@ mod tests {
         let in_category = |category: u8| Entry {
             id: Vec::new(),
             category_id: vec![category],
+            account_id: Vec::new(),
             amount: 1.0,
             comment: None,
             date: NaiveDate::from_ymd_opt(2026, 9, 1).unwrap(),
@@ -237,6 +246,7 @@ mod tests {
         let entry = Entry {
             id: vec![0x9f, 0x3a, 0x1c, 0x07, 0xaa, 0xbb],
             category_id: Vec::new(),
+            account_id: Vec::new(),
             amount: 1.0,
             comment: None,
             date: NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
@@ -251,6 +261,7 @@ mod tests {
         let entry = Entry {
             id: vec![1],
             category_id: vec![7],
+            account_id: Vec::new(),
             amount: 1.0,
             comment: None,
             date: NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
