@@ -359,6 +359,17 @@ impl Workspace {
             .commands(self.commands(cx))
             .scrolls(scrolls)
             .content(content);
+        // A transfer is the second thing a ledger does, and on the main
+        // screen it stays within a thumb's reach: Material's small FAB over
+        // "new" on a phone, a button in the bar on a pointer.
+        let page = match section {
+            Section::Transactions => page.secondary(
+                Command::new("new-transfer", "New transfer…")
+                    .icon(Lucide::ArrowLeftRight)
+                    .action(NewTransfer),
+            ),
+            Section::Categories | Section::Charts | Section::Tags => page,
+        };
         // With room for a rail or a sidebar, "new" heads it; on a compact
         // window it is the page's own, its FAB or its button.
         if env.is_compact() {

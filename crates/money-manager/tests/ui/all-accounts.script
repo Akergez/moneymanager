@@ -26,9 +26,9 @@ expect:dialog=closed
 expect:records=45
 expect:balance=1 054 237.45 ₽ · 1 704.00 $
 # Choosing an account on the screen narrows every list to it.
-click:850,58
+click:756,58
 wait:700
-click:920,121
+click:800,122
 wait:700
 expect:account=Savings
 expect:records=1
@@ -45,9 +45,9 @@ expect:records=2
 expect:balance=1 694.00 $
 shot:all-accounts-savings
 # And back to all of them, expense and income alike.
-click:850,58
+click:756,58
 wait:700
-click:920,92
+click:800,92
 wait:700
 expect:account=
 expect:records=46

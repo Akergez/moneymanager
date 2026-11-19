@@ -7,7 +7,7 @@ wait:2500
 expect:accounts=2
 expect:visible-accounts=2
 expect:main-account=Основной
-click:850,58
+click:756,58
 wait:500
 key:up
 key:enter

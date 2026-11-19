@@ -37,4 +37,11 @@ expect:sheet=open
 key:escape
 wait:800
 expect:sheet=closed
+# The small FAB over "new" is a transfer: one press opens its form.
+click:364,588
+wait:1000
+expect:sheet=open
+key:escape
+wait:800
+expect:sheet=closed
 quit

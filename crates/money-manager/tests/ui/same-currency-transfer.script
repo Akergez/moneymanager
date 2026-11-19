@@ -9,9 +9,9 @@ click:620,253
 wait:1500
 expect:stage=workspace
 # A second account, in the currency the first one already has.
-click:850,58
+click:756,58
 wait:700
-click:860,190
+click:800,190
 wait:900
 expect:dialog=open
 click:620,167
@@ -26,9 +26,9 @@ expect:dialog=closed
 expect:accounts=2
 expect:account=Wallet
 # "New transfer…", out of Wallet and into the account started with.
-click:850,58
+click:756,58
 wait:700
-click:860,190
+click:800,190
 wait:900
 expect:dialog=open
 type:250
@@ -38,9 +38,9 @@ wait:900
 expect:dialog=closed
 expect:balance=-250.00 ₽
 # The other side received the same amount.
-click:850,58
+click:756,58
 wait:700
-click:920,149
+click:800,149
 wait:700
 expect:account=Основной
 expect:balance=250.00 ₽

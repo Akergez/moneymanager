@@ -378,7 +378,8 @@ cargo test --workspace
 and fills an *empty* installation with sample records. Point `XDG_DATA_HOME`
 and `XDG_CONFIG_HOME` somewhere disposable to try it without touching your own
 ledger. `MONEY_MANAGER_INPUT=touch MONEY_MANAGER_SIZE=400x800` draws the window
-the way a phone does: for a finger, with sheets, a navigation bar and a FAB.
+the way a phone does: for a finger, with sheets, a navigation bar, a FAB and a
+small FAB over it for a transfer.
 
 The window is drawn with the design system alone: `tests/design_system.rs`
 fails on any direct use of GPUI Kit's components in the application's sources.
