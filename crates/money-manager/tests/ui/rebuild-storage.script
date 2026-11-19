@@ -24,7 +24,7 @@ wait:900
 click:954,670
 wait:700
 shot:rebuild-storage
-click:725,294
+key:enter
 wait:1200
 expect:dialog=closed
 expect:remote=no

@@ -29,14 +29,14 @@ click:595,253
 wait:500
 expect:bars-chosen=1
 # Down to the running total, and "Utilities" in its row.
-scroll:700,500,-520
-wait:700
-click:380,641
+scroll:700,500,-2000
+wait:1200
+click:380,444
 wait:500
 expect:bars-chosen=1
 expect:line-chosen=1
 # The same chip again is "All" again.
-click:380,641
+click:380,444
 wait:500
 expect:line-chosen=0
 key:ctrl-m
