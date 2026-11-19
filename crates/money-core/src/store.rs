@@ -1279,6 +1279,80 @@ mod tests {
     }
 
     #[test]
+    fn setting_a_balance_moves_only_the_opening_balance() {
+        let dir = temp_dir("set_balance");
+        let mut store = Store::open(&dir, 1).unwrap();
+        Account::create_with_id(&mut store, &DEFAULT_ACCOUNT_ID, "Основной", "RUB", 100.0).unwrap();
+        let other = Account::create(&mut store, "Wallet", "RUB", 0.0).unwrap();
+        let date = NaiveDate::from_ymd_opt(2026, 9, 12).unwrap();
+        let food = Category::create(&mut store, "Food").unwrap();
+        let salary = TopUpCategory::create(&mut store, "Salary").unwrap();
+        let spent = Expense::create(&mut store, &food.id, 30.0, None, date, &DEFAULT_ACCOUNT_ID)
+            .unwrap();
+        let earned = TopUp::create(&mut store, &salary.id, 10.0, None, date, &DEFAULT_ACCOUNT_ID)
+            .unwrap();
+        let moved = Transfer::create(
+            &mut store,
+            &DEFAULT_ACCOUNT_ID,
+            &other.id,
+            20.0,
+            20.0,
+            None,
+            date,
+        )
+        .unwrap();
+
+        let balance = |s: &Store| {
+            ledger::summaries(
+                &Account::read_all(s).unwrap(),
+                &Expense::read_all(s).unwrap(),
+                &TopUp::read_all(s).unwrap(),
+                &Transfer::read_all(s).unwrap(),
+            )[&DEFAULT_ACCOUNT_ID.to_vec()]
+            .balance
+        };
+        let opening = |s: &Store| {
+            Account::read_all(s)
+                .unwrap()
+                .into_iter()
+                .find(|a| a.id == DEFAULT_ACCOUNT_ID)
+                .unwrap()
+                .opening_balance
+        };
+        // 100 + 10 - 30 - 20.
+        assert_eq!(balance(&store), 60.0);
+
+        // The amount the account holds now: the opening balance takes the
+        // difference, and every record stays where it was.
+        Account::set_balance(&mut store, &DEFAULT_ACCOUNT_ID, 500.0).unwrap();
+        assert_eq!(balance(&store), 500.0);
+        assert_eq!(opening(&store), 540.0);
+        assert_eq!(Expense::read_all(&store).unwrap().len(), 1);
+        assert_eq!(Expense::read_all(&store).unwrap()[0].amount, 30.0);
+        assert_eq!(TopUp::read_all(&store).unwrap()[0].amount, 10.0);
+        assert_eq!(Transfer::read_all(&store).unwrap()[0].amount_from, 20.0);
+        assert_eq!(TopUp::read_all(&store).unwrap()[0].id, earned.id);
+        assert_eq!(Transfer::read_all(&store).unwrap()[0].id, moved.id);
+        assert_eq!(Expense::read_all(&store).unwrap()[0].id, spent.id);
+
+        // A debt is a balance like any other.
+        Account::set_balance(&mut store, &DEFAULT_ACCOUNT_ID, -12.5).unwrap();
+        assert_eq!(balance(&store), -12.5);
+        assert_eq!(opening(&store), 27.5);
+
+        // The amount is kept to the cent, as it is shown.
+        Account::set_balance(&mut store, &DEFAULT_ACCOUNT_ID, 1000.0).unwrap();
+        Account::set_balance(&mut store, &DEFAULT_ACCOUNT_ID, 0.1).unwrap();
+        assert_eq!(opening(&store), 40.1);
+        assert!((balance(&store) - 0.1).abs() < 1e-9);
+
+        assert!(Account::set_balance(&mut store, &DEFAULT_ACCOUNT_ID, f64::NAN).is_err());
+        assert!(Account::set_balance(&mut store, &[9u8; 16], 1.0).is_err());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn deleting_records_and_transfers() {
         let dir = temp_dir("delete_ledger");
         let mut store = Store::open(&dir, 1).unwrap();

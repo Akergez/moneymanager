@@ -11,9 +11,9 @@ use money_core::store::hex_encode;
 use super::{Place, Section, Workspace};
 use crate::book::{Filter, Mode};
 use crate::shell::{
-    CONTEXT, EditRecord, ExportCsv, GoBack, ImportCsv, NewRecord, NewTransfer, OpenSettings,
-    SelectNext, SelectPrevious, ShowCategories, ShowCharts, ShowTags, ShowTransactions, SyncNow,
-    ToggleMode,
+    CONTEXT, EditRecord, ExportCsv, GoBack, ImportCsv, NewRecord, NewTransfer, OpenBalance,
+    OpenSettings, SelectNext, SelectPrevious, SetBalance, ShowCategories, ShowCharts, ShowTags,
+    ShowTransactions, SyncNow, ToggleMode,
 };
 use crate::ui::Lucide;
 
@@ -30,6 +30,8 @@ impl Workspace {
             None => "All accounts".to_string(),
         };
         let current = book.current_account().cloned();
+        // Both account-scoped actions need one account on screen to be about.
+        let one_account = current.is_some();
         let all_selected = book.shows_all_accounts();
         let all_handle = self.book.clone();
         let all = Command::new("all-accounts", "All accounts")
@@ -76,10 +78,18 @@ impl Workspace {
             .command(
                 Command::new("edit-account", "Edit account…")
                     .icon(Lucide::Pencil)
-                    .disabled(current.is_none())
+                    .disabled(!one_account)
                     .on_trigger(move |window, cx| {
                         crate::accounts::open_account_dialog(&edit, current.clone(), window, cx)
                     }),
+            )
+            .command(
+                // What the balance is made of, and the one amount a person
+                // knows: what the account holds now.
+                Command::new("balance-details", "Balance details…")
+                    .icon(Lucide::Scale)
+                    .action(OpenBalance)
+                    .disabled(!one_account),
             )
             .command(
                 Command::new("manage-accounts", "Accounts…")
@@ -174,7 +184,41 @@ impl Workspace {
         match place {
             Place::Section(section) => self.render_page(*section, env, cx),
             Place::Records(mode, filter) => self.render_records(*mode, filter, page, env, cx),
+            Place::Account(id) => self.render_account(id, page, cx),
         }
+    }
+
+    /// The page of one account: its balance, what the balance is made of, and
+    /// the amount it holds now — the one figure a person thinks in.
+    fn render_account(&self, id: &[u8], page: Page, cx: &mut Context<Self>) -> AnyElement {
+        let Some(view) = self.account_page.clone() else {
+            return gpui_kit::Empty.into_any_element();
+        };
+        let book = self.book.read(cx);
+        let account = book.account(id).cloned();
+        let title = account
+            .as_ref()
+            .map(|account| account.name.clone())
+            .unwrap_or_else(|| "Account".to_string());
+        let detail = view.read(cx).detail(cx);
+        let edit = {
+            let (book, account) = (self.book.clone(), account);
+            Command::new("edit-account", "Edit account…")
+                .icon(Lucide::Pencil)
+                .on_trigger(move |window, cx| {
+                    crate::accounts::open_account_dialog(&book, account.clone(), window, cx)
+                })
+        };
+        // The page is about one amount; recording a new record belongs to the
+        // screens that list records, and to the account menu.
+        let commands = vec![edit];
+        Screen::new("account", title)
+            .subtitle(detail)
+            .up(page.up())
+            .commands(commands)
+            .scrolls(true)
+            .content(view)
+            .into_any_element()
     }
 
     /// The records of one category or one tag: its name over them, the way
@@ -437,6 +481,14 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &SelectNext, _, cx| this.step_selection(true, cx)))
             .on_action(
                 cx.listener(|this, _: &NewTransfer, window, cx| this.new_transfer(window, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &OpenBalance, _, cx| this.open_balance_of_current(cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &SetBalance, window, cx| {
+                    this.set_balance_of_current(window, cx)
+                }),
             )
             .on_action(cx.listener(|this, _: &SyncNow, window, cx| this.sync_now(window, cx)))
             .on_action(

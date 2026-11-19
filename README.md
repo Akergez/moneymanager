@@ -60,6 +60,12 @@ storage on a server or in a bucket is not changed, so connect to a new one.
   screen to it. A new record asks which account when all are shown — it starts
   on the main one — and needs no choice when the screens are already about
   one. Each account has a currency and an opening balance.
+- **An account's balance** — **Balance details…** in the account menu
+  (`Ctrl+B`) shows what the balance is made of: the starting balance, then
+  income, expenses and transfers in and out, each with the number of records
+  that made it. **Set balance…** (`Ctrl+Shift+B`) writes the amount the account
+  holds now: the starting balance takes the difference and no record is
+  touched.
 - **Transfers** — between two accounts, with the two amounts entered
   separately and the exchange rate derived from them. A transfer shows as an
   expense on one account and an income on the other; deleting either side
@@ -344,10 +350,12 @@ that shows both orders.
 | `Ctrl+1` / `Ctrl+2` / `Ctrl+3` / `Ctrl+4` | Transactions / Categories / Charts / Tags |
 | `Ctrl+M` | Switch between expenses and income |
 | `Ctrl+N` | New record (a new category on the Categories screen, a new tag on the Tags screen, a record in the category or with the tag on the page of one) |
-| `Escape`, `Alt+Left` | Back from the page of a category's or a tag's records |
+| `Escape`, `Alt+Left` | Back from the page of a category's or a tag's records, or of an account's balance |
 | `Up` / `Down` | Select the previous / next record |
 | `Enter`, `Ctrl+E` | Open the selected record |
 | `Ctrl+T` | New transfer |
+| `Ctrl+B` | The balance of the account on screen, and what it is made of |
+| `Ctrl+Shift+B` | Set the amount that account holds now |
 | `Ctrl+S` | Sync |
 | `Ctrl+,` | Settings |
 | `Ctrl+Q` | Quit |

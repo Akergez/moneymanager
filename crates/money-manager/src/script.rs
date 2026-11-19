@@ -248,6 +248,7 @@ fn observe(what: &str, window: &mut Window, cx: &mut App) -> Option<String> {
         "page" => match workspace.place(cx) {
             crate::workspace::Place::Section(section) => section.name().to_string(),
             crate::workspace::Place::Records(..) => "records".to_string(),
+            crate::workspace::Place::Account(_) => "account".to_string(),
         },
         "page-records" => workspace
             .records_page(cx)

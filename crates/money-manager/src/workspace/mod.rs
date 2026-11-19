@@ -17,6 +17,7 @@ use std::rc::Rc;
 use gpui_adaptive::{NavigatorState, Notice, Route, Tone, WidthClass};
 use gpui_kit::{AppContext, Context, Entity, FocusHandle, Subscription, Window};
 
+use crate::accounts::AccountView;
 use crate::book::{Book, Filter, Mode, SyncState};
 use crate::categories::{CategoriesView, Kind};
 use crate::charts::ChartsView;
@@ -69,12 +70,15 @@ impl Section {
     }
 }
 
-/// A page of the workspace: a screen of its navigation, or the records of
-/// one category or one tag, opened from the screen that lists them.
+/// A page of the workspace: a screen of its navigation, the records of
+/// one category or one tag, or one account's balance, opened from screens
+/// that list them.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Place {
     Section(Section),
     Records(Mode, Filter),
+    /// The balance of one account, and what it is made of.
+    Account(Vec<u8>),
 }
 
 impl Route for Place {
@@ -96,6 +100,9 @@ pub struct Workspace {
     navigator: Entity<NavigatorState<Place>>,
     /// The records of the page over the screen, while there is one.
     records: Option<Entity<TransactionsView>>,
+    /// The account whose balance is the page over the screen, while there is
+    /// one.
+    account_page: Option<Entity<AccountView>>,
     focus: FocusHandle,
     /// The width the last frame was drawn at, for a UI scenario to ask about.
     width: WidthClass,
@@ -215,6 +222,7 @@ impl Workspace {
             charts,
             navigator,
             records: None,
+            account_page: None,
             focus: cx.focus_handle(),
             width: WidthClass::Expanded,
             announced,
@@ -257,7 +265,7 @@ impl Workspace {
     pub fn records_page(&self, cx: &gpui_kit::App) -> Option<&Entity<TransactionsView>> {
         match self.place(cx) {
             Place::Records(..) => self.records.as_ref(),
-            Place::Section(_) => None,
+            Place::Section(_) | Place::Account(_) => None,
         }
     }
 
@@ -293,18 +301,55 @@ impl Workspace {
         });
     }
 
-    /// A page of a category or a tag that is no longer there (a tag
-    /// deleted, here or on another device) has nothing to show: back.
-    fn leave_missing_page(&mut self, cx: &mut Context<Self>) {
-        let Place::Records(mode, filter) = self.place(cx) else {
+    /// Opens the page of one account's balance over the screen that is up.
+    fn open_account_page(&mut self, id: &[u8], cx: &mut Context<Self>) {
+        if self.book.read(cx).account(id).is_none() {
             return;
+        }
+        let book = self.book.clone();
+        let account = id.to_vec();
+        let view = cx.new(|cx| AccountView::new(book, account.clone(), cx));
+        cx.observe(&view, |_, _, cx| cx.notify()).detach();
+        self.account_page = Some(view);
+        let root = Place::Section(self.screen);
+        self.navigator.update(cx, |navigator, cx| {
+            navigator.set_stack(vec![root, Place::Account(account)], cx)
+        });
+    }
+
+    /// The balance page of the account on screen; with all of them on screen
+    /// there is no one balance to open, so it stays where it is.
+    fn open_balance_of_current(&mut self, cx: &mut Context<Self>) {
+        let account = self.book.read(cx).current_account().map(|a| a.id.clone());
+        if let Some(id) = account {
+            self.open_account_page(&id, cx);
+        }
+    }
+
+    /// The form that sets what the account on screen holds now.
+    fn set_balance_of_current(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let account = self.book.read(cx).current_account().map(|a| a.id.clone());
+        if let Some(id) = account {
+            crate::accounts::open_balance_dialog(&self.book, &id, window, cx);
+        }
+    }
+
+    /// A page of a category or a tag that is no longer there (a tag
+    /// deleted, here or on another device) has nothing to show: back. So has
+    /// the page of an account the ledger no longer has.
+    fn leave_missing_page(&mut self, cx: &mut Context<Self>) {
+        let missing = match self.place(cx) {
+            Place::Records(mode, filter) => {
+                let book = self.book.read(cx);
+                match &filter {
+                    Filter::Category(id) => book.category(mode, id).is_none(),
+                    Filter::Tag(id) => book.tag(mode, id).is_none(),
+                }
+            }
+            Place::Account(id) => self.book.read(cx).account(&id).is_none(),
+            Place::Section(_) => false,
         };
-        let book = self.book.read(cx);
-        let there = match &filter {
-            Filter::Category(id) => book.category(mode, id).is_some(),
-            Filter::Tag(id) => book.tag(mode, id).is_some(),
-        };
-        if !there {
+        if missing {
             self.go_back(cx);
         }
     }
@@ -357,7 +402,7 @@ impl Workspace {
         match self.place(cx) {
             Place::Records(..) => self.records.clone(),
             Place::Section(Section::Transactions) => Some(self.transactions.clone()),
-            Place::Section(_) => None,
+            Place::Section(_) | Place::Account(_) => None,
         }
     }
 

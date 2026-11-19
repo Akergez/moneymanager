@@ -130,6 +130,89 @@ pub fn ledger_for(
     }
 }
 
+/// One part of a balance: how many records it takes and what they come to.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Tally {
+    pub count: usize,
+    pub amount: f64,
+}
+
+/// What an account's balance is made of: where it started and every kind of
+/// record that moved it since, each part with its own count and total.
+///
+/// This is the arithmetic [`summaries`] reports, opened up: a balance is
+/// `opening_balance + income + transfers_in - expenses - transfers_out`, all
+/// in the account's own currency.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct AccountBreakdown {
+    pub opening_balance: f64,
+    /// The account's own expenses, its transfer legs left out.
+    pub expenses: Tally,
+    /// The account's own top-ups, its transfer legs left out.
+    pub income: Tally,
+    /// Legs of the transfers that left this account.
+    pub transfers_out: Tally,
+    /// Legs of the transfers that arrived in this account.
+    pub transfers_in: Tally,
+}
+
+impl AccountBreakdown {
+    /// What came in: top-ups and transfers that arrived.
+    pub fn total_in(&self) -> f64 {
+        self.income.amount + self.transfers_in.amount
+    }
+
+    /// What went out: expenses and transfers that left.
+    pub fn total_out(&self) -> f64 {
+        self.expenses.amount + self.transfers_out.amount
+    }
+
+    /// The balance this adds up to.
+    pub fn balance(&self) -> f64 {
+        self.opening_balance + self.total_in() - self.total_out()
+    }
+}
+
+/// The parts of `account`'s balance. `expenses` and `top_ups` may be either
+/// the stored records or a ledger's; a transfer leg is counted once, from the
+/// transfer itself.
+pub fn breakdown(
+    account: &Account,
+    expenses: &[Expense],
+    top_ups: &[TopUp],
+    transfers: &[Transfer],
+) -> AccountBreakdown {
+    let mut parts = AccountBreakdown {
+        opening_balance: account.opening_balance,
+        ..Default::default()
+    };
+    for expense in expenses
+        .iter()
+        .filter(|e| e.account_id == account.id && e.transfer.is_none())
+    {
+        parts.expenses.count += 1;
+        parts.expenses.amount += expense.amount;
+    }
+    for top_up in top_ups
+        .iter()
+        .filter(|t| t.account_id == account.id && t.transfer.is_none())
+    {
+        parts.income.count += 1;
+        parts.income.amount += top_up.amount;
+    }
+    for tr in transfers {
+        if tr.from_account_id == account.id {
+            parts.transfers_out.count += 1;
+            parts.transfers_out.amount += tr.amount_from;
+        }
+        if tr.to_account_id == account.id {
+            parts.transfers_in.count += 1;
+            parts.transfers_in.amount += tr.amount_to;
+        }
+    }
+    parts
+}
+
 /// Totals of every account, keyed by account id:
 /// balance = opening_balance + top-ups + inbound transfers - expenses - outbound
 /// transfers, over all live records. Amounts in different currencies are never
@@ -141,42 +224,20 @@ pub fn summaries(
     top_ups: &[TopUp],
     transfers: &[Transfer],
 ) -> HashMap<Vec<u8>, AccountSummary> {
-    let mut m: HashMap<Vec<u8>, AccountSummary> = accounts
+    accounts
         .iter()
-        .map(|a| {
+        .map(|account| {
+            let parts = breakdown(account, expenses, top_ups, transfers);
             (
-                a.id.clone(),
+                account.id.clone(),
                 AccountSummary {
-                    balance: a.opening_balance,
-                    ..Default::default()
+                    balance: parts.balance(),
+                    total_in: parts.total_in(),
+                    total_out: parts.total_out(),
                 },
             )
         })
-        .collect();
-
-    let mut add = |id: &[u8], incoming: bool, amount: f64| {
-        if let Some(s) = m.get_mut(id) {
-            if incoming {
-                s.total_in += amount;
-                s.balance += amount;
-            } else {
-                s.total_out += amount;
-                s.balance -= amount;
-            }
-        }
-    };
-    for e in expenses {
-        add(&e.account_id, false, e.amount);
-    }
-    for t in top_ups {
-        add(&t.account_id, true, t.amount);
-    }
-    for tr in transfers {
-        add(&tr.from_account_id, false, tr.amount_from);
-        add(&tr.to_account_id, true, tr.amount_to);
-    }
-
-    m
+        .collect()
 }
 
 /// Format a rate with enough precision to be useful for both strong and weak
@@ -432,6 +493,85 @@ mod tests {
         );
         // A weak source currency still shows significant digits.
         assert_eq!(format_rate_value(0.000123), "0.000123");
+    }
+
+    #[test]
+    fn a_breakdown_names_every_part_of_the_balance() {
+        let (a1, a2) = (id(1), id(2));
+        let accounts = vec![
+            account(a1.clone(), "Card", "USD", 10.0),
+            account(a2.clone(), "Cash", "RUB", 0.0),
+        ];
+        let expenses = [
+            expense(10, &a1, 5.0),
+            expense(11, &a1, 2.5),
+            // Another account's records are none of this balance.
+            expense(12, &a2, 999.0),
+        ];
+        let top_ups = [top_up(13, &a1, 100.0)];
+        // 100 USD out to Cash, 9 235 RUB in; 20 RUB back the other way.
+        let transfers = [
+            transfer(&a1, &a2, 100.0, 9235.0),
+            transfer(&a2, &a1, 20.0, 0.22),
+        ];
+
+        let card = breakdown(&accounts[0], &expenses, &top_ups, &transfers);
+        assert_eq!(
+            card,
+            AccountBreakdown {
+                opening_balance: 10.0,
+                expenses: Tally {
+                    count: 2,
+                    amount: 7.5
+                },
+                income: Tally {
+                    count: 1,
+                    amount: 100.0
+                },
+                transfers_out: Tally {
+                    count: 1,
+                    amount: 100.0
+                },
+                transfers_in: Tally {
+                    count: 1,
+                    amount: 0.22
+                },
+            }
+        );
+        // 10 + 100 + 0.22 - 7.5 - 100
+        assert!((card.balance() - 2.72).abs() < 1e-9);
+        assert!((card.total_in() - 100.22).abs() < 1e-9);
+        assert!((card.total_out() - 107.5).abs() < 1e-9);
+
+        // The same parts are what summaries has: one formula, not two.
+        let m = summaries(&accounts, &expenses, &top_ups, &transfers);
+        for account in &accounts {
+            let parts = breakdown(account, &expenses, &top_ups, &transfers);
+            assert_eq!(m[&account.id].balance, parts.balance());
+            assert_eq!(m[&account.id].total_in, parts.total_in());
+            assert_eq!(m[&account.id].total_out, parts.total_out());
+        }
+    }
+
+    #[test]
+    fn a_ledger_s_own_legs_are_not_counted_twice() {
+        let (a1, a2) = (id(1), id(2));
+        let accounts = vec![
+            account(a1.clone(), "Card", "USD", 0.0),
+            account(a2.clone(), "Cash", "RUB", 0.0),
+        ];
+        let transfers = [transfer(&a1, &a2, 100.0, 9235.0)];
+        let ledger = ledger_for(&accounts[0], &accounts, &[], &[], &transfers);
+
+        let parts = breakdown(
+            &accounts[0],
+            &ledger.expenses,
+            &ledger.top_ups,
+            &transfers,
+        );
+        assert_eq!(parts.expenses.count, 0);
+        assert_eq!(parts.transfers_out.count, 1);
+        assert_eq!(parts.balance(), -100.0);
     }
 
     #[test]

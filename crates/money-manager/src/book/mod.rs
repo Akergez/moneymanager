@@ -20,7 +20,7 @@ use std::path::Path;
 
 use chrono::NaiveDate;
 use gpui_kit::{AppContext, Context, SharedString};
-use money_core::ledger::{self, AccountLedger, AccountSummary};
+use money_core::ledger::{self, AccountBreakdown, AccountLedger, AccountSummary};
 use money_core::models::{
     Account, Category, CategoryState, Expense, Redirects, TopUp, TopUpCategory, Transfer,
 };
@@ -435,6 +435,15 @@ impl Book {
         self.summaries.get(account_id).copied().unwrap_or_default()
     }
 
+    /// What the balance of `account_id` is made of: where it started, and the
+    /// records that moved it since, each kind with its count and total.
+    pub fn breakdown(&self, account_id: &[u8]) -> AccountBreakdown {
+        let Some(account) = self.account(account_id) else {
+            return AccountBreakdown::default();
+        };
+        ledger::breakdown(account, &self.expenses, &self.top_ups, &self.transfers)
+    }
+
     /// The current account's records of one kind, newest first.
     pub fn entries(&self, mode: Mode) -> Vec<Entry> {
         let mut entries: Vec<Entry> = match mode {
@@ -840,6 +849,22 @@ impl Book {
             Ok(())
         })?;
         Ok(saved.unwrap_or_default())
+    }
+
+    /// Sets the account's balance as it stands: the amount it holds now, which
+    /// is what a person thinks of as their money. The ledger keeps an opening
+    /// balance and records, so the opening balance takes the difference and
+    /// every record stays as it is.
+    pub fn set_account_balance(
+        &mut self,
+        id: &[u8],
+        balance: f64,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        match self.account(id) {
+            Some(_) => self.write(cx, |store| Account::set_balance(store, id, balance)),
+            None => Err("Account no longer exists.".to_string()),
+        }
     }
 
     pub fn add_transfer(

@@ -18,6 +18,8 @@ gpui_kit::actions!(
         SelectPrevious,
         SelectNext,
         NewTransfer,
+        OpenBalance,
+        SetBalance,
         ImportCsv,
         ExportCsv,
         SyncNow,

@@ -1,0 +1,48 @@
+# mode: demo
+# size: 1240x800
+#
+# An account's balance page: the starting balance, then what came in and went
+# out, each with the records that did it, and the amount the account holds now.
+# Setting that amount moves the starting balance alone: every record stays,
+# and the ledger's other account is untouched.
+wait:2500
+expect:page=transactions
+# One account on screen: the page is about it. "Savings" holds 1 716.50 $ —
+# 1 500.00 $ to begin with and 216.50 $ of records.
+click:756,58
+wait:700
+click:800,122
+wait:700
+expect:account=Savings
+expect:balance=1 716.50 $
+key:ctrl-b
+wait:900
+expect:page=account
+expect:account=Savings
+expect:balance=1 716.50 $
+# The account holds 2 000.00 $ now, whatever the records add up to.
+key:ctrl-shift-b
+wait:900
+expect:dialog=open
+key:ctrl-a
+type:2000
+wait:300
+key:enter
+wait:900
+expect:dialog=closed
+expect:page=account
+expect:balance=2 000.00 $
+# Back to the records: the balance is the one typed, and the other account
+# has not moved.
+key:alt-left
+wait:900
+expect:page=transactions
+expect:account=Savings
+expect:balance=2 000.00 $
+click:756,58
+wait:700
+click:800,92
+wait:700
+expect:account=
+expect:balance=1 054 237.45 ₽ · 2 000.00 $
+quit
