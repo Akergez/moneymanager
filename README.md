@@ -33,6 +33,8 @@ storage on a server or in a bucket is not changed, so connect to a new one.
   the account switcher: id, amount, category, date, account (and the comment
   where there is room). One switch turns the screen from expenses to income.
   Sortable by column; a row opens the record. Totals are written per currency.
+  A new record starts on the day of the latest one; **Settings → Records →
+  Date on a new record** starts it on today instead.
 - **Categories** — expense and income categories, each with a colour and an
   icon, drawn as a list (the row says how many records it has) or, chosen in
   **Settings → Appearance → Categories**, as a grid of icons with their names
@@ -228,7 +230,8 @@ and the flatpak has no filesystem access at all.
 
 On Android both are under the application's internal data directory.
 
-`settings.json` contains interface preferences and `default_currency`.
+`settings.json` contains interface preferences, the day a new record starts
+on, and `default_currency`.
 Account visibility and the main account are stored in the synced RDX ledger
 instead. Old `source` and `remote` keys are removed after conversion.
 An older `last_account` key is left alone and no longer used: the screens open

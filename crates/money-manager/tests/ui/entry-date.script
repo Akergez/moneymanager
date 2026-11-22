@@ -1,0 +1,31 @@
+# mode: demo
+# size: 1240x800
+#
+# Settings chooses the day a new record starts on: the last record's day, as
+# the form has always started, or today. Chosen "Today", the next expense is
+# dated today rather than the day of the last one in the sample ledger.
+wait:2500
+expect:records=44
+expect:latest-date=2026-10-04
+key:ctrl-,
+wait:900
+expect:dialog=open
+scroll:620,400,-250
+wait:900
+# "Today", beside "Last record's day" in Records.
+click:968,439
+wait:500
+key:escape
+wait:700
+expect:dialog=closed
+key:ctrl-n
+wait:900
+expect:dialog=open
+type:10
+wait:300
+key:enter
+wait:900
+expect:dialog=closed
+expect:records=45
+expect:latest-date=2026-10-05
+quit

@@ -1,9 +1,10 @@
 //! What this installation remembers that is not the ledger.
 //!
-//! `settings.json` holds display preferences, the currency of a new ledger
-//! and the last selected account. Tresse settings are read from repository
-//! files and never cached here. Old `source` and `remote` keys are read only
-//! until migration completes. Nothing in this file is synced.
+//! `settings.json` holds display preferences, the day a new record starts on,
+//! the currency of a new ledger and the last selected account. Tresse
+//! settings are read from repository files and never cached here. Old
+//! `source` and `remote` keys are read only until migration completes.
+//! Nothing in this file is synced.
 //!
 //! The file is read once, at startup, and kept in memory as a GPUI global;
 //! every change is written straight back. A key this version does not know is
@@ -222,6 +223,16 @@ impl Settings {
         self.set("category_view", Some(view));
     }
 
+    /// Which day a new expense or income starts on: `latest`, the day of the
+    /// last record entered, or `today`.
+    pub fn entry_date(&self) -> Option<String> {
+        self.get("entry_date")
+    }
+
+    pub fn set_entry_date(&mut self, day: &str) {
+        self.set("entry_date", Some(day));
+    }
+
     /// Whether the charts leave transfer legs out.
     pub fn hides_transfers(&self) -> bool {
         self.get("hide_transfers").unwrap_or(false)
@@ -337,12 +348,14 @@ mod tests {
         let mut settings = Settings::load(file.clone());
         settings.set_default_currency("EUR");
         settings.set_category_view("icons");
+        settings.set_entry_date("today");
         settings.save().unwrap();
 
         let reloaded = Settings::load(file);
         assert_eq!(reloaded.source(), None);
         assert_eq!(reloaded.default_currency(), "EUR");
         assert_eq!(reloaded.category_view().as_deref(), Some("icons"));
+        assert_eq!(reloaded.entry_date().as_deref(), Some("today"));
         assert!(!reloaded.has_legacy_config());
     }
 

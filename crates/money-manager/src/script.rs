@@ -272,6 +272,11 @@ fn observe(what: &str, window: &mut Window, cx: &mut App) -> Option<String> {
             .map(|account| account.name.clone())
             .unwrap_or_default(),
         "records" => book.entries(mode).len().to_string(),
+        // The day of the latest record entered of the mode: the day the form
+        // starts on when the settings say so.
+        "latest-date" => crate::book::latest_date(&book.entries(mode))
+            .map(|day| day.to_string())
+            .unwrap_or_default(),
         "categories" => book.categories(mode).len().to_string(),
         "bars-chosen" => workspace.charts().read(cx).chosen_counts().0.to_string(),
         "line-chosen" => workspace.charts().read(cx).chosen_counts().1.to_string(),

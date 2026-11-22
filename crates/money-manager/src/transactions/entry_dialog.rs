@@ -7,8 +7,9 @@
 //! the latest record and the categories are a grid of their tiles to change
 //! it with, and Add saves (Enter in the amount too, the keyboard's own key on
 //! a phone). With one account on screen there is no account to choose: the
-//! record is on it. Its day starts on that of the latest record, today and
-//! yesterday a press away and any other typed or picked; the comment stays folded until asked for, so
+//! record is on it. Its day starts on that of the latest record or, as
+//! Settings can choose, on today — today and yesterday a press away and any
+//! other typed or picked; the comment stays folded until asked for, so
 //! none of these costs a press when it is not wanted. Tags are chips at
 //! the categories, any number of them on, and one more makes a tag. It is a
 //! [`Form`]: a dialog for a pointer, a sheet over the keyboard for a finger.
@@ -34,6 +35,8 @@ use money_core::format::{format_amount, format_money, parse_amount};
 
 use crate::book::{self, Book, CategoryInfo, CategoryLook, Entry, EntryDraft, Filter, Mode};
 use crate::ui::{self, Lucide};
+
+use super::DefaultDate;
 
 struct EntryForm {
     book: Entity<Book>,
@@ -116,11 +119,14 @@ impl EntryForm {
             }
             state
         });
-        // A new record starts on the day of the latest one of its kind, not
-        // on today: what is being entered usually continues from there.
+        // A new record starts on the day the settings choose: that of the
+        // latest one of its kind, or today.
         let day = match &editing {
             Some(entry) => entry.date,
-            None => book::latest_date(&entries).unwrap_or_else(crate::today),
+            None => match DefaultDate::current(cx) {
+                DefaultDate::Latest => book::latest_date(&entries).unwrap_or_else(crate::today),
+                DefaultDate::Today => crate::today(),
+            },
         };
         let date = cx.new(|cx| DateFieldState::new(Some(day), window, cx));
         let comment = cx.new(|cx| {

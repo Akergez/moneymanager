@@ -32,7 +32,50 @@ use money_core::store::hex_encode;
 pub use entry_dialog::{open_entry_dialog, open_new_entry_in};
 
 use crate::book::{Book, CategoryInfo, CategoryLook, CategoryStyle, Entry, Filter, Mode};
+use crate::settings::Settings;
 use crate::ui::Lucide;
+
+/// The day a new expense or income starts on: the settings choose it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DefaultDate {
+    /// The day of the latest record entered, what is usually continued from
+    /// — and what the form has always started on.
+    Latest,
+    /// Today, whatever was entered before.
+    Today,
+}
+
+impl DefaultDate {
+    pub const ALL: [DefaultDate; 2] = [DefaultDate::Latest, DefaultDate::Today];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            DefaultDate::Latest => "Last record's day",
+            DefaultDate::Today => "Today",
+        }
+    }
+
+    /// What `settings.json` keeps.
+    pub fn stored(self) -> &'static str {
+        match self {
+            DefaultDate::Latest => "latest",
+            DefaultDate::Today => "today",
+        }
+    }
+
+    /// The day chosen in the settings; the latest record's, as the form has
+    /// always started, when none is.
+    pub fn current(cx: &App) -> Self {
+        Self::parse(Settings::global(cx).entry_date().as_deref())
+    }
+
+    fn parse(stored: Option<&str>) -> Self {
+        match stored {
+            Some("today") => DefaultDate::Today,
+            _ => DefaultDate::Latest,
+        }
+    }
+}
 
 const ID: &str = "id";
 const AMOUNT: &str = "amount";
@@ -532,6 +575,17 @@ mod tests {
         assert_eq!(ids(&rows), [3, 1, 2]);
         sort_rows(&mut rows, None);
         assert_eq!(ids(&rows), [2, 3, 1]);
+    }
+
+    #[test]
+    fn a_default_date_survives_being_stored() {
+        for day in DefaultDate::ALL {
+            assert_eq!(DefaultDate::parse(Some(day.stored())), day);
+        }
+        // The form's own habit when nothing is chosen, and for a value a
+        // later version may write.
+        assert_eq!(DefaultDate::parse(None), DefaultDate::Latest);
+        assert_eq!(DefaultDate::parse(Some("yesterday")), DefaultDate::Latest);
     }
 
     #[test]

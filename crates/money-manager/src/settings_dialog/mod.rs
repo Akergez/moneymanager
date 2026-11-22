@@ -1,7 +1,8 @@
-//! The settings dialog: how the window looks, and where the ledger syncs.
+//! The settings dialog: how the window looks, which day a new record starts
+//! on, and where the ledger syncs.
 //!
-//! What is under Appearance takes effect as it is chosen; Save is for the
-//! sync storage alone.
+//! The window's look and the new record's day take effect as they are
+//! chosen; Save is for the sync storage alone.
 //!
 //! Sync has the two tabs of the first-run page, less its "Start without
 //! sync": Server (a server's sign-in page, a config string, and exporting
@@ -28,6 +29,7 @@ use crate::book::Book;
 use crate::categories::View;
 use crate::onboarding::{RemoteFields, Tab, describe_remote};
 use crate::settings::Settings;
+use crate::transactions::DefaultDate;
 
 mod theme_rows;
 
@@ -335,6 +337,30 @@ impl SettingsForm {
         fields
     }
 
+    /// Which day a new record starts on.
+    fn render_records(&self, cx: &mut Context<Self>) -> Fields {
+        let current = DefaultDate::current(cx);
+        let days = DefaultDate::ALL
+            .iter()
+            .fold(
+                Segments::new("entry-date", current.stored()),
+                |segments, day| segments.segment(day.stored(), day.label()),
+            )
+            .on_change(|key, _, cx| {
+                if let Some(day) = DefaultDate::ALL
+                    .into_iter()
+                    .find(|day| day.stored() == key.as_ref())
+                {
+                    Settings::update(cx, |settings| settings.set_entry_date(day.stored()));
+                }
+            });
+        Fields::new().child(Text::title("Records")).child(
+            Setting::new("Date on a new record")
+                .detail("On an expense or an income: the last record's day, or today")
+                .control(days),
+        )
+    }
+
     /// Where the ledger syncs now, and whether the form holds a change of
     /// it that Save has yet to make.
     fn render_status(&self, cx: &mut Context<Self>) -> Note {
@@ -525,6 +551,7 @@ impl Render for SettingsForm {
         gpui_adaptive::prim::column()
             .gap(space)
             .child(self.render_appearance(cx))
+            .child(self.render_records(cx))
             .child(self.render_sync(cx))
             .children(self.render_storage(cx))
     }
