@@ -422,9 +422,9 @@ impl Workspace {
 
     /// Moves the list's selection a row up or down: the keyboard's way
     /// through the records, Enter opening the one it is on.
-    fn step_selection(&mut self, forward: bool, cx: &mut Context<Self>) {
+    fn step_selection(&mut self, forward: bool, window: &Window, cx: &mut Context<Self>) {
         if let Some(records) = self.active_records(cx) {
-            records.update(cx, |view, cx| view.step_selection(forward, cx));
+            records.update(cx, |view, cx| view.step_selection(forward, window, cx));
         }
     }
 

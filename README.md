@@ -32,9 +32,12 @@ storage on a server or in a bucket is not changed, so connect to a new one.
 - **Transactions** — the records of every account, or of the one chosen in
   the account switcher: id, amount, category, date, account (and the comment
   where there is room). One switch turns the screen from expenses to income.
-  Newest operation dates come first, then newest creation times, then UUIDs.
-  Records without a creation time go at the bottom of their day. A row opens
-  the record. Totals are written per currency.
+  By default, newest operation dates come first, then newest creation times,
+  then UUIDs. Records without a creation time go at the bottom of their day.
+  On desktop, the Amount, Category and Date headers switch between each
+  column's two directions and the default order. The chosen column is the
+  first sort key, followed by creation time and UUID in the same direction.
+  A row opens the record. Totals are written per currency.
   A new record starts on the day of the latest one; **Settings → Records →
   Date on a new record** starts it on today instead.
 - **Categories** — expense and income categories, each with a colour and an

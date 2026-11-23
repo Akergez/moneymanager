@@ -475,10 +475,14 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &ToggleMode, _, cx| this.toggle_mode(cx)))
             .on_action(cx.listener(|this, _: &NewRecord, window, cx| this.new_record(window, cx)))
             .on_action(cx.listener(|this, _: &EditRecord, window, cx| this.edit_record(window, cx)))
+            .on_action(cx.listener(|this, _: &SelectPrevious, window, cx| {
+                this.step_selection(false, window, cx)
+            }))
             .on_action(
-                cx.listener(|this, _: &SelectPrevious, _, cx| this.step_selection(false, cx)),
+                cx.listener(|this, _: &SelectNext, window, cx| {
+                    this.step_selection(true, window, cx)
+                }),
             )
-            .on_action(cx.listener(|this, _: &SelectNext, _, cx| this.step_selection(true, cx)))
             .on_action(
                 cx.listener(|this, _: &NewTransfer, window, cx| this.new_transfer(window, cx)),
             )

@@ -105,10 +105,13 @@ pub struct TransferDraft {
 impl Entry {
     pub(super) fn newest_first(a: &Self, b: &Self) -> std::cmp::Ordering {
         // Missing creation times go at the bottom of their operation day.
-        b.date
-            .cmp(&a.date)
-            .then_with(|| b.created_at.cmp(&a.created_at))
-            .then_with(|| b.id.cmp(&a.id))
+        b.date.cmp(&a.date).then_with(|| b.cmp_creation(a))
+    }
+
+    pub(crate) fn cmp_creation(&self, other: &Self) -> std::cmp::Ordering {
+        self.created_at
+            .cmp(&other.created_at)
+            .then_with(|| self.id.cmp(&other.id))
     }
 
     /// The first eight hex digits of the id, which is what the terminal

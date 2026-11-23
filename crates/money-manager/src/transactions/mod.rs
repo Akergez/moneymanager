@@ -3,7 +3,7 @@
 //!
 //! A table where there is room to compare columns, a list of rows on a phone:
 //! both are one [`Records`], drawn from the same [`EntryRow`]s, so the two
-//! show the same records in ledger order.
+//! show the same records. Table headers change the order on desktop.
 //!
 //! A record's tags are small pills on its row, after the category in a
 //! table and on the second line of a list. The same view, given a
@@ -16,6 +16,7 @@
 
 mod entry_dialog;
 
+use std::cmp::Ordering;
 use std::rc::Rc;
 
 use gpui_adaptive::records::ScrollStrategy;
@@ -158,6 +159,62 @@ impl EntryRow {
     }
 }
 
+/// Which way a column sorts the records.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Direction {
+    Ascending,
+    Descending,
+}
+
+type TableSort = (&'static str, Direction);
+
+/// What a press on a column's header does to the order: the column's own
+/// first direction (the newest dates, the smallest amounts), then the other,
+/// then back to the ledger's order.
+fn next_sort(current: Option<TableSort>, pressed: &str) -> Option<TableSort> {
+    let key = [AMOUNT, CATEGORY, DATE]
+        .into_iter()
+        .find(|key| *key == pressed)?;
+    let first = if key == DATE {
+        Direction::Descending
+    } else {
+        Direction::Ascending
+    };
+    match current {
+        Some((sorted, direction)) if sorted == key && direction == first => Some((
+            key,
+            match first {
+                Direction::Ascending => Direction::Descending,
+                Direction::Descending => Direction::Ascending,
+            },
+        )),
+        Some((sorted, _)) if sorted == key => None,
+        _ => Some((key, first)),
+    }
+}
+
+fn sorted_table_rows(rows: &[EntryRow], (column, direction): TableSort) -> Rc<Vec<EntryRow>> {
+    let mut rows = rows.to_vec();
+    rows.sort_by(|a, b| {
+        let order = match column {
+            AMOUNT => a.entry.amount.total_cmp(&b.entry.amount),
+            CATEGORY => a.category.cmp(&b.category),
+            DATE => a.entry.date.cmp(&b.entry.date),
+            _ => Ordering::Equal,
+        }
+        .then_with(|| a.entry.cmp_creation(&b.entry));
+        match direction {
+            Direction::Ascending => order,
+            Direction::Descending => order.reverse(),
+        }
+    });
+    Rc::new(rows)
+}
+
+fn uses_table(env: Env) -> bool {
+    env.input() == InputMode::Pointer && env.width() != WidthClass::Compact
+}
+
 pub struct TransactionsView {
     book: Entity<Book>,
     mode: Mode,
@@ -165,6 +222,7 @@ pub struct TransactionsView {
     /// category or a tag on the page of one.
     filter: Option<Filter>,
     rows: Rc<Vec<EntryRow>>,
+    table_order: Option<(TableSort, Rc<Vec<EntryRow>>)>,
     /// The record the keyboard is on.
     selected: Option<Vec<u8>>,
     scroll: RecordsScroll,
@@ -184,6 +242,7 @@ impl TransactionsView {
             mode,
             filter,
             rows: Rc::new(Vec::new()),
+            table_order: None,
             selected: None,
             scroll: RecordsScroll::new(),
             _subscriptions: subscriptions,
@@ -236,7 +295,24 @@ impl TransactionsView {
             self.selected = None;
         }
         self.rows = Rc::new(rows);
+        if let Some((sort, table_rows)) = &mut self.table_order {
+            *table_rows = sorted_table_rows(&self.rows, *sort);
+        }
         cx.notify();
+    }
+
+    fn sort_by(&mut self, column: &str, cx: &mut Context<Self>) {
+        let current = self.table_order.as_ref().map(|(sort, _)| *sort);
+        self.table_order =
+            next_sort(current, column).map(|sort| (sort, sorted_table_rows(&self.rows, sort)));
+        cx.notify();
+    }
+
+    fn visible_rows(&self, table: bool) -> &Rc<Vec<EntryRow>> {
+        match (table, &self.table_order) {
+            (true, Some((_, rows))) => rows,
+            _ => &self.rows,
+        }
     }
 
     /// "12 records · 1 234.50 ₽": what the page's subtitle says. With
@@ -287,21 +363,21 @@ impl TransactionsView {
 
     /// Moves the selection one record on or back, from the first record
     /// when there is none, and keeps it in view.
-    pub fn step_selection(&mut self, forward: bool, cx: &mut Context<Self>) {
-        if self.rows.is_empty() {
+    pub fn step_selection(&mut self, forward: bool, window: &Window, cx: &mut Context<Self>) {
+        let rows = self.visible_rows(uses_table(Env::of(window, cx)));
+        if rows.is_empty() {
             return;
         }
-        let at = self
-            .rows
+        let at = rows
             .iter()
             .position(|row| Some(&row.entry.id) == self.selected.as_ref());
-        let last = self.rows.len() - 1;
+        let last = rows.len() - 1;
         let next = match (at, forward) {
             (None, _) => 0,
             (Some(at), true) => (at + 1).min(last),
             (Some(at), false) => at.saturating_sub(1),
         };
-        self.selected = Some(self.rows[next].entry.id.clone());
+        self.selected = Some(rows[next].entry.id.clone());
         self.scroll.scroll_to_item(next, ScrollStrategy::Nearest);
         cx.notify();
     }
@@ -358,11 +434,11 @@ impl Render for TransactionsView {
         let with_comments = env.width() == WidthClass::Expanded;
         // On a pointer with room for columns, each account has one; on a
         // phone the account goes under the date.
-        let table = env.input() == InputMode::Pointer && env.width() != WidthClass::Compact;
+        let table = uses_table(env);
+        let rows = self.visible_rows(table).clone();
         let all_accounts = self.book.read(cx).shows_all_accounts();
         let account_column = all_accounts && table;
-        let records: Vec<Record> = self
-            .rows
+        let records: Vec<Record> = rows
             .iter()
             .map(|row| {
                 let look = row.look(cx);
@@ -389,8 +465,7 @@ impl Render for TransactionsView {
                     .pills(row.pills(cx))
             })
             .collect();
-        let selected = self
-            .rows
+        let selected = rows
             .iter()
             .find(|row| Some(&row.entry.id) == self.selected.as_ref())
             .map(EntryRow::element_id);
@@ -403,16 +478,19 @@ impl Render for TransactionsView {
                 Column::new(AMOUNT, "Amount")
                     .grow(4.)
                     .numeric()
+                    .sortable()
                     .role(ColumnRole::Trailing),
             )
             .column(
                 Column::new(CATEGORY, "Category")
                     .grow(7.)
+                    .sortable()
                     .role(ColumnRole::Title),
             )
             .column(
                 Column::new(DATE, "Date")
                     .grow(4.)
+                    .sortable()
                     .role(ColumnRole::Subtitle),
             );
         if account_column {
@@ -421,12 +499,18 @@ impl Render for TransactionsView {
         if with_comments {
             table = table.column(Column::new(COMMENT, "Comment").grow(6.).muted());
         }
-        let rows = self.rows.clone();
+        if let Some(((column, direction), _)) = &self.table_order {
+            table = table.sorted_by(*column, *direction == Direction::Ascending);
+        }
         let view = cx.entity().downgrade();
+        let sorter = view.clone();
         table
             .shared(Rc::new(records))
             .selected(selected)
             .fill(&self.scroll)
+            .on_sort(move |column, _, cx| {
+                sorter.update(cx, |this, cx| this.sort_by(column, cx)).ok();
+            })
             .on_activate(move |id, window, cx| {
                 let Some(row) = rows.iter().find(|row| &row.element_id() == id) else {
                     return;
@@ -442,6 +526,64 @@ impl Render for TransactionsView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::{DateTime, NaiveDate};
+
+    #[test]
+    fn table_sort_reverses_column_creation_time_and_uuid() {
+        let row = |id, amount, day, created_at: Option<i64>| {
+            EntryRow::new(
+                Entry {
+                    id: vec![id],
+                    category_id: Vec::new(),
+                    account_id: Vec::new(),
+                    amount,
+                    comment: None,
+                    date: NaiveDate::from_ymd_opt(2026, 10, day).unwrap(),
+                    created_at: created_at
+                        .map(|second| DateTime::from_timestamp(second, 0).unwrap()),
+                    is_transfer: false,
+                    tags: Vec::new(),
+                },
+                "Основной".into(),
+                "RUB".into(),
+                "Food".into(),
+                Default::default(),
+                "RUB",
+            )
+        };
+        let rows = [
+            row(9, 50.0, 9, None),
+            row(2, 50.0, 3, Some(5)),
+            row(1, 50.0, 8, Some(5)),
+            row(3, 50.0, 4, Some(6)),
+            row(4, 10.0, 7, Some(7)),
+        ];
+        let ids = |sort| {
+            sorted_table_rows(&rows, sort)
+                .iter()
+                .map(|row| row.entry.id[0])
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ids((AMOUNT, Direction::Ascending)), [4, 9, 1, 2, 3]);
+        assert_eq!(ids((AMOUNT, Direction::Descending)), [3, 2, 1, 9, 4]);
+        assert_eq!(ids((CATEGORY, Direction::Descending)), [4, 3, 2, 1, 9]);
+        assert_eq!(ids((DATE, Direction::Descending)), [9, 1, 4, 3, 2]);
+    }
+
+    #[test]
+    fn desktop_headers_cycle_through_both_directions_and_default() {
+        for (column, first, second) in [
+            (AMOUNT, Direction::Ascending, Direction::Descending),
+            (CATEGORY, Direction::Ascending, Direction::Descending),
+            (DATE, Direction::Descending, Direction::Ascending),
+        ] {
+            let sort = next_sort(None, column);
+            assert_eq!(sort, Some((column, first)));
+            let sort = next_sort(sort, column);
+            assert_eq!(sort, Some((column, second)));
+            assert_eq!(next_sort(sort, column), None);
+        }
+    }
 
     #[test]
     fn a_default_date_survives_being_stored() {
