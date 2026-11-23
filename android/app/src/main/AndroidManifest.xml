@@ -54,7 +54,7 @@
           `singleTask`: one activity is one ledger open once.
         -->
         <activity
-            android:name="dev.gpui.mobile.GpuiActivity"
+            android:name=".MoneyManagerActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|navigation|uiMode|density"
             android:exported="true"
             android:launchMode="singleTask"

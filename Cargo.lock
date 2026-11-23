@@ -2424,8 +2424,8 @@ dependencies = [
 
 [[package]]
 name = "gpui-adaptive"
-version = "0.6.0"
-source = "git+https://github.com/Akergez/gpui-mobile-components?tag=v0.6.0#22b88708321308c27b78278edd2ae8ec02fcbb58"
+version = "0.6.2"
+source = "git+https://github.com/Akergez/gpui-mobile-components?tag=v0.6.2#74c97aeacf9b0152b0c8e3e7a2cab839527b8cc4"
 dependencies = [
  "chrono",
  "gpui-adaptive-colors",
@@ -4341,7 +4341,7 @@ dependencies = [
 
 [[package]]
 name = "money-core"
-version = "3.0.10"
+version = "3.1.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -4358,8 +4358,9 @@ dependencies = [
 
 [[package]]
 name = "money-manager"
-version = "3.0.10"
+version = "3.1.0"
 dependencies = [
+ "async-channel",
  "chrono",
  "dirs 6.0.0",
  "embed-resource",
@@ -4379,7 +4380,7 @@ dependencies = [
 
 [[package]]
 name = "money-tresse"
-version = "3.0.10"
+version = "3.1.0"
 dependencies = [
  "libc",
  "rdx-rs",

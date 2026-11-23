@@ -26,6 +26,8 @@ mod categories;
 mod charts;
 mod onboarding;
 mod paths;
+#[cfg(target_os = "android")]
+mod physical_keyboard;
 mod script;
 mod settings;
 mod settings_dialog;
@@ -92,6 +94,8 @@ fn start(cx: &mut gpui_kit::App) {
     appearance::apply(None, cx);
     shell::init(cx);
     shell::open_window(cx);
+    #[cfg(target_os = "android")]
+    physical_keyboard::init(cx);
 }
 
 /// A finger on Android; a pointer everywhere else, unless
