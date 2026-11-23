@@ -96,6 +96,7 @@ pub fn ledger_for(
                     tr.comment.as_deref(),
                 )),
                 date: tr.date,
+                created_at: tr.created_at,
                 account_id: account.id.clone(),
                 transfer: Some(TransferLeg {
                     transfer_id: tr.id.clone(),
@@ -116,6 +117,7 @@ pub fn ledger_for(
                     tr.comment.as_deref(),
                 )),
                 date: tr.date,
+                created_at: tr.created_at,
                 account_id: account.id.clone(),
                 transfer: Some(TransferLeg {
                     transfer_id: tr.id.clone(),
@@ -333,6 +335,7 @@ mod tests {
             amount,
             comment: None,
             date: date(),
+            created_at: None,
             account_id: account_id.to_vec(),
             transfer: None,
         }
@@ -345,6 +348,7 @@ mod tests {
             amount,
             comment: None,
             date: date(),
+            created_at: None,
             account_id: account_id.to_vec(),
             transfer: None,
         }
@@ -359,6 +363,7 @@ mod tests {
             amount_to,
             comment: None,
             date: date(),
+            created_at: None,
         }
     }
 

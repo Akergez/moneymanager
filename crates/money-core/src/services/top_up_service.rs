@@ -27,6 +27,7 @@ impl TopUp {
         };
         Self::create_with_id(store, &id, category_id, amount, comment, date, &account_id)?;
         Ok(TopUp {
+            created_at: store.created_at(TOP_UPS_IDX, &hex_encode(&id)),
             id,
             category_id: category_id.to_vec(),
             amount,
@@ -59,14 +60,18 @@ impl TopUp {
         Ok(store
             .records(TOP_UPS_IDX)
             .into_iter()
-            .map(|rec| TopUp {
-                id: hex_decode(&child_str(rec, 0)),
-                category_id: hex_decode(&child_str(rec, 1)),
-                amount: child_f64(rec, 2),
-                comment: child_opt_str(rec, 3),
-                date: parse_date(&child_str(rec, 4)),
-                account_id: child_account_id(rec, 5),
-                transfer: None,
+            .map(|rec| {
+                let key = child_str(rec, 0);
+                TopUp {
+                    id: hex_decode(&key),
+                    created_at: store.created_at(TOP_UPS_IDX, &key),
+                    category_id: hex_decode(&child_str(rec, 1)),
+                    amount: child_f64(rec, 2),
+                    comment: child_opt_str(rec, 3),
+                    date: parse_date(&child_str(rec, 4)),
+                    account_id: child_account_id(rec, 5),
+                    transfer: None,
+                }
             })
             .collect())
     }

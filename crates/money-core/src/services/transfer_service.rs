@@ -54,6 +54,7 @@ impl Transfer {
             date,
         )?;
         Ok(Transfer {
+            created_at: store.created_at(TRANSFERS_IDX, &hex_encode(&id)),
             id,
             from_account_id: from_account_id.to_vec(),
             to_account_id: to_account_id.to_vec(),
@@ -94,14 +95,18 @@ impl Transfer {
         Ok(store
             .records(TRANSFERS_IDX)
             .into_iter()
-            .map(|rec| Transfer {
-                id: hex_decode(&child_str(rec, 0)),
-                from_account_id: hex_decode(&child_str(rec, 1)),
-                to_account_id: hex_decode(&child_str(rec, 2)),
-                amount_from: child_f64(rec, 3),
-                amount_to: child_f64(rec, 4),
-                comment: child_opt_str(rec, 5),
-                date: parse_date(&child_str(rec, 6)),
+            .map(|rec| {
+                let key = child_str(rec, 0);
+                Transfer {
+                    id: hex_decode(&key),
+                    created_at: store.created_at(TRANSFERS_IDX, &key),
+                    from_account_id: hex_decode(&child_str(rec, 1)),
+                    to_account_id: hex_decode(&child_str(rec, 2)),
+                    amount_from: child_f64(rec, 3),
+                    amount_to: child_f64(rec, 4),
+                    comment: child_opt_str(rec, 5),
+                    date: parse_date(&child_str(rec, 6)),
+                }
             })
             .collect())
     }

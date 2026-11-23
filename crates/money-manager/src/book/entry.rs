@@ -1,6 +1,6 @@
 //! One line of an account's list, whichever kind it is.
 
-use chrono::NaiveDate;
+use chrono::{DateTime, NaiveDate, Utc};
 use money_core::models::{Expense, TopUp};
 
 /// Which half of the ledger a screen is showing.
@@ -49,6 +49,7 @@ pub struct Entry {
     pub amount: f64,
     pub comment: Option<String>,
     pub date: NaiveDate,
+    pub created_at: Option<DateTime<Utc>>,
     /// A leg is derived from its transfer and cannot be edited by itself;
     /// deleting it deletes the transfer.
     pub is_transfer: bool,
@@ -102,6 +103,14 @@ pub struct TransferDraft {
 }
 
 impl Entry {
+    pub(super) fn newest_first(a: &Self, b: &Self) -> std::cmp::Ordering {
+        // Missing creation times go at the bottom of their operation day.
+        b.date
+            .cmp(&a.date)
+            .then_with(|| b.created_at.cmp(&a.created_at))
+            .then_with(|| b.id.cmp(&a.id))
+    }
+
     /// The first eight hex digits of the id, which is what the terminal
     /// version showed and is enough to tell two records apart by eye.
     pub fn short_id(&self) -> String {
@@ -154,6 +163,7 @@ impl From<&Expense> for Entry {
             amount: expense.amount,
             comment: expense.comment.clone(),
             date: expense.date,
+            created_at: expense.created_at,
             is_transfer: expense.transfer.is_some(),
             tags: Vec::new(),
         }
@@ -169,6 +179,7 @@ impl From<&TopUp> for Entry {
             amount: top_up.amount,
             comment: top_up.comment.clone(),
             date: top_up.date,
+            created_at: top_up.created_at,
             is_transfer: top_up.transfer.is_some(),
             tags: Vec::new(),
         }
@@ -178,6 +189,31 @@ impl From<&TopUp> for Entry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn entries_sort_by_operation_day_then_creation_then_uuid() {
+        let on = |id, day, created_at: Option<i64>| Entry {
+            id: vec![id],
+            category_id: Vec::new(),
+            account_id: Vec::new(),
+            amount: 1.0,
+            comment: None,
+            date: NaiveDate::from_ymd_opt(2026, 9, day).unwrap(),
+            created_at: created_at.map(|second| DateTime::from_timestamp(second, 0).unwrap()),
+            is_transfer: false,
+            tags: Vec::new(),
+        };
+        let mut entries = [
+            on(9, 7, None),
+            on(1, 7, Some(2)),
+            on(4, 7, Some(3)),
+            on(2, 7, Some(3)),
+            on(3, 6, Some(9)),
+            on(5, 8, None),
+        ];
+        entries.sort_by(Entry::newest_first);
+        assert_eq!(entries.map(|entry| entry.id[0]), [5, 4, 2, 1, 9, 3]);
+    }
 
     #[test]
     fn each_mode_has_a_noun_of_its_own_for_the_switch_to_go_by() {
@@ -194,6 +230,7 @@ mod tests {
             amount: 1.0,
             comment: None,
             date: NaiveDate::from_ymd_opt(2026, 9, day).unwrap(),
+            created_at: None,
             is_transfer,
             tags: Vec::new(),
         };
@@ -214,6 +251,7 @@ mod tests {
             amount: 1.0,
             comment: None,
             date: NaiveDate::from_ymd_opt(2026, 9, day).unwrap(),
+            created_at: None,
             is_transfer,
             tags: Vec::new(),
         };
@@ -231,6 +269,7 @@ mod tests {
             amount: 1.0,
             comment: None,
             date: NaiveDate::from_ymd_opt(2026, 9, 1).unwrap(),
+            created_at: None,
             is_transfer: false,
             tags: Vec::new(),
         };
@@ -250,6 +289,7 @@ mod tests {
             amount: 1.0,
             comment: None,
             date: NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+            created_at: None,
             is_transfer: false,
             tags: Vec::new(),
         };
@@ -265,6 +305,7 @@ mod tests {
             amount: 1.0,
             comment: None,
             date: NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+            created_at: None,
             is_transfer: false,
             tags: vec![vec![8], vec![9]],
         };

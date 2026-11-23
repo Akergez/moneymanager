@@ -457,7 +457,7 @@ impl Book {
                 }
             }
         }
-        entries.sort_by(|a, b| b.date.cmp(&a.date).then(b.id.cmp(&a.id)));
+        entries.sort_by(Entry::newest_first);
         entries
     }
 

@@ -3,7 +3,7 @@
 //!
 //! A table where there is room to compare columns, a list of rows on a phone:
 //! both are one [`Records`], drawn from the same [`EntryRow`]s, so the two
-//! cannot show different records. The table's headers sort it.
+//! show the same records in ledger order.
 //!
 //! A record's tags are small pills on its row, after the category in a
 //! table and on the second line of a list. The same view, given a
@@ -16,7 +16,6 @@
 
 mod entry_dialog;
 
-use std::cmp::Ordering;
 use std::rc::Rc;
 
 use gpui_adaptive::records::ScrollStrategy;
@@ -159,74 +158,6 @@ impl EntryRow {
     }
 }
 
-/// Which way a column sorts the records.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Direction {
-    Ascending,
-    Descending,
-}
-
-/// What a press on a column's header does to the order: the column's own
-/// first direction (the newest dates, the smallest amounts), then the other,
-/// then back to the ledger's order.
-fn next_sort(
-    current: Option<(&'static str, Direction)>,
-    pressed: &str,
-) -> Option<(&'static str, Direction)> {
-    let key = [AMOUNT, CATEGORY, DATE]
-        .into_iter()
-        .find(|key| *key == pressed)?;
-    let first = if key == DATE {
-        Direction::Descending
-    } else {
-        Direction::Ascending
-    };
-    match current {
-        Some((sorted, direction)) if sorted == key && direction == first => Some((
-            key,
-            match first {
-                Direction::Ascending => Direction::Descending,
-                Direction::Descending => Direction::Ascending,
-            },
-        )),
-        Some((sorted, _)) if sorted == key => None,
-        _ => Some((key, first)),
-    }
-}
-
-/// Puts `rows` in the order of `sort`; ties, and no column at all, are the
-/// ledger's own order: the newest first.
-fn sort_rows(rows: &mut [EntryRow], sort: Option<(&'static str, Direction)>) {
-    let newest_first = |a: &EntryRow, b: &EntryRow| {
-        b.entry
-            .date
-            .cmp(&a.entry.date)
-            .then(b.entry.id.cmp(&a.entry.id))
-    };
-    let Some((key, direction)) = sort else {
-        rows.sort_by(newest_first);
-        return;
-    };
-    let by_column = |a: &EntryRow, b: &EntryRow| match key {
-        AMOUNT => a
-            .entry
-            .amount
-            .partial_cmp(&b.entry.amount)
-            .unwrap_or(Ordering::Equal),
-        CATEGORY => a.category.cmp(&b.category),
-        DATE => a.entry.date.cmp(&b.entry.date),
-        _ => Ordering::Equal,
-    };
-    match direction {
-        Direction::Ascending => {
-            rows.sort_by(|a, b| by_column(a, b).then_with(|| newest_first(a, b)))
-        }
-        Direction::Descending => {
-            rows.sort_by(|a, b| by_column(b, a).then_with(|| newest_first(a, b)))
-        }
-    }
-}
-
 pub struct TransactionsView {
     book: Entity<Book>,
     mode: Mode,
@@ -234,9 +165,6 @@ pub struct TransactionsView {
     /// category or a tag on the page of one.
     filter: Option<Filter>,
     rows: Rc<Vec<EntryRow>>,
-    /// How the rows are ordered, so that new rows come in the same order
-    /// instead of resetting what the person chose.
-    sort: Option<(&'static str, Direction)>,
     /// The record the keyboard is on.
     selected: Option<Vec<u8>>,
     scroll: RecordsScroll,
@@ -256,7 +184,6 @@ impl TransactionsView {
             mode,
             filter,
             rows: Rc::new(Vec::new()),
-            sort: None,
             selected: None,
             scroll: RecordsScroll::new(),
             _subscriptions: subscriptions,
@@ -272,11 +199,10 @@ impl TransactionsView {
         }
     }
 
-    /// Rebuilds the rows from the ledger, in the order the table was left
-    /// in. The selection stays on its record while that is still there.
+    /// Rebuilds the rows in ledger order, keeping the selection by record ID.
     fn refresh(&mut self, cx: &mut Context<Self>) {
         let mode = self.mode;
-        let mut rows: Vec<EntryRow> = {
+        let rows: Vec<EntryRow> = {
             let book = self.book.read(cx);
             let tags = book.tags(mode);
             let displayed_in = book.currency().to_string();
@@ -304,20 +230,11 @@ impl TransactionsView {
                 })
                 .collect()
         };
-        sort_rows(&mut rows, self.sort);
         if let Some(selected) = &self.selected
             && !rows.iter().any(|row| &row.entry.id == selected)
         {
             self.selected = None;
         }
-        self.rows = Rc::new(rows);
-        cx.notify();
-    }
-
-    fn sort_by(&mut self, column: &str, cx: &mut Context<Self>) {
-        self.sort = next_sort(self.sort, column);
-        let mut rows = (*self.rows).clone();
-        sort_rows(&mut rows, self.sort);
         self.rows = Rc::new(rows);
         cx.notify();
     }
@@ -486,19 +403,16 @@ impl Render for TransactionsView {
                 Column::new(AMOUNT, "Amount")
                     .grow(4.)
                     .numeric()
-                    .sortable()
                     .role(ColumnRole::Trailing),
             )
             .column(
                 Column::new(CATEGORY, "Category")
                     .grow(7.)
-                    .sortable()
                     .role(ColumnRole::Title),
             )
             .column(
                 Column::new(DATE, "Date")
                     .grow(4.)
-                    .sortable()
                     .role(ColumnRole::Subtitle),
             );
         if account_column {
@@ -507,19 +421,12 @@ impl Render for TransactionsView {
         if with_comments {
             table = table.column(Column::new(COMMENT, "Comment").grow(6.).muted());
         }
-        if let Some((key, direction)) = self.sort {
-            table = table.sorted_by(key, direction == Direction::Ascending);
-        }
         let rows = self.rows.clone();
         let view = cx.entity().downgrade();
-        let sorter = view.clone();
         table
             .shared(Rc::new(records))
             .selected(selected)
             .fill(&self.scroll)
-            .on_sort(move |column, _, cx| {
-                sorter.update(cx, |this, cx| this.sort_by(column, cx)).ok();
-            })
             .on_activate(move |id, window, cx| {
                 let Some(row) = rows.iter().find(|row| &row.element_id() == id) else {
                     return;
@@ -535,47 +442,6 @@ impl Render for TransactionsView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::NaiveDate;
-
-    fn row(id: u8, amount: f64, category: &str, day: u32) -> EntryRow {
-        EntryRow::new(
-            Entry {
-                id: vec![id],
-                category_id: vec![1],
-                account_id: Vec::new(),
-                amount,
-                comment: None,
-                date: NaiveDate::from_ymd_opt(2026, 10, day).unwrap(),
-                is_transfer: false,
-                tags: Vec::new(),
-            },
-            "Основной".into(),
-            "RUB".into(),
-            category.to_string().into(),
-            Default::default(),
-            "RUB",
-        )
-    }
-
-    fn ids(rows: &[EntryRow]) -> Vec<u8> {
-        rows.iter().map(|row| row.entry.id[0]).collect()
-    }
-
-    #[test]
-    fn rows_sort_by_a_column_and_fall_back_to_newest_first() {
-        let mut rows = vec![
-            row(1, 50.0, "Food", 3),
-            row(2, 10.0, "Transport", 5),
-            row(3, 50.0, "Food", 4),
-        ];
-        sort_rows(&mut rows, Some((AMOUNT, Direction::Ascending)));
-        // The two fifties tie, and the newer one comes first.
-        assert_eq!(ids(&rows), [2, 3, 1]);
-        sort_rows(&mut rows, Some((AMOUNT, Direction::Descending)));
-        assert_eq!(ids(&rows), [3, 1, 2]);
-        sort_rows(&mut rows, None);
-        assert_eq!(ids(&rows), [2, 3, 1]);
-    }
 
     #[test]
     fn a_default_date_survives_being_stored() {
@@ -586,18 +452,5 @@ mod tests {
         // later version may write.
         assert_eq!(DefaultDate::parse(None), DefaultDate::Latest);
         assert_eq!(DefaultDate::parse(Some("yesterday")), DefaultDate::Latest);
-    }
-
-    #[test]
-    fn a_header_sorts_its_own_way_first_then_the_other_then_not_at_all() {
-        let amount = next_sort(None, AMOUNT);
-        assert_eq!(amount, Some((AMOUNT, Direction::Ascending)));
-        let amount = next_sort(amount, AMOUNT);
-        assert_eq!(amount, Some((AMOUNT, Direction::Descending)));
-        assert_eq!(next_sort(amount, AMOUNT), None);
-        // The newest dates first is what a date is sorted for.
-        assert_eq!(next_sort(amount, DATE), Some((DATE, Direction::Descending)));
-        // An id is not a column to sort by.
-        assert_eq!(next_sort(None, ID), None);
     }
 }

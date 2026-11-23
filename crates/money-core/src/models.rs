@@ -5,7 +5,7 @@
 //! app and the on-disk identity are unchanged; the store renders them as hex
 //! strings for the RDX record key.
 
-use chrono::NaiveDate;
+use chrono::{DateTime, NaiveDate, Utc};
 
 /// How a category is drawn. Both fields are optional and sit after the name
 /// in the record, so a record written before they existed — or by a client
@@ -102,6 +102,7 @@ pub struct Expense {
     pub amount: f64,
     pub comment: Option<String>,
     pub date: NaiveDate,
+    pub created_at: Option<DateTime<Utc>>,
     /// Which account this expense belongs to. Old records without a field get
     /// [`store::DEFAULT_ACCOUNT_ID`].
     pub account_id: Vec<u8>,
@@ -124,6 +125,7 @@ pub struct TopUp {
     pub amount: f64,
     pub comment: Option<String>,
     pub date: NaiveDate,
+    pub created_at: Option<DateTime<Utc>>,
     /// Which account this top-up belongs to. Old records without a field get
     /// [`store::DEFAULT_ACCOUNT_ID`].
     pub account_id: Vec<u8>,
@@ -155,6 +157,7 @@ pub struct Transfer {
     pub amount_to: f64,
     pub comment: Option<String>,
     pub date: NaiveDate,
+    pub created_at: Option<DateTime<Utc>>,
 }
 
 impl Transfer {

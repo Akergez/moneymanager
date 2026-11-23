@@ -1,16 +1,16 @@
 //! RDX-backed persistence: replaces the former SQLite/diesel layer.
 //!
-//! The dataset is a CRDT document — a positional [`Tuple`] of eleven [`Eulerian`]
+//! The dataset is a CRDT document — a positional [`Tuple`] of twelve [`Eulerian`]
 //! collections (categories, expenses, top-up categories, top-ups, accounts,
 //! transfers, account preferences, then the tags of expenses and their links
-//! and the tags of top-ups and theirs, in the order of the `*_IDX` constants below). Each record is a
+//! the tags of top-ups and theirs, and operation creation times). Each record is a
 //! `Tuple` whose first child is its key (a hex id for domain records, a name for
 //! preferences); the rest are fields. Per-record stamps give last-write-wins semantics and tombstones mark
 //! deletions.
 //!
 //! Collections are merged positionally with zero-padding, so documents written
 //! with fewer collections (legacy, pre-accounts) merge losslessly into this
-//! eleven-collection shape; and a record missing a trailing field reads as empty.
+//! current shape; and a record missing a trailing field reads as empty.
 //! The other way round holds too: a version that knows fewer collections
 //! merges a document with more and keeps the ones it does not know.
 //!
@@ -23,6 +23,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use chrono::{DateTime, Utc};
 use rdx_rs::{RdxElement, RdxValue, Stamp};
 use rdx_sync::ChunkStore;
 use rdx_sync_fs::FileChunkStore;
@@ -43,7 +44,10 @@ pub const EXPENSE_TAGS_IDX: usize = 7;
 pub const EXPENSE_TAG_LINKS_IDX: usize = 8;
 pub const TOP_UP_TAGS_IDX: usize = 9;
 pub const TOP_UP_TAG_LINKS_IDX: usize = 10;
-const COLLECTION_COUNT: usize = 11;
+// Keep creation times outside operation tuples so older clients rewriting a
+// whole operation can still merge without discarding its creation time.
+const CREATED_AT_IDX: usize = 11;
+const COLLECTION_COUNT: usize = 12;
 
 /// Fixed id of the implicit default account. Existing records with no
 /// `account_id` belong to it; the id is deterministic so two devices creating
@@ -129,13 +133,15 @@ impl Store {
 
     /// Live (non-tombstoned) record tuples of collection `idx`.
     pub fn records(&self, idx: usize) -> Vec<&RdxElement> {
-        self.doc
-            .value
-            .children()
-            .and_then(|cols| cols.get(idx))
-            .and_then(|collection| collection.value.children())
-            .map(|children| children.iter().filter(|rec| !rec.is_tombstone()).collect())
-            .unwrap_or_default()
+        collection(&self.doc, idx)
+            .iter()
+            .filter(|rec| !rec.is_tombstone())
+            .collect()
+    }
+
+    pub(crate) fn created_at(&self, idx: usize, key: &str) -> Option<DateTime<Utc>> {
+        let record = find_record(&self.doc, CREATED_AT_IDX, &format!("{idx}:{key}"))?;
+        child_opt_str(record, 1)?.parse().ok()
     }
 
     /// Insert or overwrite the record keyed by `key` in collection `idx`.
@@ -163,6 +169,9 @@ impl Store {
             let mut collections: Vec<Vec<RdxElement>> = vec![Vec::new(); COLLECTION_COUNT];
             for (idx, key, fields) in records {
                 let stamp = self.next_stamp();
+                if let Some(creation) = new_creation_record(&doc, idx, &key, stamp) {
+                    collections[CREATED_AT_IDX].push(creation);
+                }
                 let mut children = vec![RdxElement::with_stamp(RdxValue::Str(key), stamp)];
                 children.extend(
                     fields
@@ -220,7 +229,12 @@ impl Store {
                     .map(|value| RdxElement::with_stamp(value, stamp)),
             );
             let record = RdxElement::with_stamp(RdxValue::Tuple(children), stamp);
-            let doc = rdx_rs::merge(&current, &patch_doc(idx, record));
+            let creation = if deleted {
+                None
+            } else {
+                new_creation_record(&current, idx, key, stamp)
+            };
+            let doc = rdx_rs::merge(&current, &patch_doc(idx, record, creation));
             write_doc(&root, &doc)?;
             self.doc = doc;
             Ok(())
@@ -269,12 +283,59 @@ fn empty_doc() -> RdxElement {
     RdxElement::new(RdxValue::Tuple(cols))
 }
 
-/// A document containing only `record` in collection `idx`, ready to merge.
-fn patch_doc(idx: usize, record: RdxElement) -> RdxElement {
+fn collection(doc: &RdxElement, idx: usize) -> &[RdxElement] {
+    doc.value
+        .children()
+        .and_then(|cols| cols.get(idx))
+        .and_then(|collection| collection.value.children())
+        .unwrap_or_default()
+}
+
+fn find_record<'a>(doc: &'a RdxElement, idx: usize, key: &str) -> Option<&'a RdxElement> {
+    let records = collection(doc, idx);
+    let pos = records
+        .binary_search_by(|record| {
+            record
+                .value
+                .children()
+                .and_then(|children| children.first())
+                .and_then(RdxElement::as_str)
+                .cmp(&Some(key))
+        })
+        .ok()?;
+    records.get(pos)
+}
+
+fn new_creation_record(
+    doc: &RdxElement,
+    idx: usize,
+    key: &str,
+    stamp: Stamp,
+) -> Option<RdxElement> {
+    if !matches!(idx, EXPENSES_IDX | TOP_UPS_IDX | TRANSFERS_IDX)
+        || find_record(doc, idx, key).is_some()
+    {
+        return None;
+    }
+    let fields = [
+        RdxValue::Str(format!("{idx}:{key}")),
+        RdxValue::Str(Utc::now().to_rfc3339()),
+    ];
+    let children = fields
+        .into_iter()
+        .map(|value| RdxElement::with_stamp(value, stamp))
+        .collect();
+    Some(RdxElement::with_stamp(RdxValue::Tuple(children), stamp))
+}
+
+/// A patch containing one record and, at creation, its metadata.
+fn patch_doc(idx: usize, record: RdxElement, creation: Option<RdxElement>) -> RdxElement {
     let cols = (0..COLLECTION_COUNT)
         .map(|i| {
             let entries = if i == idx {
                 vec![record.clone()]
+            } else if i == CREATED_AT_IDX {
+                creation.iter().cloned().collect()
             } else {
                 Vec::new()
             };
@@ -307,13 +368,15 @@ fn has_records(doc: &RdxElement) -> bool {
         .unwrap_or(false)
 }
 
-/// Total number of records across all collections of `doc`.
+/// Total number of records, excluding their creation metadata.
 fn count_records(doc: &RdxElement) -> usize {
     doc.value
         .children()
         .map(|cols| {
             cols.iter()
-                .map(|c| c.value.children().map(|r| r.len()).unwrap_or(0))
+                .enumerate()
+                .filter(|(idx, _)| *idx != CREATED_AT_IDX)
+                .map(|(_, c)| c.value.children().map(|r| r.len()).unwrap_or(0))
                 .sum()
         })
         .unwrap_or(0)
@@ -618,10 +681,12 @@ mod tests {
         let baseline = patch_doc(
             CATEGORIES_IDX,
             legacy_record("aa", vec![RdxValue::Str("Old".into())], Stamp::new(11, 64)),
+            None,
         );
         let tombstone = patch_doc(
             CATEGORIES_IDX,
             legacy_record("aa", vec![], Stamp::new(22, 129)),
+            None,
         );
         let added = patch_doc(
             CATEGORIES_IDX,
@@ -630,6 +695,7 @@ mod tests {
                 vec![RdxValue::Str("Unsynced".into())],
                 Stamp::new(22, 192),
             ),
+            None,
         );
         let staged = rdx_rs::merge(&tombstone, &added);
         let mut chunks = FileChunkStore::open(old.path()).unwrap();
@@ -1119,6 +1185,7 @@ mod tests {
         let food = Category::create(&mut store, "Food").unwrap();
         let day = NaiveDate::from_ymd_opt(2026, 11, 7).unwrap();
         let lunch = Expense::create(&mut store, &food.id, 12.0, None, day, &[]).unwrap();
+        let created_at = lunch.created_at.unwrap();
         let trip = Tag::create(&mut store, TagKind::Expense, "Trip", &Default::default()).unwrap();
         Tag::set_for_record(
             &mut store,
@@ -1156,7 +1223,9 @@ mod tests {
         assert_eq!(merged.value.children().unwrap().len(), COLLECTION_COUNT);
         store.merge_document(&old_shape).unwrap();
 
-        assert_eq!(Expense::read_all(&store).unwrap()[0].amount, 15.0);
+        let updated = &Expense::read_all(&store).unwrap()[0];
+        assert_eq!(updated.amount, 15.0);
+        assert_eq!(updated.created_at, Some(created_at));
         assert_eq!(
             Tag::links(&store, TagKind::Expense)[&lunch.id],
             vec![trip.id]
@@ -1203,11 +1272,14 @@ mod tests {
         assert_eq!(exps.len(), 1);
         assert_eq!(exps[0].amount, 42.0);
         assert_eq!(exps[0].account_id, DEFAULT_ACCOUNT_ID.to_vec());
+        assert_eq!(exps[0].created_at, None);
+        Expense::update(&mut store, &exps[0].id, 45.0, None, exps[0].date).unwrap();
         assert_eq!(Account::read_all(&store).unwrap().len(), 1);
 
         // Survives a reopen as well.
         store.seal().unwrap();
         let reopened = Store::open(&dir.join("data"), 7).unwrap();
+        assert_eq!(Expense::read_all(&reopened).unwrap()[0].created_at, None);
         assert_eq!(
             Expense::read_all(&reopened).unwrap()[0].account_id,
             DEFAULT_ACCOUNT_ID.to_vec()

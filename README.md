@@ -32,7 +32,9 @@ storage on a server or in a bucket is not changed, so connect to a new one.
 - **Transactions** — the records of every account, or of the one chosen in
   the account switcher: id, amount, category, date, account (and the comment
   where there is room). One switch turns the screen from expenses to income.
-  Sortable by column; a row opens the record. Totals are written per currency.
+  Newest operation dates come first, then newest creation times, then UUIDs.
+  Records without a creation time go at the bottom of their day. A row opens
+  the record. Totals are written per currency.
   A new record starts on the day of the latest one; **Settings → Records →
   Date on a new record** starts it on today instead.
 - **Categories** — expense and income categories, each with a colour and an
@@ -298,15 +300,18 @@ moved into the ledger the first time it is opened.
 
 ## The ledger format
 
-The internal record schema is unchanged from the terminal version;
-`crates/money-core/src/store.rs` describes it:
+The operation tuples retain the layout used by the terminal version.
+`crates/money-core/src/store.rs` describes the ledger:
 
-- The document is a tuple of eleven collections: categories, expenses, income
+- The document is a tuple of twelve collections: categories, expenses, income
   categories, income, accounts, transfers, account preferences, then expense
-  tags, the links that put them on expenses, income tags and their links. The
-  trailing ones are absent in older ledgers. A record is a tuple whose first
+  tags, the links that put them on expenses, income tags and their links, and
+  operation creation times. The trailing collections are absent in older
+  ledgers. A record is a tuple whose first
   child is its key: a hex ID for domain records, a name for preferences, and
   `<record id>:<tag id>` for a tag's link.
+- Creation times are stored in UTC, keyed by operation collection and ID.
+  This preserves the time when an older version rewrites an operation.
 - Tags are backward compatible both ways. A version from before them merges
   the document by position and keeps the collections it does not know, so
   tags travel through its syncs untouched; and since a tag is a link record of
